@@ -1,0 +1,72 @@
+{
+  "name": "ramble",
+  "displayName": "Ramble for GitHub Copilot",
+  "description": "Turn rambling requests into structured prompts for GitHub Copilot Chat",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.108.1"
+  },
+  "categories": [
+    "Chat"
+  ],
+  "keywords": [
+    "copilot",
+    "github copilot",
+    "chat",
+    "prompt",
+    "AI",
+    "productivity"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YOUR_USERNAME/ramble"
+  },
+  "bugs": {
+    "url": "https://github.com/YOUR_USERNAME/ramble/issues"
+  },
+  "homepage": "https://github.com/YOUR_USERNAME/ramble#readme",
+  "activationEvents": [
+    "onChatParticipant:ramble"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "chatParticipants": [
+      {
+        "id": "ramble",
+        "name": "ramble",
+        "fullName": "Ramble for GitHub Copilot",
+        "description": "Turn your rambles into structured prompts",
+        "isSticky": true
+      }
+    ],
+    "commands": [
+      {
+        "command": "ramble.copyLast",
+        "title": "Ramble: Copy Last Compiled Prompt"
+      },
+      {
+        "command": "ramble.refreshContext",
+        "title": "Ramble: Refresh Workspace Context"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.108.1",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "typescript-eslint": "^8.52.0",
+    "eslint": "^9.39.2",
+    "typescript": "^5.9.3",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}
