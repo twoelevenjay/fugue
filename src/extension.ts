@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { registerJohannParticipant } from './johann/participant';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -693,6 +694,14 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(participant);
+
+    // Register Johann orchestration agent
+    const johannDisposables = registerJohannParticipant(context);
+    for (const d of johannDisposables) {
+        context.subscriptions.push(d);
+    }
+
+    console.log('Johann orchestration agent activated');
 }
 
 export function deactivate() {

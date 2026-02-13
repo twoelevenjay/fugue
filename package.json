@@ -27,7 +27,8 @@
   },
   "homepage": "https://github.com/YOUR_USERNAME/ramble#readme",
   "activationEvents": [
-    "onChatParticipant:ramble"
+    "onChatParticipant:ramble",
+    "onChatParticipant:johann"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -37,6 +38,13 @@
         "name": "ramble",
         "fullName": "Ramble for GitHub Copilot",
         "description": "Turn your rambles into structured prompts",
+        "isSticky": true
+      },
+      {
+        "id": "johann",
+        "name": "johann",
+        "fullName": "Johann — Orchestration Agent",
+        "description": "OpenClaw-inspired orchestration layer for GitHub Copilot. Decomposes tasks, selects models, spawns subagents, and manages long-running workflows.",
         "isSticky": true
       }
     ],
@@ -48,6 +56,14 @@
       {
         "command": "ramble.refreshContext",
         "title": "Ramble: Refresh Workspace Context"
+      },
+      {
+        "command": "johann.showMemory",
+        "title": "Johann: Show Memory Files"
+      },
+      {
+        "command": "johann.clearMemory",
+        "title": "Johann: Clear Memory"
       }
     ]
   },
