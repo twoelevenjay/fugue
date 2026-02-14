@@ -28,12 +28,38 @@ Thanks for your interest in contributing to Ramble for GitHub Copilot!
 ```
 ramble/
 ├── src/
-│   ├── extension.ts      # Main extension code
+│   ├── extension.ts          # Main extension: @ramble participant, input analysis, chunking
+│   ├── johann/               # Johann orchestration agent
+│   │   ├── index.ts          # Public exports
+│   │   ├── participant.ts    # @johann chat participant registration
+│   │   ├── orchestrator.ts   # Core orchestration: plan → execute → review → merge
+│   │   ├── taskDecomposer.ts # LLM-powered task decomposition
+│   │   ├── modelPicker.ts    # 5-tier model selection and escalation
+│   │   ├── subagentManager.ts# Subagent execution and review
+│   │   ├── memory.ts         # Persistent memory system
+│   │   ├── memorySearch.ts   # Keyword search across memory
+│   │   ├── dailyNotes.ts     # Append-only daily log files
+│   │   ├── sessionTranscript.ts # JSONL conversation recording
+│   │   ├── subagentRegistry.ts  # Subagent tracking
+│   │   ├── announceFlow.ts   # Subagent completion notifications
+│   │   ├── bootstrap.ts      # First-run workspace setup
+│   │   ├── templates.ts      # Bootstrap file templates (SOUL.md etc.)
+│   │   ├── systemPrompt.ts   # Multi-section system prompt assembly
+│   │   ├── skills.ts         # Discoverable skill system
+│   │   ├── heartbeat.ts      # Periodic self-check timer
+│   │   ├── directives.ts     # Slash command handling (/help, /yolo, etc.)
+│   │   ├── config.ts         # VS Code settings-based configuration
+│   │   ├── logger.ts         # Structured logging
+│   │   └── types.ts          # Core type definitions
 │   └── test/
 │       └── extension.test.ts
-├── package.json          # Extension manifest
-├── tsconfig.json         # TypeScript config
-└── eslint.config.mjs     # Linting rules
+├── docs/
+│   ├── JOHANN.md             # Architecture documentation
+│   ├── YOLO-MODE.md          # YOLO mode guide
+│   └── OPENCLAW-FEATURES.md  # Feature integration matrix
+├── package.json              # Extension manifest
+├── tsconfig.json             # TypeScript config
+└── eslint.config.mjs         # Linting rules
 ```
 
 ## Code Style

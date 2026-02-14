@@ -13,6 +13,16 @@ import { ModelPicker } from './modelPicker';
 import { TaskDecomposer } from './taskDecomposer';
 import { SubagentManager } from './subagentManager';
 import { MemorySystem } from './memory';
+import { getCopilotAgentSettings } from './config';
+import {
+    classifyError,
+    extractErrorMessage,
+    withRetry,
+    REVIEW_RETRY_POLICY,
+    ClassifiedError,
+} from './retry';
+import { DebugConversationLog } from './debugConversationLog';
+import { WorktreeManager, WorktreeMergeResult } from './worktreeManager';
 
 // ============================================================================
 // ORCHESTRATOR — The top-level controller
@@ -27,13 +37,17 @@ import { MemorySystem } from './memory';
 
 const MERGE_SYSTEM_PROMPT = `You are Johann, collecting and synthesizing results from multiple subagents that worked on parts of a larger task.
 
+Each subagent was a GitHub Copilot session with full tool access. They used their tools to create files, run commands, and make actual changes in the workspace. Their outputs describe what they DID.
+
 Given the original request and the results from each subtask, produce a unified, coherent response.
 
 RULES:
 - Synthesize, don't just concatenate. The user shouldn't see the internal decomposition.
-- If all subtasks succeeded, present the combined result clearly.
+- If all subtasks succeeded, present a clear summary of what was built/changed.
 - If some subtasks failed, be transparent about what was accomplished and what wasn't.
-- Include all code, changes, and explanations from successful subtasks.
+- Verify consistency between subtask outputs: do imports match? Do interfaces align? Are there integration gaps?
+- If you spot integration issues, flag them clearly with specific details.
+- Do NOT re-output all the code verbatim. The files already exist. Summarize what was created and highlight any issues.
 - Be thorough but organized.`;
 
 export class Orchestrator {
@@ -54,10 +68,18 @@ export class Orchestrator {
     /**
      * Main entry point — orchestrate a user request.
      * Streams progress updates to the response stream.
+     *
+     * @param request - The user's original request
+     * @param fullContext - Complete context for planning/merge (system prompt + workspace + memory + conversation)
+     * @param subagentContext - Minimal workspace context for subagents (project structure only, no Johann identity)
+     * @param userModel - The LLM model selected by the user
+     * @param response - Chat response stream for live output
+     * @param token - Cancellation token
      */
     async orchestrate(
         request: string,
-        workspaceContext: string,
+        fullContext: string,
+        subagentContext: string,
         userModel: vscode.LanguageModelChat,
         response: vscode.ChatResponseStream,
         token: vscode.CancellationToken
@@ -69,11 +91,29 @@ export class Orchestrator {
             status: 'planning',
             escalations: [],
             startedAt: new Date().toISOString(),
-            workspaceContext,
+            workspaceContext: subagentContext,
         };
+
+        // Track total LLM requests for awareness
+        let totalLlmRequests = 0;
+
+        // Check Copilot settings and warn if low limits
+        const copilotSettings = getCopilotAgentSettings();
+        if (copilotSettings.readable && copilotSettings.maxRequests > 0 && copilotSettings.maxRequests < 50) {
+            response.markdown(
+                `> ⚠️ **Copilot request limit is set to ${copilotSettings.maxRequests}.** ` +
+                `Complex orchestrations may be interrupted. ` +
+                `Consider increasing \`github.copilot.chat.agent.maxRequests\` ` +
+                `or type \`/yolo on\` for guidance.\n\n`
+            );
+        }
 
         // Ensure memory directory exists
         await this.memory.ensureMemoryDir();
+
+        // Initialize debug conversation log
+        const debugLog = new DebugConversationLog(session.sessionId);
+        await debugLog.initialize();
 
         // Get memory context
         const memoryContext = await this.memory.getRecentMemoryContext();
@@ -83,13 +123,16 @@ export class Orchestrator {
             response.markdown('### Planning\n\n');
             response.markdown('Analyzing your request and creating an execution plan...\n\n');
 
+            await debugLog.logEvent('planning', `Starting planning for: ${request.substring(0, 200)}`);
+
             const plan = await this.taskDecomposer.decompose(
                 request,
-                workspaceContext,
+                fullContext,
                 memoryContext,
                 userModel,
                 token,
-                response
+                response,
+                debugLog
             );
 
             session.plan = plan;
@@ -105,20 +148,55 @@ export class Orchestrator {
             // == PHASE 2: EXECUTION ==
             response.markdown('### Executing\n\n');
 
-            const results = await this.executePlan(plan, workspaceContext, response, token);
+            await debugLog.logEvent('subtask-execution', `Starting execution of ${plan.subtasks.length} subtasks`);
 
-            // == PHASE 3: MERGE & RESPOND ==
-            session.status = 'reviewing';
-            response.markdown('\n### Synthesizing Results\n\n');
+            // Initialize worktree manager for parallel isolation
+            let worktreeManager: WorktreeManager | undefined;
+            if (this.config.useWorktrees && plan.strategy !== 'serial') {
+                const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                if (workspaceRoot) {
+                    worktreeManager = new WorktreeManager(workspaceRoot, session.sessionId);
+                    const wtInitialized = await worktreeManager.initialize();
+                    if (wtInitialized) {
+                        await debugLog.logEvent('worktree', `Worktree manager initialized (base: ${worktreeManager.getBaseBranch()})`);
+                    } else {
+                        worktreeManager = undefined;
+                        response.markdown('> ℹ️ Git worktree isolation unavailable (not a git repo or git not found). Parallel subtasks will share the workspace.\n\n');
+                    }
+                }
+            }
 
-            const finalOutput = await this.mergeResults(
-                request,
-                plan,
-                results,
-                userModel,
-                token,
-                response
-            );
+            try {
+                // Pass subagentContext (minimal workspace context without Johann's identity)
+                // to prevent subagents from confusing themselves with Johann
+                const results = await this.executePlan(plan, subagentContext, response, token, debugLog, worktreeManager);
+
+                // == PHASE 3: MERGE & RESPOND ==
+                session.status = 'reviewing';
+                response.markdown('\n### Synthesizing Results\n\n');
+
+                await debugLog.logEvent('merge', 'Starting result synthesis');
+
+                const finalOutput = await this.mergeResults(
+                    request,
+                    plan,
+                    results,
+                    userModel,
+                    token,
+                    response,
+                    debugLog
+                );
+            } finally {
+                // Always clean up worktrees, even on error
+                if (worktreeManager) {
+                    try {
+                        await worktreeManager.cleanupAll();
+                        await debugLog.logEvent('worktree', 'All worktrees cleaned up');
+                    } catch {
+                        // Don't let cleanup failure break the flow
+                    }
+                }
+            }
 
             // == PHASE 4: MEMORY ==
             session.status = 'completed';
@@ -150,23 +228,43 @@ export class Orchestrator {
                 }
             }
 
+            // Finalize debug log on success
+            await debugLog.finalize('completed');
+
         } catch (err) {
             session.status = 'failed';
-            const errorMsg = err instanceof Error ? err.message : 'Unknown error';
-            response.markdown(`\n\n**Orchestration Error:** ${errorMsg}\n`);
+            const classified = classifyError(err);
 
-            await this.memory.recordError(errorMsg, `Session: ${session.sessionId}, Request: ${request.substring(0, 200)}`);
+            // Save the plan to memory if we got that far, so it can be resumed
+            if (session.plan) {
+                await this.savePlanForRecovery(session, classified);
+            }
+
+            // Provide category-specific error guidance
+            this.renderErrorForUser(response, classified, session);
+
+            await this.memory.recordError(
+                classified.message,
+                `Session: ${session.sessionId}, Category: ${classified.category}, Request: ${request.substring(0, 200)}`
+            );
+
+            // Finalize debug log on failure
+            await debugLog.finalize('failed', classified.message);
         }
     }
 
     /**
      * Execute the orchestration plan, respecting dependencies and strategy.
+     * When multiple subtasks are ready (all dependencies satisfied) and
+     * parallel execution is enabled, runs them concurrently via Promise.all.
      */
     private async executePlan(
         plan: OrchestrationPlan,
         workspaceContext: string,
         response: vscode.ChatResponseStream,
-        token: vscode.CancellationToken
+        token: vscode.CancellationToken,
+        debugLog: DebugConversationLog,
+        worktreeManager?: WorktreeManager
     ): Promise<Map<string, SubtaskResult>> {
         const results = new Map<string, SubtaskResult>();
         const completed = new Set<string>();
@@ -186,21 +284,104 @@ export class Orchestrator {
                 break;
             }
 
-            // Execute ready subtasks (could be parallel in future, serial for now)
-            for (const subtask of ready) {
-                if (token.isCancellationRequested) break;
+            // Execute ready subtasks — parallel when enabled and multiple are ready
+            if (this.config.allowParallelExecution && ready.length > 1 &&
+                (plan.strategy === 'parallel' || plan.strategy === 'mixed')) {
 
-                const result = await this.executeSubtaskWithEscalation(
-                    subtask,
-                    results,
-                    workspaceContext,
-                    response,
-                    token
-                );
+                // Create worktrees for filesystem isolation if available
+                const useWorktrees = worktreeManager?.isReady() ?? false;
+                if (useWorktrees) {
+                    response.markdown(`  ⚡ Running ${ready.length} subtasks in parallel (git worktree isolation)...\n`);
 
-                results.set(subtask.id, result);
-                subtask.result = result;
-                completed.add(subtask.id);
+                    // Create a worktree per subtask
+                    for (const subtask of ready) {
+                        try {
+                            const wt = await worktreeManager!.createWorktree(subtask.id);
+                            subtask.worktreePath = wt.worktreePath;
+                        } catch (err) {
+                            const msg = err instanceof Error ? err.message : String(err);
+                            response.markdown(`  ⚠️ Worktree creation failed for "${subtask.title}": ${msg.substring(0, 100)}. Running without isolation.\n`);
+                        }
+                    }
+                } else {
+                    response.markdown(`  ⚡ Running ${ready.length} subtasks in parallel...\n`);
+                }
+
+                // Execute all ready subtasks concurrently
+                const promises = ready.map(async (subtask) => {
+                    if (token.isCancellationRequested) return;
+
+                    const result = await this.executeSubtaskWithEscalation(
+                        subtask,
+                        results,
+                        workspaceContext,
+                        response,
+                        token,
+                        debugLog
+                    );
+
+                    results.set(subtask.id, result);
+                    subtask.result = result;
+                    completed.add(subtask.id);
+                });
+
+                await Promise.all(promises);
+
+                // Merge worktree branches back to the main branch sequentially
+                if (useWorktrees) {
+                    const worktreeSubtasks = ready.filter(st => st.worktreePath);
+                    if (worktreeSubtasks.length > 0) {
+                        response.markdown('\n  🔀 Merging parallel results back to main branch...\n');
+
+                        const mergeResults = await worktreeManager!.mergeAllSequentially(
+                            worktreeSubtasks.map(st => st.id)
+                        );
+
+                        // Report merge results
+                        for (const mr of mergeResults) {
+                            if (!mr.success) {
+                                response.markdown(`  ⚠️ **Merge conflict** for "${mr.subtaskId}": ${mr.error}\n`);
+                                if (mr.conflictFiles && mr.conflictFiles.length > 0) {
+                                    response.markdown(`    Conflicting files: ${mr.conflictFiles.map(f => `\`${f}\``).join(', ')}\n`);
+                                }
+                                // Mark the subtask as failed due to merge conflict
+                                const subtask = ready.find(st => st.id === mr.subtaskId);
+                                if (subtask?.result) {
+                                    subtask.result.success = false;
+                                    subtask.result.reviewNotes += ` [MERGE CONFLICT: ${mr.error}]`;
+                                }
+                            } else if (mr.hasChanges) {
+                                response.markdown(`  ✅ Merged: ${mr.subtaskId}\n`);
+                            }
+                        }
+
+                        // Clean up worktrees for this batch
+                        for (const subtask of worktreeSubtasks) {
+                            await worktreeManager!.cleanupWorktree(subtask.id);
+                            subtask.worktreePath = undefined;
+                        }
+
+                        response.markdown('\n');
+                    }
+                }
+            } else {
+                // Serial execution
+                for (const subtask of ready) {
+                    if (token.isCancellationRequested) break;
+
+                    const result = await this.executeSubtaskWithEscalation(
+                        subtask,
+                        results,
+                        workspaceContext,
+                        response,
+                        token,
+                        debugLog
+                    );
+
+                    results.set(subtask.id, result);
+                    subtask.result = result;
+                    completed.add(subtask.id);
+                }
             }
         }
 
@@ -216,7 +397,8 @@ export class Orchestrator {
         dependencyResults: Map<string, SubtaskResult>,
         workspaceContext: string,
         response: vscode.ChatResponseStream,
-        token: vscode.CancellationToken
+        token: vscode.CancellationToken,
+        debugLog: DebugConversationLog
     ): Promise<SubtaskResult> {
         const escalation: EscalationRecord = {
             subtaskId: subtask.id,
@@ -281,7 +463,8 @@ export class Orchestrator {
                 dependencyResults,
                 workspaceContext,
                 token,
-                response
+                response,
+                debugLog
             );
 
             if (!result.success) {
@@ -302,7 +485,8 @@ export class Orchestrator {
                 result,
                 modelInfo.model, // Use the same model for review
                 token,
-                response
+                response,
+                debugLog
             );
 
             result.success = review.success;
@@ -348,7 +532,8 @@ export class Orchestrator {
         results: Map<string, SubtaskResult>,
         model: vscode.LanguageModelChat,
         token: vscode.CancellationToken,
-        stream?: vscode.ChatResponseStream
+        stream?: vscode.ChatResponseStream,
+        debugLog?: DebugConversationLog
     ): Promise<string> {
         // If only one subtask, just return its output
         if (plan.subtasks.length === 1) {
@@ -369,14 +554,37 @@ export class Orchestrator {
                 )
             ];
 
-            const response = await model.sendRequest(messages, {}, token);
-            let output = '';
-            for await (const chunk of response.text) {
-                output += chunk;
-                if (stream) {
-                    stream.markdown(chunk);
-                }
-            }
+            const mergeStartTime = Date.now();
+            const output = await withRetry(
+                async () => {
+                    const callStart = Date.now();
+                    const response = await model.sendRequest(messages, {}, token);
+                    let text = '';
+                    for await (const chunk of response.text) {
+                        text += chunk;
+                        if (stream) {
+                            stream.markdown(chunk);
+                        }
+                    }
+
+                    // Debug log the merge call
+                    if (debugLog) {
+                        await debugLog.logLLMCall({
+                            timestamp: new Date(callStart).toISOString(),
+                            phase: 'merge',
+                            label: 'Result synthesis',
+                            model: model.id || model.name || 'unknown',
+                            promptMessages: [MERGE_SYSTEM_PROMPT + '\n\n---\n\n' + mergePrompt],
+                            responseText: text,
+                            durationMs: Date.now() - callStart,
+                        });
+                    }
+
+                    return text;
+                },
+                REVIEW_RETRY_POLICY,
+                token
+            );
             return output;
         } catch {
             // Fallback: concatenate results
@@ -473,6 +681,130 @@ export class Orchestrator {
         }
 
         return lines.join('\n');
+    }
+
+    /**
+     * Save the orchestration plan to memory so it can potentially be resumed.
+     * This preserves planning work even when execution fails due to network issues.
+     */
+    private async savePlanForRecovery(
+        session: JohannSession,
+        error: ClassifiedError
+    ): Promise<void> {
+        if (!session.plan) return;
+
+        const plan = session.plan;
+        const completedTasks = plan.subtasks.filter(st => st.status === 'completed');
+        const pendingTasks = plan.subtasks.filter(st => st.status !== 'completed');
+
+        const recoveryContent = [
+            `# Recovery Plan — ${plan.summary}`,
+            ``,
+            `**Session:** ${session.sessionId}`,
+            `**Failed at:** ${new Date().toISOString()}`,
+            `**Error category:** ${error.category}`,
+            `**Error:** ${error.message.substring(0, 300)}`,
+            ``,
+            `## Progress`,
+            `- Completed: ${completedTasks.length}/${plan.subtasks.length}`,
+            `- Remaining: ${pendingTasks.length}`,
+            ``,
+            `## Original Request`,
+            session.originalRequest.substring(0, 2000),
+            ``,
+            `## Completed Subtasks`,
+            ...completedTasks.map(st =>
+                `- ✅ **${st.title}** (${st.assignedModel || 'unknown'})`
+            ),
+            ``,
+            `## Remaining Subtasks`,
+            ...pendingTasks.map(st =>
+                `- ⏳ **${st.title}** (${st.complexity}) — ${st.description.substring(0, 200)}`
+            ),
+        ].join('\n');
+
+        try {
+            await this.memory.recordLearning(
+                `Recovery plan: ${plan.summary.substring(0, 80)}`,
+                recoveryContent,
+                ['recovery', 'interrupted', error.category]
+            );
+        } catch {
+            // Don't let memory failure compound the original error
+        }
+    }
+
+    /**
+     * Render a user-facing error message with category-specific guidance.
+     */
+    private renderErrorForUser(
+        response: vscode.ChatResponseStream,
+        classified: ClassifiedError,
+        session: JohannSession
+    ): void {
+        const planProgress = session.plan
+            ? (() => {
+                const completed = session.plan.subtasks.filter(st => st.status === 'completed').length;
+                const total = session.plan.subtasks.length;
+                return completed > 0
+                    ? `\n\n> **Progress saved:** ${completed}/${total} subtasks completed before the error. ` +
+                      `Your plan has been saved to Johann's memory. You can re-run your request and Johann will have context from this attempt.\n`
+                    : '';
+            })()
+            : '';
+
+        switch (classified.category) {
+            case 'network':
+                response.markdown(
+                    `\n\n**Network Error**\n\n` +
+                    `Johann's orchestration was interrupted by a transient network error ` +
+                    `after automatic retries were exhausted.\n\n` +
+                    `**What happened:** ${classified.message.substring(0, 200)}\n\n` +
+                    `**To resolve:**\n` +
+                    `1. Check your internet connection\n` +
+                    `2. If on WiFi, try switching networks or using a wired connection\n` +
+                    `3. Re-run your request — Johann will retry from where it left off\n` +
+                    planProgress
+                );
+                break;
+
+            case 'rate-limit':
+                response.markdown(
+                    `\n\n**Copilot Request Limit Reached**\n\n` +
+                    `Johann's orchestration was interrupted because Copilot hit its request limit.\n\n` +
+                    `**To fix this:**\n` +
+                    `1. Increase \`github.copilot.chat.agent.maxRequests\` in VS Code settings\n` +
+                    `2. Type \`/yolo on\` for full setup guidance\n` +
+                    `3. Wait a moment, then re-run your request\n` +
+                    planProgress +
+                    `\n**Error:** ${classified.message.substring(0, 200)}\n`
+                );
+                break;
+
+            case 'cancelled':
+                response.markdown(
+                    `\n\n**Request Cancelled**\n\n` +
+                    `The orchestration was cancelled.` +
+                    planProgress
+                );
+                break;
+
+            case 'auth':
+                response.markdown(
+                    `\n\n**Authentication Error**\n\n` +
+                    `${classified.userGuidance}\n\n` +
+                    `**Error:** ${classified.message.substring(0, 200)}\n`
+                );
+                break;
+
+            default:
+                response.markdown(
+                    `\n\n**Orchestration Error**\n\n` +
+                    `${classified.message.substring(0, 300)}\n` +
+                    planProgress
+                );
+                break;
+        }
     }
 
     private generateSessionId(): string {

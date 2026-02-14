@@ -58,6 +58,9 @@ const WORKSPACE_CONTEXT_KEY = 'ramble.workspaceContext';
 const MAX_QUESTION_ROUNDS = 3;
 const MAX_README_SIZE = 5000; // Truncate large READMEs
 const MAX_INSTRUCTIONS_SIZE = 10000;
+const LARGE_INPUT_THRESHOLD = 8000; // Characters before chunking kicks in
+const MAX_INPUT_SIZE = 100000; // Hard limit on input size
+const CHUNK_SIZE = 6000; // Characters per chunk for analysis
 
 // ============================================================================
 // WORKSPACE CONTEXT GATHERING
@@ -226,6 +229,193 @@ async function sendToLLM(
     }
     
     return result;
+}
+
+// ============================================================================
+// LARGE INPUT HANDLING — Chunked analysis for big pasted feature lists
+// ============================================================================
+
+/**
+ * Split a large input into manageable chunks, breaking at paragraph/section boundaries.
+ * Preserves section context by including overlap between chunks.
+ */
+function chunkLargeInput(text: string, chunkSize: number = CHUNK_SIZE): string[] {
+    if (text.length <= chunkSize) {
+        return [text];
+    }
+
+    const chunks: string[] = [];
+    let remaining = text;
+    let chunkIndex = 0;
+
+    while (remaining.length > 0) {
+        if (remaining.length <= chunkSize) {
+            chunks.push(remaining);
+            break;
+        }
+
+        // Find a good break point near the chunk size
+        let breakPoint = chunkSize;
+
+        // Try to break at a double newline (paragraph boundary)
+        const paragraphBreak = remaining.lastIndexOf('\n\n', chunkSize);
+        if (paragraphBreak > chunkSize * 0.5) {
+            breakPoint = paragraphBreak + 2;
+        } else {
+            // Try to break at a single newline
+            const lineBreak = remaining.lastIndexOf('\n', chunkSize);
+            if (lineBreak > chunkSize * 0.5) {
+                breakPoint = lineBreak + 1;
+            }
+            // Otherwise break at chunkSize
+        }
+
+        chunks.push(remaining.substring(0, breakPoint));
+        remaining = remaining.substring(breakPoint);
+        chunkIndex++;
+    }
+
+    return chunks;
+}
+
+/**
+ * Analyze a large input in chunks and merge the results.
+ * Each chunk is analyzed independently, then results are merged.
+ */
+async function analyzeChunkedInput(
+    model: vscode.LanguageModelChat,
+    input: string,
+    workspaceContext: string,
+    response: vscode.ChatResponseStream,
+    token: vscode.CancellationToken
+): Promise<AnalysisResult | null> {
+    const chunks = chunkLargeInput(input);
+
+    response.markdown(`Input is large (${input.length.toLocaleString()} chars) — processing in ${chunks.length} chunks to preserve all information...\n\n`);
+
+    const chunkResults: AnalysisResult[] = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+        if (token.isCancellationRequested) { return null; }
+
+        response.markdown(`Processing chunk ${i + 1}/${chunks.length}...\n`);
+
+        const chunkPrompt = `You are analyzing CHUNK ${i + 1} of ${chunks.length} of a large user request.
+
+IMPORTANT: Extract ALL distinct features, requirements, details, and information from this chunk.
+Do NOT summarize or abbreviate — your job is to ensure ZERO information loss.
+Another pass will merge all chunks, so capture everything faithfully.
+
+${chunks.length > 1 ? `This is part ${i + 1} of ${chunks.length}. The user's full request was split into chunks. Extract everything from THIS chunk.` : ''}`;
+
+        const analysisPrompt = getAnalysisPrompt(workspaceContext);
+        const fullPrompt = analysisPrompt + '\n\n' + chunkPrompt;
+
+        try {
+            const result = await sendToLLM(model, fullPrompt, chunks[i], token);
+            const parsed = parseJSON<AnalysisResult>(result);
+            if (parsed) {
+                chunkResults.push(parsed);
+            }
+        } catch (err) {
+            response.markdown(`Warning: Chunk ${i + 1} analysis failed: ${err instanceof Error ? err.message : 'Unknown error'}\n`);
+        }
+    }
+
+    if (chunkResults.length === 0) { return null; }
+
+    // If only one chunk, return directly
+    if (chunkResults.length === 1) { return chunkResults[0]; }
+
+    // Merge all chunk results
+    response.markdown(`Merging ${chunkResults.length} chunk results...\n\n`);
+    return mergeChunkResults(model, chunkResults, workspaceContext, token);
+}
+
+/**
+ * Merge multiple analysis results from chunks into a single unified result.
+ */
+async function mergeChunkResults(
+    model: vscode.LanguageModelChat,
+    chunkResults: AnalysisResult[],
+    workspaceContext: string,
+    token: vscode.CancellationToken
+): Promise<AnalysisResult | null> {
+    const mergePrompt = `You are merging multiple analysis results from chunks of a large user request into a single unified context packet.
+
+CRITICAL RULES:
+1. PRESERVE ALL DISTINCT INFORMATION from every chunk — do not drop, summarize, or abbreviate
+2. DEDUPLICATE: If the same fact appears in multiple chunks, keep ONE instance
+3. MERGE RELATED: Combine related information from different chunks into coherent sections
+4. PRESERVE ALL: features, examples, requirements, constraints, technical details, relationships
+5. Maintain all arrays (constraints, successCriteria, inputsArtifacts, etc.) with ALL items from ALL chunks
+6. Combine additionalContext from all chunks
+7. The merged result should be COMPLETE — reading it should give the full picture
+
+${workspaceContext ? `WORKSPACE CONTEXT:\n${workspaceContext}\n\n---\n\n` : ''}Here are the analysis results from ${chunkResults.length} chunks:
+
+${chunkResults.map((r, i) => `=== CHUNK ${i + 1} RESULT ===\n${JSON.stringify(r.contextPacket, null, 2)}`).join('\n\n')}
+
+Merge these into a SINGLE JSON result with the same structure:
+{
+  "contextPacket": { ... merged context packet with ALL information from ALL chunks ... },
+  "missingInfo": [ ... any remaining questions that couldn't be answered from any chunk ... ],
+  "isComplete": true/false
+}
+
+Return ONLY valid JSON.`;
+
+    try {
+        const result = await sendToLLM(model, mergePrompt, '', token);
+        return parseJSON<AnalysisResult>(result);
+    } catch {
+        // Fallback: manually merge the chunk results
+        return manualMergeChunks(chunkResults);
+    }
+}
+
+/**
+ * Fallback manual merge when LLM merge fails.
+ */
+function manualMergeChunks(chunkResults: AnalysisResult[]): AnalysisResult {
+    const merged: ContextPacket = createEmptyContextPacket();
+    const allMissing: PendingQuestion[] = [];
+
+    for (const chunk of chunkResults) {
+        const cp = chunk.contextPacket;
+        if (cp.goal && !merged.goal) { merged.goal = cp.goal; }
+        else if (cp.goal) { merged.goal += ' ' + cp.goal; }
+
+        if (cp.currentState) {
+            merged.currentState += (merged.currentState ? '\n' : '') + cp.currentState;
+        }
+        merged.constraints.push(...cp.constraints);
+        merged.inputsArtifacts.push(...cp.inputsArtifacts);
+        if (cp.outputFormat && !merged.outputFormat) { merged.outputFormat = cp.outputFormat; }
+        merged.successCriteria.push(...cp.successCriteria);
+        merged.nonGoals.push(...cp.nonGoals);
+        if (cp.additionalContext) {
+            merged.additionalContext += (merged.additionalContext ? '\n\n' : '') + cp.additionalContext;
+        }
+        merged.suspectedTranscriptionIssues.push(...(cp.suspectedTranscriptionIssues || []));
+
+        if (chunk.missingInfo) {
+            allMissing.push(...chunk.missingInfo);
+        }
+    }
+
+    // Deduplicate arrays
+    merged.constraints = [...new Set(merged.constraints)];
+    merged.inputsArtifacts = [...new Set(merged.inputsArtifacts)];
+    merged.successCriteria = [...new Set(merged.successCriteria)];
+    merged.nonGoals = [...new Set(merged.nonGoals)];
+    merged.suspectedTranscriptionIssues = [...new Set(merged.suspectedTranscriptionIssues)];
+
+    return {
+        contextPacket: merged,
+        missingInfo: allMissing,
+        isComplete: allMissing.length === 0,
+    };
 }
 
 // ============================================================================
@@ -712,16 +902,40 @@ export function activate(context: vscode.ExtensionContext) {
         session.workspaceContext = workspaceContext;
         session.state = 'IDLE';
 
+        // Check input size and warn if extremely large
+        if (userMessage.length > MAX_INPUT_SIZE) {
+            response.markdown(`⚠️ Input is very large (${userMessage.length.toLocaleString()} chars). Truncating to ${MAX_INPUT_SIZE.toLocaleString()} chars to stay within processing limits.\n\n`);
+            session.rawRamble = userMessage.substring(0, MAX_INPUT_SIZE);
+        }
+
         response.markdown('Analyzing your request...\n\n');
 
         try {
-            const analysisPrompt = getAnalysisPrompt(workspaceContext);
-            const analysisResult = await sendToLLM(model, analysisPrompt, userMessage, token);
-            const parsed = parseJSON<AnalysisResult>(analysisResult);
+            let parsed: AnalysisResult | null;
+
+            // Use chunked analysis for large inputs
+            if (session.rawRamble.length > LARGE_INPUT_THRESHOLD) {
+                parsed = await analyzeChunkedInput(
+                    model,
+                    session.rawRamble,
+                    workspaceContext,
+                    response,
+                    token
+                );
+            } else {
+                const analysisPrompt = getAnalysisPrompt(workspaceContext);
+                const analysisResult = await sendToLLM(model, analysisPrompt, session.rawRamble, token);
+                parsed = parseJSON<AnalysisResult>(analysisResult);
+
+                if (!parsed) {
+                    response.markdown('**Error:** Failed to analyze your request. Please try again.\n');
+                    response.markdown('\n*Debug info:*\n```\n' + analysisResult.substring(0, 500) + '\n```\n');
+                    return;
+                }
+            }
 
             if (!parsed) {
                 response.markdown('**Error:** Failed to analyze your request. Please try again.\n');
-                response.markdown('\n*Debug info:*\n```\n' + analysisResult.substring(0, 500) + '\n```\n');
                 return;
             }
 

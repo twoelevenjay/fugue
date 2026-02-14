@@ -88,6 +88,11 @@
           "default": true,
           "description": "Allow parallel execution of independent subtasks."
         },
+        "johann.useWorktrees": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use git worktrees to isolate parallel subtasks. Each parallel subtask gets its own working directory on a temporary branch, preventing file conflicts. Changes are merged back sequentially after execution. Requires git and a git repository. Falls back gracefully if unavailable."
+        },
         "johann.memoryDir": {
           "type": "string",
           "default": ".vscode/johann",
@@ -134,6 +139,21 @@
           "enum": ["full", "minimal", "none"],
           "default": "full",
           "description": "System prompt assembly mode. Full = all sections, minimal = reduced for subagents, none = bare."
+        },
+        "johann.largeInputChunkSize": {
+          "type": "number",
+          "default": 8000,
+          "description": "Character count threshold for chunking large inputs. Inputs exceeding this size are processed in chunks to prevent information loss."
+        },
+        "johann.maxInputSize": {
+          "type": "number",
+          "default": 100000,
+          "description": "Maximum input size in characters. Inputs exceeding this are truncated with a warning."
+        },
+        "johann.debugConversationLog": {
+          "type": "boolean",
+          "default": true,
+          "description": "Write full LLM conversation logs to .vscode/johann/debug/ for debugging hangs and errors."
         }
       }
     }

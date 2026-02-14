@@ -1,0 +1,4 @@
+# Johann workspace
+sessions/
+registry/
+*.sqlite

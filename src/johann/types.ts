@@ -65,6 +65,8 @@ export interface Subtask {
     attempts: number;
     /** Maximum attempts before giving up */
     maxAttempts: number;
+    /** Worktree path for filesystem isolation during parallel execution */
+    worktreePath?: string;
 }
 
 /**
@@ -169,6 +171,8 @@ export interface OrchestratorConfig {
     maxAttemptsPerSubtask: number;
     /** Whether to run independent subtasks in parallel */
     allowParallelExecution: boolean;
+    /** Whether to use git worktrees for parallel subtask isolation */
+    useWorktrees: boolean;
     /** Memory directory relative to workspace root */
     memoryDir: string;
 }
@@ -177,5 +181,6 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
     maxSubtasks: 10,
     maxAttemptsPerSubtask: 3,
     allowParallelExecution: true,
+    useWorktrees: true,
     memoryDir: '.vscode/johann',
 };

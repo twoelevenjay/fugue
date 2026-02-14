@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { Subtask, SubtaskResult, ModelInfo } from './types';
+import { withRetry, EXECUTION_RETRY_POLICY, REVIEW_RETRY_POLICY, extractErrorMessage, classifyError } from './retry';
+import { DebugConversationLog } from './debugConversationLog';
 
 // ============================================================================
 // SUBAGENT MANAGER — Spawns and manages individual subagent executions
@@ -11,33 +13,64 @@ import { Subtask, SubtaskResult, ModelInfo } from './types';
 // - Success criteria to evaluate against
 // ============================================================================
 
-const SUBAGENT_SYSTEM_PREFIX = `You are a focused coding agent executing a specific subtask as part of a larger orchestrated plan. Your job is to complete the task described below thoroughly and correctly.
+const SUBAGENT_SYSTEM_PREFIX = `You are a GitHub Copilot coding agent executing a specific subtask assigned to you by an orchestrator.
 
-RULES:
-- Do exactly what the task description asks. No more, no less.
-- Be thorough and produce complete, working code when code is requested.
-- If you need to make assumptions, state them clearly.
-- Format your response as clear, structured output.
-- If the task has success criteria, make sure your output satisfies ALL of them.
+CRITICAL RULES:
+1. **USE YOUR TOOLS.** You have full access to file creation, file editing, terminal commands, and all other Copilot tools. You MUST use them to make real changes in the workspace. Do NOT just output text describing what should be done — actually DO it.
+2. **CREATE REAL FILES.** When the task says "create a component," create the actual file in the workspace using your file-creation tools. When it says "install dependencies," run the actual npm/pip/etc command in the terminal. When it says "edit a file," use your edit tools.
+3. **You are NOT Johann.** You are NOT an orchestrator. You are NOT doing onboarding. You are a worker agent executing a specific coding task. Do not introduce yourself. Do not ask questions. Do not give a greeting. Just execute the task.
+4. **No stubs or placeholders.** Every function must be fully implemented. No "// TODO" comments. No "// Implement logic here" placeholders. No empty function bodies. Complete, working code only.
+5. **Report what you DID.** Your final response should summarize what you actually did (files created, commands run, changes made), not what should be done.
+
+IF YOU OUTPUT INSTRUCTIONS OR PROSE INSTEAD OF MAKING ACTUAL CHANGES WITH YOUR TOOLS, YOU HAVE FAILED THE TASK.
 
 `;
 
-const REVIEW_SYSTEM_PROMPT = `You are a code review agent. Your job is to evaluate whether a subtask's output meets its success criteria.
+const REVIEW_SYSTEM_PROMPT = `You are a strict code review agent. Your job is to evaluate whether a subtask's output meets its success criteria.
 
 Given:
 1. The original subtask description
 2. The success criteria
 3. The output produced
 
-Evaluate the output and return a JSON object:
+REVIEW CHECKLIST — You MUST evaluate ALL of these before making a judgment:
+
+1. **Did real work happen?** The subagent was supposed to USE TOOLS to create files, run commands, and make actual workspace changes. If the output is just instructions, prose, step-by-step guides, or code in markdown blocks telling someone what to do (rather than reporting what was actually done), mark as FAILURE. Look for phrases like "Create a file", "Run the following", "Add this code" — these indicate the agent described work instead of doing it.
+
+2. **No stubs or placeholders.** Search for these red flags in any code output:
+   - Comments like "// TODO", "// Implement", "// Add logic here", "/* Placeholder */"
+   - Empty function bodies or functions returning only hardcoded dummy values
+   - Components with "Implement rendering logic here" style comments
+   - Hooks or utilities that are skeletal shells without real logic
+   If ANY are found in critical functionality, mark as FAILURE.
+
+3. **Success criteria met.** Check each criterion individually. ALL must be substantially met.
+
+4. **Code correctness.** Look for:
+   - Missing imports or obviously wrong import paths
+   - Variables or functions used before definition
+   - Type mismatches (in TypeScript)
+   - Logic bugs (e.g., event handlers triggering without proper guard conditions)
+   - Missing error handling for likely failure points
+   - Interfaces/types that don't match between files
+
+5. **Completeness.** Are all requested files, components, and features present? Is anything mentioned in the task description but missing from the output?
+
+Return a JSON object:
 {
   "success": true/false,
-  "reason": "Brief explanation of why it passed or failed",
-  "suggestions": ["Specific improvement suggestion 1", "..."]
+  "reason": "Specific explanation citing concrete evidence from the output. Reference specific file names, function names, or code patterns you checked.",
+  "suggestions": ["Specific actionable improvement 1", "..."],
+  "checklist": {
+    "realWorkDone": true/false,
+    "noStubs": true/false,
+    "criteriaMet": true/false,
+    "codeCorrect": true/false,
+    "complete": true/false
+  }
 }
 
-Be strict but fair. If the output substantially meets the criteria with only minor issues, mark it as success.
-If the output is fundamentally wrong, incomplete, or misses key criteria, mark it as failure.
+A review that passes everything without citing specific evidence is WRONG. Analyze the output thoroughly.
 
 Return ONLY valid JSON.`;
 
@@ -52,7 +85,8 @@ export class SubagentManager {
         dependencyResults: Map<string, SubtaskResult>,
         workspaceContext: string,
         token: vscode.CancellationToken,
-        stream?: vscode.ChatResponseStream
+        stream?: vscode.ChatResponseStream,
+        debugLog?: DebugConversationLog
     ): Promise<SubtaskResult> {
         const startTime = Date.now();
 
@@ -69,14 +103,44 @@ export class SubagentManager {
                 stream.markdown(`\n<details><summary>📋 ${subtask.title} — <code>${modelInfo.name}</code> output</summary>\n\n`);
             }
 
-            const response = await modelInfo.model.sendRequest(messages, {}, token);
-            let output = '';
-            for await (const chunk of response.text) {
-                output += chunk;
-                if (stream) {
-                    stream.markdown(chunk);
+            const output = await withRetry(
+                async () => {
+                    const callStart = Date.now();
+                    const response = await modelInfo.model.sendRequest(messages, {}, token);
+                    let text = '';
+                    for await (const chunk of response.text) {
+                        text += chunk;
+                        if (stream) {
+                            stream.markdown(chunk);
+                        }
+                    }
+
+                    // Debug log the subtask execution call
+                    if (debugLog) {
+                        await debugLog.logLLMCall({
+                            timestamp: new Date(callStart).toISOString(),
+                            phase: 'subtask-execution',
+                            label: subtask.title,
+                            model: modelInfo.id || modelInfo.name || 'unknown',
+                            promptMessages: [prompt],
+                            responseText: text,
+                            durationMs: Date.now() - callStart,
+                        });
+                    }
+
+                    return text;
+                },
+                EXECUTION_RETRY_POLICY,
+                token,
+                (attempt, maxRetries, error, delayMs) => {
+                    if (stream) {
+                        stream.markdown(
+                            `\n\n> ⚠️ **${error.category} error** during execution (attempt ${attempt}/${maxRetries}): ` +
+                            `${error.message.substring(0, 150)}\n> Retrying in ${(delayMs / 1000).toFixed(1)}s...\n\n`
+                        );
+                    }
                 }
-            }
+            );
 
             // Close the collapsible section
             if (stream) {
@@ -95,7 +159,34 @@ export class SubagentManager {
             };
         } catch (err) {
             const durationMs = Date.now() - startTime;
-            const errorMsg = `Execution error: ${err instanceof Error ? err.message : 'Unknown error'}`;
+            const classified = classifyError(err);
+
+            let errorMsg: string;
+            if (classified.category === 'rate-limit') {
+                errorMsg =
+                    `Copilot request limit reached during subtask execution. ` +
+                    `Increase \`github.copilot.chat.agent.maxRequests\` in VS Code settings. ` +
+                    `Original error: ${classified.message}`;
+            } else if (classified.category === 'network') {
+                errorMsg =
+                    `Network error during subtask execution (retries exhausted): ${classified.message}`;
+            } else {
+                errorMsg = `Execution error: ${classified.message}`;
+            }
+
+            // Debug log the failed call
+            if (debugLog) {
+                await debugLog.logLLMCall({
+                    timestamp: new Date(startTime).toISOString(),
+                    phase: 'subtask-execution',
+                    label: subtask.title,
+                    model: modelInfo.id || modelInfo.name || 'unknown',
+                    promptMessages: ['(prompt was built but call failed)'],
+                    responseText: '',
+                    durationMs,
+                    error: errorMsg,
+                });
+            }
 
             if (stream) {
                 stream.markdown(`\n⚠️ ${errorMsg}\n\n</details>\n\n`);
@@ -121,7 +212,8 @@ export class SubagentManager {
         result: SubtaskResult,
         reviewModel: vscode.LanguageModelChat,
         token: vscode.CancellationToken,
-        stream?: vscode.ChatResponseStream
+        stream?: vscode.ChatResponseStream,
+        debugLog?: DebugConversationLog
     ): Promise<{ success: boolean; reason: string; suggestions: string[] }> {
         // If the execution itself failed, no need to review
         if (!result.success) {
@@ -154,24 +246,46 @@ ${result.output.substring(0, 10000)}
 `;
 
         try {
+            const fullReviewPrompt = REVIEW_SYSTEM_PROMPT + '\n\n---\n\n' + reviewPrompt;
             const messages = [
-                vscode.LanguageModelChatMessage.User(
-                    REVIEW_SYSTEM_PROMPT + '\n\n---\n\n' + reviewPrompt
-                )
+                vscode.LanguageModelChatMessage.User(fullReviewPrompt)
             ];
 
             if (stream) {
                 stream.markdown(`<details><summary>🔍 Reviewing: ${subtask.title}</summary>\n\n`);
             }
 
-            const response = await reviewModel.sendRequest(messages, {}, token);
-            let reviewOutput = '';
-            for await (const chunk of response.text) {
-                reviewOutput += chunk;
-                if (stream) {
-                    stream.markdown(chunk);
-                }
-            }
+            const reviewOutput = await withRetry(
+                async () => {
+                    const callStart = Date.now();
+                    const response = await reviewModel.sendRequest(messages, {}, token);
+                    let text = '';
+                    for await (const chunk of response.text) {
+                        text += chunk;
+                        if (stream) {
+                            stream.markdown(chunk);
+                        }
+                    }
+
+                    // Debug log the review call
+                    if (debugLog) {
+                        await debugLog.logLLMCall({
+                            timestamp: new Date(callStart).toISOString(),
+                            phase: 'review',
+                            label: `Review: ${subtask.title}`,
+                            model: reviewModel.id || reviewModel.name || 'unknown',
+                            promptMessages: [fullReviewPrompt],
+                            responseText: text,
+                            durationMs: Date.now() - callStart,
+                        });
+                    }
+
+                    return text;
+                },
+                REVIEW_RETRY_POLICY,
+                token
+                // No onRetry callback — reviews are silent about retries
+            );
 
             if (stream) {
                 stream.markdown('\n\n</details>\n\n');
@@ -180,10 +294,10 @@ ${result.output.substring(0, 10000)}
             // Parse the review result
             return this.parseReviewResult(reviewOutput);
         } catch {
-            // If review fails, default to accepting the output
+            // If review fails, default to REJECTING the output — don't rubber-stamp
             return {
-                success: true,
-                reason: 'Review model unavailable — output accepted by default.',
+                success: false,
+                reason: 'Review model unavailable — output rejected by default for safety. Re-run to retry.',
                 suggestions: [],
             };
         }
@@ -204,6 +318,22 @@ ${result.output.substring(0, 10000)}
         if (workspaceContext) {
             parts.push('=== WORKSPACE CONTEXT ===');
             parts.push(workspaceContext);
+            parts.push('');
+        }
+
+        // If this subtask has an isolated worktree, instruct the subagent to use it
+        if (subtask.worktreePath) {
+            parts.push('=== ISOLATED WORKING DIRECTORY ===');
+            parts.push(`You are operating in a dedicated git worktree at: ${subtask.worktreePath}`);
+            parts.push('This is an isolated copy of the codebase on its own branch, created to prevent');
+            parts.push('conflicts with other parallel subtasks.');
+            parts.push('');
+            parts.push('CRITICAL RULES FOR WORKTREE ISOLATION:');
+            parts.push(`1. ALL file operations (create, edit, delete) MUST target paths under: ${subtask.worktreePath}`);
+            parts.push(`2. When running terminal commands, ALWAYS cd to the worktree first: cd "${subtask.worktreePath}"`);
+            parts.push('3. Do NOT modify files in the main workspace directory — only use your worktree.');
+            parts.push('4. Your changes will be automatically committed and merged back to the main branch.');
+            parts.push('5. If installing dependencies, run install commands inside the worktree directory.');
             parts.push('');
         }
 
@@ -237,6 +367,7 @@ ${result.output.substring(0, 10000)}
 
     /**
      * Parse the review model's output into a structured result.
+     * Handles both the legacy format and new checklist format.
      */
     private parseReviewResult(rawOutput: string): { success: boolean; reason: string; suggestions: string[] } {
         try {
@@ -258,20 +389,34 @@ ${result.output.substring(0, 10000)}
                 }
             }
 
+            // If the review includes a checklist, ALL checklist items must pass
+            // for the overall review to pass. This prevents rubber-stamp reviews.
+            let success = Boolean(parsed.success);
+            const checklist = parsed.checklist as Record<string, boolean> | undefined;
+            if (checklist && typeof checklist === 'object') {
+                const checklistValues = Object.values(checklist);
+                const allPassed = checklistValues.every(v => v === true);
+                if (!allPassed && success) {
+                    // Override: if any checklist item failed, the review fails
+                    success = false;
+                    const failedItems = Object.entries(checklist)
+                        .filter(([, v]) => v !== true)
+                        .map(([k]) => k);
+                    parsed.reason = `Review checklist failures: ${failedItems.join(', ')}. ${parsed.reason || ''}`;
+                }
+            }
+
             return {
-                success: Boolean(parsed.success),
+                success,
                 reason: String(parsed.reason || ''),
                 suggestions: Array.isArray(parsed.suggestions)
                     ? parsed.suggestions.map(String)
                     : [],
             };
         } catch {
-            // If we can't parse, check for obvious signals
-            const lower = rawOutput.toLowerCase();
-            if (lower.includes('"success": true') || lower.includes('"success":true')) {
-                return { success: true, reason: 'Parsed as success from raw output', suggestions: [] };
-            }
-            return { success: false, reason: 'Could not parse review output', suggestions: [] };
+            // If we can't parse, default to FAILURE (not success)
+            // A review that can't be parsed should not rubber-stamp the output
+            return { success: false, reason: 'Could not parse review output — defaulting to failure for safety', suggestions: [] };
         }
     }
 }

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { searchMemory, formatSearchResults } from './memorySearch';
-import { getConfig, formatConfig } from './config';
+import { getConfig, formatConfig, getCopilotAgentSettings, formatCopilotSettings } from './config';
 import { listDailyNotes, readDailyNotes } from './dailyNotes';
 import { listSessions, getRecentSessionsSummary } from './sessionTranscript';
 
@@ -18,6 +18,7 @@ import { listSessions, getRecentSessionsSummary } from './sessionTranscript';
 //   /search    — Search memory for keywords
 //   /notes     — Show today's daily notes or a specific date
 //   /sessions  — List recent sessions
+//   /yolo      — Toggle YOLO mode (maximum autonomy)
 //   /help      — Show available directives
 // ============================================================================
 
@@ -69,6 +70,8 @@ export async function handleDirective(
             return await handleNotes(args, response);
         case '/sessions':
             return await handleSessions(response);
+        case '/yolo':
+            return await handleYolo(args, response);
         default:
             response.markdown(`Unknown directive: \`${command}\`. Type \`/help\` for available commands.\n`);
             return { isDirective: true, handled: false };
@@ -92,6 +95,7 @@ async function handleHelp(response: vscode.ChatResponseStream): Promise<Directiv
 | \`/config\` | Show current configuration |
 | \`/notes [date]\` | Show daily notes (today or specific date) |
 | \`/sessions\` | List recent sessions |
+| \`/yolo [on\\|off]\` | Toggle YOLO mode (maximum autonomy) |
 
 `;
 
@@ -235,5 +239,93 @@ async function handleSessions(response: vscode.ChatResponseStream): Promise<Dire
     } else {
         response.markdown('No session transcripts found.\n');
     }
+    return { isDirective: true, handled: true, output };
+}
+
+async function handleYolo(args: string, response: vscode.ChatResponseStream): Promise<DirectiveResult> {
+    const copilot = getCopilotAgentSettings();
+    const arg = args.trim().toLowerCase();
+
+    if (arg === 'on' || arg === 'enable') {
+        // Guide the user to enable YOLO mode in Copilot settings
+        const output = `## Enabling YOLO Mode
+
+YOLO mode is controlled by **GitHub Copilot's settings**, not Johann. To enable maximum autonomy:
+
+### Add to your \`.vscode/settings.json\`:
+
+\`\`\`json
+{
+  "github.copilot.chat.agent.autoApprove": true,
+  "github.copilot.chat.agent.maxRequests": 200
+}
+\`\`\`
+
+Or open **Settings** → search for \`copilot agent\` and configure there.
+
+### What these do:
+- **autoApprove** — Skips the "Allow" confirmation before each terminal command or file edit
+- **maxRequests** — How many LLM requests Copilot allows before pausing with a "Continue?" prompt. Set high (100–200) for complex orchestrations.
+
+### Current Copilot settings:
+${formatCopilotSettings()}
+
+${copilot.autoApprove && copilot.maxRequests >= 100
+    ? '✅ Your Copilot settings already look good for YOLO mode.'
+    : '⚠️ Your Copilot settings may cause Johann to stall on confirmation prompts during complex orchestrations.'}
+
+### Also consider raising Johann's orchestration limits:
+\`\`\`json
+{
+  "johann.maxSubtasks": 20,
+  "johann.maxAttempts": 5
+}
+\`\`\`
+`;
+        response.markdown(output);
+        return { isDirective: true, handled: true, output };
+    }
+
+    if (arg === 'off' || arg === 'disable') {
+        const output = `## Disabling YOLO Mode
+
+To restore confirmation prompts, update your \`.vscode/settings.json\`:
+
+\`\`\`json
+{
+  "github.copilot.chat.agent.autoApprove": false,
+  "github.copilot.chat.agent.maxRequests": 30
+}
+\`\`\`
+
+Or open **Settings** → search for \`copilot agent\` and change there.
+
+### Current Copilot settings:
+${formatCopilotSettings()}
+`;
+        response.markdown(output);
+        return { isDirective: true, handled: true, output };
+    }
+
+    // No argument — show current status
+    const yoloActive = copilot.autoApprove && copilot.maxRequests >= 100;
+    const yoloStatus = yoloActive ? '🟢 **ACTIVE**' : '⚪ **INACTIVE**';
+
+    const output = `## YOLO Mode: ${yoloStatus}
+
+YOLO mode is determined by your **GitHub Copilot settings** — Johann reads them but doesn't own them.
+
+${formatCopilotSettings()}
+
+${yoloActive
+    ? 'Copilot is configured for maximum autonomy. Johann can run long orchestrations without confirmation prompts.'
+    : `Copilot may pause Johann for confirmation during complex tasks. To enable YOLO mode, type \`/yolo on\` for setup instructions.`}
+
+### Usage:
+- \`/yolo\` — Show current YOLO status
+- \`/yolo on\` — Show how to enable maximum autonomy
+- \`/yolo off\` — Show how to restore confirmation prompts
+`;
+    response.markdown(output);
     return { isDirective: true, handled: true, output };
 }

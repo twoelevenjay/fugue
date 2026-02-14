@@ -271,16 +271,27 @@ export function registerJohannParticipant(
             // Get recent daily notes for context
             const dailyNotesContext = await getRecentDailyNotesContext(2, 2000);
 
-            // Combine all context
-            const contextParts: string[] = [];
-            if (systemPrompt) contextParts.push(systemPrompt);
-            if (workspaceContext) contextParts.push(workspaceContext);
-            if (dailyNotesContext) contextParts.push(dailyNotesContext);
+            // Build full context (for planning + merge — includes system prompt, memory, conversation)
+            const fullContextParts: string[] = [];
+            if (systemPrompt) {
+                fullContextParts.push(systemPrompt);
+            }
+            if (workspaceContext) {
+                fullContextParts.push(workspaceContext);
+            }
+            if (dailyNotesContext) {
+                fullContextParts.push(dailyNotesContext);
+            }
             if (conversationHistory) {
-                contextParts.push(`=== Recent Conversation ===\n${conversationHistory}`);
+                fullContextParts.push(`=== Recent Conversation ===\n${conversationHistory}`);
             }
 
-            const fullContext = contextParts.join('\n\n---\n\n');
+            const fullContext = fullContextParts.join('\n\n---\n\n');
+
+            // Subagent context is ONLY the workspace structure — no Johann identity,
+            // no system prompt, no memory. This prevents subagents from confusing
+            // themselves with Johann or picking up the bootstrap/onboarding personality.
+            const subagentContext = workspaceContext;
 
             // === FIRST RUN HANDLING ===
             if (isFirstRun && johannDir) {
@@ -297,6 +308,7 @@ export function registerJohannParticipant(
             await orchestrator.orchestrate(
                 userMessage,
                 fullContext,
+                subagentContext,
                 model,
                 response,
                 token

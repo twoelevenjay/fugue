@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { OrchestrationPlan, Subtask, TaskComplexity, ModelInfo } from './types';
+import { withRetry, PLANNING_RETRY_POLICY, classifyError, extractErrorMessage } from './retry';
+import { DebugConversationLog } from './debugConversationLog';
 
 // ============================================================================
 // TASK DECOMPOSER — Breaks user requests into orchestrated subtask plans
@@ -14,6 +16,10 @@ import { OrchestrationPlan, Subtask, TaskComplexity, ModelInfo } from './types';
 
 const DECOMPOSITION_SYSTEM_PROMPT = `You are Johann, a top-level orchestration agent. Your job is to analyze a user's coding request and produce an execution plan.
 
+## Architecture
+
+Each subtask you create will be executed as a **separate GitHub Copilot session** with **full tool access** — file creation, terminal commands, code editing, workspace navigation. The sessions already know how to do everything. Your job is to write precise prompts that steer them.
+
 You must decide:
 1. Can this be handled by a SINGLE agent, or should it be broken into MULTIPLE subtasks?
 2. For each subtask, what is its complexity? (trivial, simple, moderate, complex, expert)
@@ -25,20 +31,29 @@ RULES:
 - If the task is straightforward (e.g., "fix this bug", "add a button"), use a SINGLE subtask. Not everything needs decomposition.
 - If the task is complex (e.g., "refactor this module and add tests and update docs"), break it into logical subtasks.
 - Each subtask should be a self-contained unit of work that produces a verifiable result.
-- Use parallel execution when subtasks are independent.
-- Use serial execution when subtasks have dependencies.
+- **Use parallel execution** when subtasks are independent. If tasks 2, 3, and 4 all only depend on task 1, they should run in parallel after task 1 completes.
+- Use serial execution only when subtasks have strict sequential dependencies.
 - Mixed strategy means some tasks can run in parallel, others must be serial.
 - Keep subtask count reasonable (1-10). More subtasks = more overhead.
-- Complexity ratings drive model selection:
-  - trivial: formatting, renaming, simple copy-paste style tasks
-  - simple: straightforward implementation, bug fixes with clear cause
-  - moderate: feature implementation requiring some design decisions
-  - complex: architectural changes, multi-file refactors, performance optimization
-  - expert: security-critical code, complex algorithm design, system architecture
 
-IMPORTANT: Subtask descriptions must be COMPLETE and SELF-CONTAINED. Each subtask's description
-will be sent to an independent agent that has NO context from other subtasks (unless their
-results are piped in). Include all necessary context in each subtask description.
+## Subtask Descriptions
+
+CRITICAL: Subtask descriptions are the PROMPTS sent to Copilot sessions. They must:
+
+1. **Be COMPLETE and SELF-CONTAINED.** Each session has NO context from other subtasks (unless their results are piped in as dependency context). Include all necessary file paths, type definitions, conventions, and context in each description.
+
+2. **Instruct the agent to USE TOOLS.** Explicitly tell the agent to create files, run commands, etc. Do NOT write descriptions that ask for prose or code blocks — ask for actual workspace changes.
+
+3. **Specify exact file paths.** Don't say "create a component" — say "create \`src/components/Header.tsx\`".
+
+4. **Include interfaces and types** that the subtask's code needs to implement, especially when the types are defined by a dependency.
+
+## Complexity Ratings (drive model selection)
+- trivial: formatting, renaming, simple copy-paste style tasks
+- simple: straightforward implementation, bug fixes with clear cause
+- moderate: feature implementation requiring some design decisions
+- complex: architectural changes, multi-file refactors, performance optimization
+- expert: security-critical code, complex algorithm design, system architecture
 
 Return a JSON object with this EXACT structure:
 {
@@ -50,7 +65,7 @@ Return a JSON object with this EXACT structure:
     {
       "id": "task-1",
       "title": "Short title",
-      "description": "Complete, self-contained description/prompt for the subagent. Include ALL context needed.",
+      "description": "Complete, self-contained prompt for the Copilot session. Include ALL context, file paths, and explicit instructions to use tools.",
       "complexity": "trivial" | "simple" | "moderate" | "complex" | "expert",
       "dependsOn": [],
       "successCriteria": ["Criterion 1", "..."]
@@ -71,34 +86,63 @@ export class TaskDecomposer {
         memoryContext: string,
         model: vscode.LanguageModelChat,
         token: vscode.CancellationToken,
-        stream?: vscode.ChatResponseStream
+        stream?: vscode.ChatResponseStream,
+        debugLog?: DebugConversationLog
     ): Promise<OrchestrationPlan> {
         const userPrompt = this.buildDecompositionPrompt(request, workspaceContext, memoryContext);
 
+        const fullPrompt = DECOMPOSITION_SYSTEM_PROMPT + '\n\n---\n\n' + userPrompt;
         const messages = [
-            vscode.LanguageModelChatMessage.User(
-                DECOMPOSITION_SYSTEM_PROMPT + '\n\n---\n\n' + userPrompt
-            )
+            vscode.LanguageModelChatMessage.User(fullPrompt)
         ];
 
         if (stream) {
             stream.markdown('<details><summary>🧠 Planning thought process</summary>\n\n');
         }
 
-        const response = await model.sendRequest(messages, {}, token);
-        let result = '';
-        for await (const chunk of response.text) {
-            result += chunk;
-            if (stream) {
-                stream.markdown(chunk);
+        const plan = await withRetry(
+            async () => {
+                const callStart = Date.now();
+                const response = await model.sendRequest(messages, {}, token);
+                let result = '';
+                for await (const chunk of response.text) {
+                    result += chunk;
+                    if (stream) {
+                        stream.markdown(chunk);
+                    }
+                }
+
+                // Debug log the planning call
+                if (debugLog) {
+                    await debugLog.logLLMCall({
+                        timestamp: new Date(callStart).toISOString(),
+                        phase: 'planning',
+                        label: 'Task decomposition',
+                        model: model.id || model.name || 'unknown',
+                        promptMessages: [fullPrompt],
+                        responseText: result,
+                        durationMs: Date.now() - callStart,
+                    });
+                }
+
+                return this.parsePlan(result);
+            },
+            PLANNING_RETRY_POLICY,
+            token,
+            (attempt, maxRetries, error, delayMs) => {
+                if (stream) {
+                    stream.markdown(
+                        `\n\n> ⚠️ **${error.category} error** during planning (attempt ${attempt}/${maxRetries}): ` +
+                        `${error.message.substring(0, 150)}\n> Retrying in ${(delayMs / 1000).toFixed(1)}s...\n\n`
+                    );
+                }
             }
-        }
+        );
 
         if (stream) {
             stream.markdown('\n\n</details>\n\n');
         }
 
-        const plan = this.parsePlan(result);
         return plan;
     }
 

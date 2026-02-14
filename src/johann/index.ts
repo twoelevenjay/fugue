@@ -18,6 +18,8 @@ export { searchMemory, formatSearchResults } from './memorySearch';
 export type { MemorySearchResult, MemorySearchOptions } from './memorySearch';
 export { SubagentRegistry, listRegistries, loadRegistrySnapshot } from './subagentRegistry';
 export type { SubagentEntry, SubagentStatus, RegistrySnapshot } from './subagentRegistry';
+export { WorktreeManager } from './worktreeManager';
+export type { WorktreeInfo, WorktreeMergeResult } from './worktreeManager';
 export * from './announceFlow';
 export { getConfig, setConfig, getDefaults, onConfigChange, formatConfig } from './config';
 export type { JohannConfig } from './config';
