@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 
 // ============================================================================
 // CORE TYPES — Johann Orchestration System
-// Inspired by OpenClaw's multi-agent routing, session model, and agent loop.
 // ============================================================================
 
 /**

@@ -44,7 +44,7 @@
         "id": "johann",
         "name": "johann",
         "fullName": "Johann — Orchestration Agent",
-        "description": "OpenClaw-inspired orchestration layer for GitHub Copilot. Decomposes tasks, selects models, spawns subagents, and manages long-running workflows.",
+        "description": "Orchestration agent for GitHub Copilot. Decomposes tasks, selects models, spawns subagents, and manages long-running workflows.",
         "isSticky": true
       }
     ],
@@ -64,8 +64,79 @@
       {
         "command": "johann.clearMemory",
         "title": "Johann: Clear Memory"
+      },
+      {
+        "command": "johann.showLog",
+        "title": "Johann: Show Log Output"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Johann — Orchestration Agent",
+      "properties": {
+        "johann.maxSubtasks": {
+          "type": "number",
+          "default": 10,
+          "description": "Maximum number of subtasks per orchestration plan."
+        },
+        "johann.maxAttempts": {
+          "type": "number",
+          "default": 3,
+          "description": "Maximum attempts per subtask before giving up."
+        },
+        "johann.allowParallel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Allow parallel execution of independent subtasks."
+        },
+        "johann.memoryDir": {
+          "type": "string",
+          "default": ".vscode/johann",
+          "description": "Memory directory relative to workspace root."
+        },
+        "johann.maxBootstrapChars": {
+          "type": "number",
+          "default": 15000,
+          "description": "Maximum characters for bootstrap context in system prompt."
+        },
+        "johann.heartbeatEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable periodic heartbeat self-checks."
+        },
+        "johann.heartbeatIntervalMinutes": {
+          "type": "number",
+          "default": 15,
+          "description": "Heartbeat interval in minutes."
+        },
+        "johann.transcriptsEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Record session transcripts as JSONL files."
+        },
+        "johann.logLevel": {
+          "type": "string",
+          "enum": ["debug", "info", "warn", "error"],
+          "default": "info",
+          "description": "Log level for the Johann output channel."
+        },
+        "johann.onboardingEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show onboarding on first run."
+        },
+        "johann.autoDistill": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-distill daily notes into MEMORY.md during heartbeats."
+        },
+        "johann.promptMode": {
+          "type": "string",
+          "enum": ["full", "minimal", "none"],
+          "default": "full",
+          "description": "System prompt assembly mode. Full = all sections, minimal = reduced for subagents, none = bare."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

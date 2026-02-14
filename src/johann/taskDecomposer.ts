@@ -3,7 +3,6 @@ import { OrchestrationPlan, Subtask, TaskComplexity, ModelInfo } from './types';
 
 // ============================================================================
 // TASK DECOMPOSER — Breaks user requests into orchestrated subtask plans
-// Inspired by OpenClaw's agent loop and session model.
 //
 // The decomposer uses the user's selected model (or best available) to:
 // 1. Analyze the request
@@ -64,13 +63,15 @@ Return ONLY valid JSON. No markdown, no explanations.`;
 export class TaskDecomposer {
     /**
      * Decompose a user request into an orchestration plan.
+     * Streams the planning output live to the response stream.
      */
     async decompose(
         request: string,
         workspaceContext: string,
         memoryContext: string,
         model: vscode.LanguageModelChat,
-        token: vscode.CancellationToken
+        token: vscode.CancellationToken,
+        stream?: vscode.ChatResponseStream
     ): Promise<OrchestrationPlan> {
         const userPrompt = this.buildDecompositionPrompt(request, workspaceContext, memoryContext);
 
@@ -80,10 +81,21 @@ export class TaskDecomposer {
             )
         ];
 
+        if (stream) {
+            stream.markdown('<details><summary>🧠 Planning thought process</summary>\n\n');
+        }
+
         const response = await model.sendRequest(messages, {}, token);
         let result = '';
         for await (const chunk of response.text) {
             result += chunk;
+            if (stream) {
+                stream.markdown(chunk);
+            }
+        }
+
+        if (stream) {
+            stream.markdown('\n\n</details>\n\n');
         }
 
         const plan = this.parsePlan(result);

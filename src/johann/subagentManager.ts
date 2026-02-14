@@ -3,7 +3,6 @@ import { Subtask, SubtaskResult, ModelInfo } from './types';
 
 // ============================================================================
 // SUBAGENT MANAGER — Spawns and manages individual subagent executions
-// Inspired by OpenClaw's sessions_send, sessions_list, and Pi agent runtime.
 //
 // Each subagent is a single LLM invocation with:
 // - Its own model (chosen by the model picker)
@@ -45,14 +44,15 @@ Return ONLY valid JSON.`;
 export class SubagentManager {
     /**
      * Execute a single subtask using the given model.
-     * Returns the result of the execution.
+     * Streams the LLM output live to the response stream.
      */
     async executeSubtask(
         subtask: Subtask,
         modelInfo: ModelInfo,
         dependencyResults: Map<string, SubtaskResult>,
         workspaceContext: string,
-        token: vscode.CancellationToken
+        token: vscode.CancellationToken,
+        stream?: vscode.ChatResponseStream
     ): Promise<SubtaskResult> {
         const startTime = Date.now();
 
@@ -64,10 +64,23 @@ export class SubagentManager {
                 vscode.LanguageModelChatMessage.User(prompt)
             ];
 
+            // Open a collapsible log section
+            if (stream) {
+                stream.markdown(`\n<details><summary>📋 ${subtask.title} — <code>${modelInfo.name}</code> output</summary>\n\n`);
+            }
+
             const response = await modelInfo.model.sendRequest(messages, {}, token);
             let output = '';
             for await (const chunk of response.text) {
                 output += chunk;
+                if (stream) {
+                    stream.markdown(chunk);
+                }
+            }
+
+            // Close the collapsible section
+            if (stream) {
+                stream.markdown('\n\n</details>\n\n');
             }
 
             const durationMs = Date.now() - startTime;
@@ -82,11 +95,17 @@ export class SubagentManager {
             };
         } catch (err) {
             const durationMs = Date.now() - startTime;
+            const errorMsg = `Execution error: ${err instanceof Error ? err.message : 'Unknown error'}`;
+
+            if (stream) {
+                stream.markdown(`\n⚠️ ${errorMsg}\n\n</details>\n\n`);
+            }
+
             return {
                 success: false,
                 modelUsed: modelInfo.id,
                 output: '',
-                reviewNotes: `Execution error: ${err instanceof Error ? err.message : 'Unknown error'}`,
+                reviewNotes: errorMsg,
                 durationMs,
                 timestamp: new Date().toISOString(),
             };
@@ -101,7 +120,8 @@ export class SubagentManager {
         subtask: Subtask,
         result: SubtaskResult,
         reviewModel: vscode.LanguageModelChat,
-        token: vscode.CancellationToken
+        token: vscode.CancellationToken,
+        stream?: vscode.ChatResponseStream
     ): Promise<{ success: boolean; reason: string; suggestions: string[] }> {
         // If the execution itself failed, no need to review
         if (!result.success) {
@@ -140,10 +160,21 @@ ${result.output.substring(0, 10000)}
                 )
             ];
 
+            if (stream) {
+                stream.markdown(`<details><summary>🔍 Reviewing: ${subtask.title}</summary>\n\n`);
+            }
+
             const response = await reviewModel.sendRequest(messages, {}, token);
             let reviewOutput = '';
             for await (const chunk of response.text) {
                 reviewOutput += chunk;
+                if (stream) {
+                    stream.markdown(chunk);
+                }
+            }
+
+            if (stream) {
+                stream.markdown('\n\n</details>\n\n');
             }
 
             // Parse the review result

@@ -17,6 +17,8 @@ interface ContextPacket {
     successCriteria: string[];
     nonGoals: string[];
     additionalContext: string;
+    /** Potential talk-to-text transcription issues detected and how they were resolved or flagged */
+    suspectedTranscriptionIssues: string[];
 }
 
 interface PendingQuestion {
@@ -233,8 +235,28 @@ async function sendToLLM(
 function getAnalysisPrompt(workspaceContext: string): string {
     return `You are a prompt analysis assistant. Your job is to PRESERVE ALL FACTS from a user's rambling request while organizing them into a structured format. You remove filler words, not information.
 
+IMPORTANT — TALK-TO-TEXT AWARENESS:
+The user is very likely dictating via a talk-to-text system (e.g., Wispr Flow). This means:
+- The input will read like natural speech: rambling, stream-of-consciousness, with filler words.
+- Talk-to-text systems frequently introduce TRANSCRIPTION ERRORS:
+  • Homophones and near-homophones (e.g., "Johan" vs "Johann", "your" vs "you're", "their" vs "there")
+  • Mangled technical terms (e.g., "typescript" → "type script", "GitHub" → "get hub")
+  • Proper names and brand names may be wrong (e.g., a library called "Prisma" transcribed as "prism")
+  • Words that sound similar but mean different things in context
+  • Repeated or phantom words inserted by the STT engine
+
+When you detect a potential transcription discrepancy:
+1. FIRST — Check the WORKSPACE CONTEXT below. If a word looks like a mangled version of a file name, folder, package, variable, or project name that exists in the workspace, silently resolve it to the correct term and note the correction in "suspectedTranscriptionIssues".
+2. SECOND — Use your training knowledge. If a technical term, library name, or well-known concept is clearly misspelled/misheard, silently resolve it and note the correction.
+3. LAST RESORT — If you CANNOT confidently resolve the discrepancy from the codebase or your knowledge, DO NOT GUESS. Instead, add it as a follow-up question in "missingInfo" with field "transcription" so the user can clarify.
+
+Examples:
+- User says "the yohan agent" but workspace has a folder called "johann" → resolve to "johann", note in suspectedTranscriptionIssues: "Resolved 'yohan' → 'johann' (matches workspace folder src/johann/)"
+- User says "we're using prism for the database" and package.json has "prisma" → resolve to "Prisma", note the correction
+- User says "the flack API" and you're unsure if they mean Flask or Flack → ask in missingInfo: "You mentioned 'flack API' — did you mean Flask (Python web framework) or something else?"
+
 ${workspaceContext ? `IMPORTANT - WORKSPACE CONTEXT:
-The user is working in a specific workspace. Use this context to understand references like project names, paths, and terminology:
+The user is working in a specific workspace. Use this context to understand references like project names, paths, and terminology. This is your PRIMARY source for resolving potential transcription errors:
 
 ${workspaceContext}
 
@@ -246,17 +268,18 @@ ${workspaceContext}
     "goal": "The main goal/objective. Preserve all specifics mentioned - if they said 'hooks inspired by WordPress action and filter hooks', include that exact framing.",
     "currentState": "COMPREHENSIVE description of current state. Include ALL mentioned: what exists, relationships between systems, what APIs are built, what's missing.",
     "constraints": ["Array of ALL constraints, requirements, architectural decisions, and rules mentioned - err on the side of including too much"],
-    "inputsArtifacts": ["Array of ALL files, repos, systems, folders, or artifacts mentioned - USE FULL PATHS from workspace context when referenced by name/alias"],
+    "inputsArtifacts": ["Array of ACTUAL files, repos, and artifacts that EXIST in the user's workspace and are relevant to the task. Use the WORKSPACE CONTEXT to identify real paths. DO NOT list files from external systems, reference material, or example architectures the user described — those belong in additionalContext instead."],
     "outputFormat": "What format they need the output in (code, docs, analysis, etc.) - or empty string if not mentioned",
     "successCriteria": ["Array of success criteria or what 'done' looks like - or empty array if not mentioned"],
     "nonGoals": ["Things explicitly mentioned as out of scope"],
-    "additionalContext": "ALL other relevant context - examples given, analogies used (like WordPress), technical concepts explained (action hooks vs filter hooks), relationships between components, lifecycle concepts, etc. BE THOROUGH."
+    "additionalContext": "ALL other relevant context - examples given, analogies used (like WordPress), technical concepts explained (action hooks vs filter hooks), relationships between components, lifecycle concepts, etc. BE THOROUGH.",
+    "suspectedTranscriptionIssues": ["Array of transcription issues detected and how they were resolved. Format: 'Resolved X → Y (reason)' for auto-resolved, or empty if none found. Unresolvable issues go in missingInfo instead."]
   },
   "missingInfo": [
     {
       "index": 1,
       "question": "A specific, contextual question about what's missing",
-      "field": "Which field this would fill (goal, outputFormat, successCriteria, constraint, etc.)"
+      "field": "Which field this would fill (goal, outputFormat, successCriteria, constraint, transcription, etc.)"
     }
   ],
   "isComplete": true/false
@@ -267,25 +290,29 @@ CRITICAL RULES - PRESERVE ALL DISTINCT INFORMATION:
 2. PRESERVE RELATIONSHIPS - If user explains how System A relates to System B (e.g., "shell provides hooks API to boilerplate"), that relationship must be captured.
 3. PRESERVE EXAMPLES - If user gave examples (HID devices, webcam, digital scale, convention panels), include ALL of them.
 4. PRESERVE TECHNICAL CONCEPTS - If user explained a concept (action hooks = execute code at lifecycle point, filter hooks = pass value through for modification), preserve that explanation.
-5. USE THE WORKSPACE CONTEXT - Resolve aliases/keys to full paths when referenced.
+5. USE THE WORKSPACE CONTEXT - Resolve aliases/keys to full paths when referenced. Also use it to catch and correct talk-to-text errors on project-specific terms.
 6. OK TO CONDENSE:
    - Deduplicate: If the same fact is mentioned twice, keep one instance
    - Organize: If fragments about the same topic are scattered, merge them together
    - Paraphrase: "sometimes, always, most of the time" → "frequently"
    - Remove filler: um, uh, you know, like, basically
+   - Fix obvious STT artifacts: "type script" → "TypeScript", "get hub" → "GitHub" (note in suspectedTranscriptionIssues)
 7. DO NOT REMOVE: distinct facts, examples, analogies, relationships, technical concepts, or anything that adds context - even if it could be stated more briefly.
 8. Only add to missingInfo if information is GENUINELY unclear or missing and cannot be inferred.
 9. Questions must be SPECIFIC to their request, not generic.
 10. If the output format is implied (e.g., "implement hooks" implies code + documentation), fill it in.
 11. isComplete should be true if you have enough info to write a good prompt.
 12. DO NOT ask about file extensions, programming languages, or obvious technical details.
-13. Return ONLY valid JSON, no markdown, no explanations.`;
+13. DO NOT GUESS on ambiguous transcription issues — ask the user instead.
+14. Return ONLY valid JSON, no markdown, no explanations.`;
 }
 
 function getCompilePrompt(workspaceContext: string): string {
     return `You are a prompt engineering expert. Your job is to take a context packet and compile it into an ideal, structured prompt for an AI coding assistant.
 
 CRITICAL: PRESERVE ALL DISTINCT INFORMATION from the context packet. Your job is to format, organize, and present clearly. Every distinct fact, example, relationship, and technical concept must appear in the compiled prompt. You may paraphrase for clarity, but do not omit information.
+
+TALK-TO-TEXT NOTE: The context packet was extracted from talk-to-text input. Any transcription corrections are noted in "suspectedTranscriptionIssues". Use the CORRECTED terms throughout the compiled prompt (not the original misheard versions). Do not mention the transcription issues in the compiled prompt itself — they have already been resolved.
 
 ${workspaceContext ? `WORKSPACE CONTEXT (include relevant parts in the compiled prompt):
 ${workspaceContext}
@@ -309,12 +336,20 @@ DO NOT:
 - Summarize multiple examples into a generic category (keep each example)
 - Remove technical explanations, analogies, or concept definitions
 - Lose the relationships between systems/components
+- Include raw transcription errors — always use the corrected terms
 
 Return ONLY the compiled prompt text, no explanations or meta-commentary. The prompt should be ready to copy-paste to another AI assistant.`;
 }
 
 function getMergePrompt(workspaceContext: string): string {
     return `You are merging user answers into an existing context packet. Integrate new information from answers while deduplicating any redundancy.
+
+TALK-TO-TEXT AWARENESS: The user's answers are likely dictated via talk-to-text and may contain transcription errors. Apply the same rules as the initial analysis:
+- Cross-reference any unfamiliar terms against the WORKSPACE CONTEXT to catch mangled project names, file paths, or technical terms.
+- Use your training knowledge to resolve well-known misspellings of libraries, frameworks, or concepts.
+- If you resolve a transcription issue, add it to the "suspectedTranscriptionIssues" array.
+- If you CANNOT confidently resolve a term, add a follow-up question to "missingInfo" with field "transcription".
+- NEVER guess — ask when uncertain.
 
 ${workspaceContext ? `WORKSPACE CONTEXT:
 ${workspaceContext}
@@ -338,11 +373,12 @@ CRITICAL RULES:
 5. If an answer provides examples, add ALL distinct examples
 6. If an answer explains a concept, preserve that explanation
 7. Use the workspace context to resolve any project names or paths mentioned
-8. Only mark as incomplete if genuinely critical information is still missing
+8. Carry forward all existing "suspectedTranscriptionIssues" and add any new ones found in the answers
+9. Only mark as incomplete if genuinely critical information is still missing
 
 Return this exact JSON structure:
 {
-  "contextPacket": { ... context packet with all previous content PLUS new information from answers ... },
+  "contextPacket": { ... context packet with all previous content PLUS new information from answers, including suspectedTranscriptionIssues array ... },
   "missingInfo": [ ... any remaining questions, or empty array if complete ... ],
   "isComplete": true/false
 }
@@ -364,6 +400,7 @@ function createEmptyContextPacket(): ContextPacket {
         successCriteria: [],
         nonGoals: [],
         additionalContext: '',
+        suspectedTranscriptionIssues: [],
     };
 }
 
@@ -401,19 +438,31 @@ function parseJSON<T>(text: string): T | null {
     }
 }
 
-function looksLikeNewRequest(text: string): boolean {
+function looksLikeNewRequest(text: string, session?: Session): boolean {
     const trimmed = text.trim();
-    
-    if (trimmed.length > 150) {
-        return true;
-    }
-    
     const lines = trimmed.split('\n').filter(l => l.trim());
     if (lines.length === 0) return false;
     
     const firstLine = lines[0].trim();
+
+    // If we're waiting for answers, be VERY conservative about treating input as a new request.
+    // Only reset if the user explicitly says "start over", "new request", "forget that", etc.
+    if (session?.state === 'WAITING_FOR_ANSWERS') {
+        const explicitResetPatterns = [
+            /^(start over|reset|new request|forget (that|this)|scratch that|never\s?mind|cancel)/i,
+            /^(actually,?\s+(i want|i need|let'?s|forget))/i,
+        ];
+        for (const pattern of explicitResetPatterns) {
+            if (pattern.test(firstLine)) {
+                return true;
+            }
+        }
+        // Everything else while WAITING_FOR_ANSWERS is treated as answers, even long text.
+        return false;
+    }
+
+    // For IDLE/DONE sessions, use normal detection
     const answerPattern = /^(A\d+[:.]\s*|^\d+[).:]?\s*)/i;
-    
     if (answerPattern.test(firstLine)) {
         return false;
     }
@@ -429,7 +478,12 @@ function looksLikeNewRequest(text: string): boolean {
         }
     }
     
-    if (lines.length > 3) {
+    // Long messages from IDLE/DONE are likely new requests
+    if (trimmed.length > 300) {
+        return true;
+    }
+    
+    if (lines.length > 5) {
         return true;
     }
     
@@ -484,6 +538,14 @@ function formatContextPacketMarkdown(packet: ContextPacket): string {
 
     if (packet.additionalContext) {
         lines.push(`**Additional Context:** ${packet.additionalContext}\n`);
+    }
+
+    if (packet.suspectedTranscriptionIssues && packet.suspectedTranscriptionIssues.length > 0) {
+        lines.push('**Talk-to-Text Corrections:**');
+        for (const issue of packet.suspectedTranscriptionIssues) {
+            lines.push(`- ${issue}`);
+        }
+        lines.push('');
     }
 
     return lines.join('\n');
@@ -569,7 +631,7 @@ export function activate(context: vscode.ExtensionContext) {
         session.workspaceContext = workspaceContext;
 
         // Check if new request while waiting for answers
-        if (session.state === 'WAITING_FOR_ANSWERS' && looksLikeNewRequest(userMessage)) {
+        if (session.state === 'WAITING_FOR_ANSWERS' && looksLikeNewRequest(userMessage, session)) {
             session = createEmptySession();
             session.workspaceContext = workspaceContext;
         }
@@ -595,14 +657,25 @@ export function activate(context: vscode.ExtensionContext) {
 
                 session.contextPacket = parsed.contextPacket;
 
-                if (!parsed.isComplete && parsed.missingInfo.length > 0 && session.questionRound < MAX_QUESTION_ROUNDS) {
-                    session.pendingQuestions = parsed.missingInfo;
+                // Validate and filter missingInfo — drop any entries with undefined fields
+                const validMissingInfo = (parsed.missingInfo || []).filter(
+                    (q): q is PendingQuestion =>
+                        q != null &&
+                        typeof q.question === 'string' && q.question.length > 0 &&
+                        typeof q.field === 'string' && q.field.length > 0
+                ).map((q, idx) => ({
+                    ...q,
+                    index: typeof q.index === 'number' ? q.index : idx + 1,
+                }));
+
+                if (!parsed.isComplete && validMissingInfo.length > 0 && session.questionRound < MAX_QUESTION_ROUNDS) {
+                    session.pendingQuestions = validMissingInfo;
                     session.questionRound++;
                     session.state = 'WAITING_FOR_ANSWERS';
                     await context.workspaceState.update(STATE_KEY, session);
 
                     response.markdown('Thanks! A few more clarifications needed:\n\n');
-                    for (const q of parsed.missingInfo) {
+                    for (const q of validMissingInfo) {
                         response.markdown(`**Q${q.index}:** ${q.question}\n\n`);
                     }
                     return;
@@ -625,7 +698,7 @@ export function activate(context: vscode.ExtensionContext) {
                     command: 'ramble.copyLast',
                     title: 'Copy compiled prompt',
                 });
-                return;
+                return { metadata: { compiled: true, prompt: compiledPrompt } };
 
             } catch (err) {
                 response.markdown(`**Error:** ${err instanceof Error ? err.message : 'Unknown error'}\n`);
@@ -657,14 +730,25 @@ export function activate(context: vscode.ExtensionContext) {
             // Show what was extracted
             response.markdown(formatContextPacketMarkdown(parsed.contextPacket));
 
-            if (!parsed.isComplete && parsed.missingInfo.length > 0) {
-                session.pendingQuestions = parsed.missingInfo;
+            // Validate missingInfo — drop entries with undefined/empty fields
+            const validMissing = (parsed.missingInfo || []).filter(
+                (q): q is PendingQuestion =>
+                    q != null &&
+                    typeof q.question === 'string' && q.question.length > 0 &&
+                    typeof q.field === 'string' && q.field.length > 0
+            ).map((q, idx) => ({
+                ...q,
+                index: typeof q.index === 'number' ? q.index : idx + 1,
+            }));
+
+            if (!parsed.isComplete && validMissing.length > 0) {
+                session.pendingQuestions = validMissing;
                 session.questionRound = 1;
                 session.state = 'WAITING_FOR_ANSWERS';
                 await context.workspaceState.update(STATE_KEY, session);
 
                 response.markdown('\n---\n\n**I need a few clarifications:**\n\n');
-                for (const q of parsed.missingInfo) {
+                for (const q of validMissing) {
                     response.markdown(`**Q${q.index}:** ${q.question}\n\n`);
                 }
                 response.markdown('\nJust reply with your answers - I\'ll figure out which question each answer is for.\n');
@@ -688,10 +772,26 @@ export function activate(context: vscode.ExtensionContext) {
                 title: 'Copy compiled prompt',
             });
 
+            return { metadata: { compiled: true, prompt: compiledPrompt } };
+
         } catch (err) {
             response.markdown(`**Error:** ${err instanceof Error ? err.message : 'Unknown error'}\n`);
         }
     });
+
+    // Add followup provider: after compiling a prompt, offer to send it to @johann
+    participant.followupProvider = {
+        provideFollowups(result: vscode.ChatResult, _context: vscode.ChatContext, _token: vscode.CancellationToken) {
+            if (result.metadata?.compiled && result.metadata?.prompt) {
+                return [{
+                    prompt: result.metadata.prompt as string,
+                    label: 'Send compiled prompt to @johann',
+                    participant: 'johann',
+                }];
+            }
+            return [];
+        }
+    };
 
     context.subscriptions.push(participant);
 

@@ -4,7 +4,6 @@ import { MemoryEntry, OrchestratorConfig, DEFAULT_CONFIG } from './types';
 
 // ============================================================================
 // PERSISTENT MEMORY — .vscode/johann/ directory
-// Inspired by OpenClaw's workspace + skills system (AGENTS.md, SOUL.md, TOOLS.md).
 //
 // Stores timestamped memory files for:
 // - Task history and results

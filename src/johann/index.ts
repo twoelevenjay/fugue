@@ -5,3 +5,27 @@ export { SubagentManager } from './subagentManager';
 export { MemorySystem } from './memory';
 export { registerJohannParticipant } from './participant';
 export * from './types';
+
+// New modules
+export * from './templates';
+export * from './bootstrap';
+export { assembleSystemPrompt } from './systemPrompt';
+export type { SystemPromptConfig, PromptMode } from './systemPrompt';
+export * from './dailyNotes';
+export { SessionTranscript, listSessions, getRecentSessionsSummary } from './sessionTranscript';
+export type { TranscriptEntry, SessionMeta } from './sessionTranscript';
+export { searchMemory, formatSearchResults } from './memorySearch';
+export type { MemorySearchResult, MemorySearchOptions } from './memorySearch';
+export { SubagentRegistry, listRegistries, loadRegistrySnapshot } from './subagentRegistry';
+export type { SubagentEntry, SubagentStatus, RegistrySnapshot } from './subagentRegistry';
+export * from './announceFlow';
+export { getConfig, setConfig, getDefaults, onConfigChange, formatConfig } from './config';
+export type { JohannConfig } from './config';
+export { handleDirective } from './directives';
+export type { DirectiveResult } from './directives';
+export { discoverSkills, formatSkillsForPrompt, getSkillInstructions, createSkill, readSkillFile } from './skills';
+export type { Skill } from './skills';
+export { HeartbeatManager } from './heartbeat';
+export type { HeartbeatCheck } from './heartbeat';
+export { JohannLogger, createLogger, getLogger } from './logger';
+export type { LogLevel } from './logger';

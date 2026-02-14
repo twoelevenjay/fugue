@@ -16,7 +16,6 @@ import { MemorySystem } from './memory';
 
 // ============================================================================
 // ORCHESTRATOR — The top-level controller
-// Inspired by OpenClaw's Gateway control plane and agent loop.
 //
 // Flow:
 // 1. User sends request to @johann
@@ -89,7 +88,8 @@ export class Orchestrator {
                 workspaceContext,
                 memoryContext,
                 userModel,
-                token
+                token,
+                response
             );
 
             session.plan = plan;
@@ -116,10 +116,9 @@ export class Orchestrator {
                 plan,
                 results,
                 userModel,
-                token
+                token,
+                response
             );
-
-            response.markdown(finalOutput);
 
             // == PHASE 4: MEMORY ==
             session.status = 'completed';
@@ -281,7 +280,8 @@ export class Orchestrator {
                 modelInfo,
                 dependencyResults,
                 workspaceContext,
-                token
+                token,
+                response
             );
 
             if (!result.success) {
@@ -301,7 +301,8 @@ export class Orchestrator {
                 subtask,
                 result,
                 modelInfo.model, // Use the same model for review
-                token
+                token,
+                response
             );
 
             result.success = review.success;
@@ -316,7 +317,7 @@ export class Orchestrator {
 
             if (review.success) {
                 subtask.status = 'completed';
-                response.markdown(` done.\n`);
+                response.markdown(` done. (${(result.durationMs / 1000).toFixed(1)}s)\n`);
                 return result;
             }
 
@@ -339,13 +340,15 @@ export class Orchestrator {
 
     /**
      * Merge results from all subtasks into a unified response.
+     * Streams the merged output directly to the response stream.
      */
     private async mergeResults(
         originalRequest: string,
         plan: OrchestrationPlan,
         results: Map<string, SubtaskResult>,
         model: vscode.LanguageModelChat,
-        token: vscode.CancellationToken
+        token: vscode.CancellationToken,
+        stream?: vscode.ChatResponseStream
     ): Promise<string> {
         // If only one subtask, just return its output
         if (plan.subtasks.length === 1) {
@@ -370,11 +373,18 @@ export class Orchestrator {
             let output = '';
             for await (const chunk of response.text) {
                 output += chunk;
+                if (stream) {
+                    stream.markdown(chunk);
+                }
             }
             return output;
         } catch {
             // Fallback: concatenate results
-            return this.fallbackMerge(plan, results);
+            const fallback = this.fallbackMerge(plan, results);
+            if (stream) {
+                stream.markdown(fallback);
+            }
+            return fallback;
         }
     }
 

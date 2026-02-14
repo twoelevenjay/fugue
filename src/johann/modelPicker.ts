@@ -3,7 +3,7 @@ import { ModelInfo, TaskComplexity } from './types';
 
 // ============================================================================
 // MODEL PICKER — Intelligent model selection and escalation
-// Inspired by OpenClaw's model failover and model catalog systems.
+
 //
 // Key behaviors:
 // - Discovers all available models via vscode.lm.selectChatModels()
