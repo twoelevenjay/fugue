@@ -11,6 +11,21 @@ import * as vscode from 'vscode';
 export type TaskComplexity = 'trivial' | 'simple' | 'moderate' | 'complex' | 'expert';
 
 /**
+ * Task type classification for model selection.
+ * Enables deterministic routing to free (0×) vs premium models.
+ */
+export type TaskType =
+    | 'generate'        // Code generation, scaffolding, boilerplate
+    | 'refactor'        // Code transformations, renames, moves
+    | 'test'            // Test generation and writing
+    | 'debug'           // Debugging, fixing failures, error analysis
+    | 'review'          // Code review, security, edge cases
+    | 'spec'            // Planning, documentation, communication
+    | 'edit'            // Small edits, formatting, single functions
+    | 'design'          // Architecture decisions, multi-file design
+    | 'complex-refactor'; // Large-scale refactors requiring deep reasoning
+
+/**
  * Status of a subtask as it moves through the orchestration pipeline.
  */
 export type SubtaskStatus =
@@ -49,6 +64,8 @@ export interface Subtask {
     title: string;
     /** Full description / prompt for the subagent */
     description: string;
+    /** Task type for routing and multi-pass strategy selection */
+    taskType?: TaskType;
     /** Complexity rating — drives model selection */
     complexity: TaskComplexity;
     /** IDs of subtasks this depends on (must complete first) */
@@ -67,6 +84,8 @@ export interface Subtask {
     maxAttempts: number;
     /** Worktree path for filesystem isolation during parallel execution */
     worktreePath?: string;
+    /** Whether to use multi-pass execution for this subtask */
+    useMultiPass?: boolean;
 }
 
 /**
@@ -105,6 +124,8 @@ export interface ModelInfo {
     tier: number;
     /** Max input tokens (if known) */
     maxInputTokens?: number;
+    /** Cost multiplier (0 = free, 1 = standard premium, 3 = opus, etc.) */
+    costMultiplier: number;
 }
 
 /**
@@ -184,3 +205,62 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
     useWorktrees: true,
     memoryDir: '.vscode/johann',
 };
+
+// ============================================================================
+// BACKGROUND TASK MANAGEMENT
+// ============================================================================
+
+/**
+ * Status of a background task.
+ */
+export type BackgroundTaskStatus = 
+    | 'running'      // Currently executing
+    | 'paused'       // Paused (e.g., waiting for user input)
+    | 'completed'    // Successfully finished
+    | 'failed'       // Failed with error
+    | 'cancelled';   // User cancelled
+
+/**
+ * Progress information for a background task.
+ */
+export interface BackgroundTaskProgress {
+    /** Current execution phase */
+    phase: 'planning' | 'executing' | 'reviewing' | 'merging' | 'finalizing';
+    /** Number of completed subtasks */
+    completedSubtasks: number;
+    /** Total number of subtasks */
+    totalSubtasks: number;
+    /** Currently executing subtask (if any) */
+    currentSubtask?: string;
+    /** Progress percentage (0-100) */
+    percentage: number;
+}
+
+/**
+ * A background orchestration task.
+ * Runs asynchronously while user continues working.
+ */
+export interface BackgroundTask {
+    /** Unique task identifier */
+    id: string;
+    /** Associated session ID */
+    sessionId: string;
+    /** Task type (currently only orchestration) */
+    type: 'orchestration';
+    /** Current status */
+    status: BackgroundTaskStatus;
+    /** When the task started */
+    startedAt: string;
+    /** When the task finished (if completed/failed/cancelled) */
+    completedAt?: string;
+    /** Progress information */
+    progress: BackgroundTaskProgress;
+    /** Cancellation token source for stopping the task */
+    cancellationToken: vscode.CancellationTokenSource;
+    /** Original user request */
+    request: string;
+    /** Summary of the request for display */
+    summary: string;
+    /** Error message (if failed) */
+    error?: string;
+}

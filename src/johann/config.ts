@@ -51,6 +51,18 @@ export interface JohannConfig {
     maxInputSize: number;
     /** Whether to write full LLM conversation logs to .vscode/johann/debug/ */
     debugConversationLog: boolean;
+    /** Whether to enable intelligent model picker (if false, uses fixedModel) */
+    modelPickerEnabled: boolean;
+    /** Fixed model to use when picker is disabled (empty = first available) */
+    fixedModel: string;
+    /** List of allowed model patterns (regex). Empty = all allowed. */
+    allowedModels: string[];
+    /** List of blocked model patterns (regex). Takes precedence over allowedModels. */
+    blockedModels: string[];
+    /** Enable background execution mode (non-blocking orchestration). */
+    backgroundModeEnabled: boolean;
+    /** Allow escalation to Opus models (3× or higher cost). Default: false. */
+    allowOpusEscalation: boolean;
 }
 
 /**
@@ -75,6 +87,12 @@ const DEFAULTS: JohannConfig = {
     largeInputChunkSize: 8000,
     maxInputSize: 100000,
     debugConversationLog: true,
+    modelPickerEnabled: true,
+    fixedModel: '',
+    allowedModels: [],
+    blockedModels: [],
+    backgroundModeEnabled: false,
+    allowOpusEscalation: false,
 };
 
 /**
@@ -108,6 +126,12 @@ export function getConfig(): JohannConfig {
         largeInputChunkSize: cfg.get<number>('largeInputChunkSize', DEFAULTS.largeInputChunkSize),
         maxInputSize: cfg.get<number>('maxInputSize', DEFAULTS.maxInputSize),
         debugConversationLog: cfg.get<boolean>('debugConversationLog', DEFAULTS.debugConversationLog),
+        modelPickerEnabled: cfg.get<boolean>('modelPickerEnabled', DEFAULTS.modelPickerEnabled),
+        fixedModel: cfg.get<string>('fixedModel', DEFAULTS.fixedModel),
+        allowedModels: cfg.get<string[]>('allowedModels', DEFAULTS.allowedModels),
+        blockedModels: cfg.get<string[]>('blockedModels', DEFAULTS.blockedModels),
+        backgroundModeEnabled: cfg.get<boolean>('backgroundModeEnabled', DEFAULTS.backgroundModeEnabled),
+        allowOpusEscalation: cfg.get<boolean>('allowOpusEscalation', DEFAULTS.allowOpusEscalation),
     };
 }
 
@@ -221,4 +245,111 @@ export function formatCopilotSettings(): string {
         `| \`github.copilot.chat.agent.autoApprove\` | ${approveStatus} |`,
         `| \`github.copilot.chat.agent.maxRequests\` | ${requestLimit} |`,
     ].join('\n');
+}
+
+// ============================================================================
+// COPILOT MODEL SETTINGS — Backwards compatibility layer
+//
+// Attempts to read VS Code's native model visibility settings.
+// These may be in different locations depending on VS Code version:
+// - Older: github.copilot.chat.models.visible / hidden
+// - Newer: chat.models.visible / hidden
+// - Future: May move again
+//
+// This is best-effort only. Johann's own settings take precedence.
+// ============================================================================
+
+export interface CopilotModelSettings {
+    /** Models that are visible in the UI */
+    visibleModels: string[];
+    /** Models that are hidden from the UI */
+    hiddenModels: string[];
+    /** Whether we successfully read any model settings */
+    found: boolean;
+    /** Which settings location was used */
+    source: 'github.copilot' | 'chat' | 'none';
+}
+
+/**
+ * Attempt to read Copilot/VS Code model visibility settings.
+ * This is backwards compatibility - helps migrate users to Johann settings.
+ */
+export function getCopilotModelSettings(): CopilotModelSettings {
+    // Try new location (chat.models.*)
+    try {
+        const chatCfg = vscode.workspace.getConfiguration('chat.models');
+        const visible = chatCfg.get<string[]>('visible');
+        const hidden = chatCfg.get<string[]>('hidden');
+        
+        if (visible || hidden) {
+            return {
+                visibleModels: visible || [],
+                hiddenModels: hidden || [],
+                found: true,
+                source: 'chat',
+            };
+        }
+    } catch {
+        // Continue to fallback
+    }
+
+    // Try old location (github.copilot.chat.models.*)
+    try {
+        const copilotCfg = vscode.workspace.getConfiguration('github.copilot.chat.models');
+        const visible = copilotCfg.get<string[]>('visible');
+        const hidden = copilotCfg.get<string[]>('hidden');
+        
+        if (visible || hidden) {
+            return {
+                visibleModels: visible || [],
+                hiddenModels: hidden || [],
+                found: true,
+                source: 'github.copilot',
+            };
+        }
+    } catch {
+        // No settings found
+    }
+
+    return {
+        visibleModels: [],
+        hiddenModels: [],
+        found: false,
+        source: 'none',
+    };
+}
+
+/**
+ * Auto-populate Johann's model restrictions from Copilot settings if Johann settings are empty.
+ * This provides a migration path for users upgrading from older setups.
+ * 
+ * Returns true if settings were migrated, false otherwise.
+ */
+export async function migrateModelSettingsFromCopilot(): Promise<boolean> {
+    const johannCfg = getConfig();
+    
+    // Only migrate if Johann settings are empty (user hasn't configured yet)
+    if (johannCfg.allowedModels.length > 0 || johannCfg.blockedModels.length > 0) {
+        return false; // User has already configured Johann
+    }
+
+    const copilotSettings = getCopilotModelSettings();
+    
+    if (!copilotSettings.found) {
+        return false; // No Copilot settings to migrate
+    }
+
+    // Migrate hidden models to blocked
+    if (copilotSettings.hiddenModels.length > 0) {
+        await setConfig('blockedModels', copilotSettings.hiddenModels);
+        return true;
+    }
+
+    // If only visible models are specified, migrate to allowed
+    if (copilotSettings.visibleModels.length > 0) {
+        await setConfig('allowedModels', copilotSettings.visibleModels);
+        return true;
+    }
+
+    return false;
 }

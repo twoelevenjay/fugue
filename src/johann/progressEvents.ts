@@ -141,8 +141,8 @@ export type ProgressEvent =
  * A consumer of ProgressEvents that maps them to some output target.
  *
  * The primary implementation is ChatProgressReporter which renders events
- * to a VS Code ChatResponseStream. Other implementations could render
- * to an OutputChannel, a test harness, etc.
+ * to a VS Code ChatResponseStream. BackgroundProgressReporter sends updates
+ * to BackgroundTaskManager for asynchronous execution.
  */
 export interface ProgressReporter {
     /** Dispatch a structured progress event. */
@@ -151,6 +151,9 @@ export interface ProgressReporter {
     /** Convenience: emit a phase transition as a transient progress spinner. */
     phase(label: string, detail?: string): void;
 
-    /** Access the underlying chat response stream for raw writes (e.g., LLM output streaming). */
-    readonly stream: vscode.ChatResponseStream;
+    /**
+     * Access the underlying chat response stream for raw writes (e.g., LLM output streaming).
+     * Only available in synchronous (chat) mode. Background reporters throw an error if accessed.
+     */
+    readonly stream?: vscode.ChatResponseStream;
 }

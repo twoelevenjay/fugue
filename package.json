@@ -72,6 +72,34 @@
       {
         "command": "johann.showDebugLog",
         "title": "Johann: Open Debug Log"
+      },
+      {
+        "command": "johann.showModelDiagnostics",
+        "title": "Johann: Show Model Diagnostics"
+      },
+      {
+        "command": "johann.disableModelPicker",
+        "title": "Johann: Disable Model Picker (Use Fixed Model)"
+      },
+      {
+        "command": "johann.enableModelPicker",
+        "title": "Johann: Enable Model Picker"
+      },
+      {
+        "command": "johann.showBackgroundTasks",
+        "title": "Johann: Show Background Tasks"
+      },
+      {
+        "command": "johann.showTaskStatus",
+        "title": "Johann: Show Task Status"
+      },
+      {
+        "command": "johann.cancelTask",
+        "title": "Johann: Cancel Background Task"
+      },
+      {
+        "command": "johann.clearCompletedTasks",
+        "title": "Johann: Clear Completed Tasks"
       }
     ],
     "configuration": {
@@ -158,6 +186,41 @@
           "type": "boolean",
           "default": true,
           "description": "Write full LLM conversation logs to .vscode/johann/debug/ for debugging hangs and errors."
+        },
+        "johann.modelPickerEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable intelligent model picker. When disabled, Johann uses the fixed model specified in johann.fixedModel."
+        },
+        "johann.fixedModel": {
+          "type": "string",
+          "default": "",
+          "description": "Model to use when model picker is disabled. Use the model family name (e.g., 'gpt-4o', 'claude-3.5-sonnet'). Leave empty to use first available model."
+        },
+        "johann.allowedModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "List of allowed model patterns (regex). Only models matching these patterns can be used. Empty array = all models allowed. Example: ['gpt-4o', 'sonnet', 'haiku'] to allow GPT-4o and Claude Sonnet/Haiku models."
+        },
+        "johann.blockedModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "List of blocked model patterns (regex). Models matching these patterns will never be used. Takes precedence over allowedModels. Example: ['opus', 'o1-pro'] to block expensive models."        },
+        "johann.backgroundModeEnabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable background execution mode. When enabled, orchestrations run asynchronously without blocking the chat interface. Useful for long-running tasks."
+        },
+        "johann.allowOpusEscalation": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow escalation to expensive Opus models (3× or higher cost) when cheaper models fail. Default: false. Enable only if you explicitly want to use Opus models."
         }
       }
     }

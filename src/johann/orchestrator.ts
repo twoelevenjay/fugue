@@ -14,6 +14,7 @@ import { TaskDecomposer } from './taskDecomposer';
 import { SubagentManager } from './subagentManager';
 import { MemorySystem } from './memory';
 import { getCopilotAgentSettings } from './config';
+import { getLogger } from './logger';
 import {
     classifyError,
     extractErrorMessage,
@@ -24,7 +25,12 @@ import {
 import { DebugConversationLog } from './debugConversationLog';
 import { WorktreeManager, WorktreeMergeResult } from './worktreeManager';
 import { ChatProgressReporter } from './chatProgressReporter';
+import { BackgroundProgressReporter } from './backgroundProgressReporter';
+import { BackgroundTaskManager } from './backgroundTaskManager';
+import { ProgressReporter } from './progressEvents';
 import { SessionPersistence, ResumableSession } from './sessionPersistence';
+import { MultiPassExecutor } from './multiPassExecutor';
+import { ToolVerifier } from './toolVerifier';
 
 // ============================================================================
 // ORCHESTRATOR — The top-level controller
@@ -32,9 +38,18 @@ import { SessionPersistence, ResumableSession } from './sessionPersistence';
 // Flow:
 // 1. User sends request to @johann
 // 2. Orchestrator uses user's model to create an execution plan
-// 3. For each subtask: pick model → execute → review → escalate if needed
+// 3. For each subtask: 
+//    - Detect if multi-pass should be used (based on task type + complexity)
+//    - If multi-pass: use MultiPassExecutor for structured verification
+//    - If single-pass: pick model → execute → review → escalate if needed
 // 4. Merge results and respond
 // 5. Write to persistent memory
+//
+// Multi-pass integration:
+// - Draft→Critique→Revise for docs/specs/plans
+// - Self-consistency voting for debugging/analysis  
+// - Tool-verified loops for codegen
+// - Two-pass rubric for code review
 // ============================================================================
 
 const MERGE_SYSTEM_PROMPT = `You are Johann, collecting and synthesizing results from multiple subagents that worked on parts of a larger task.
@@ -58,6 +73,8 @@ export class Orchestrator {
     private subagentManager: SubagentManager;
     private memory: MemorySystem;
     private config: OrchestratorConfig;
+    private multiPassExecutor: MultiPassExecutor;
+    private toolVerifier: ToolVerifier;
 
     constructor(config: OrchestratorConfig = DEFAULT_CONFIG) {
         this.config = config;
@@ -65,6 +82,8 @@ export class Orchestrator {
         this.taskDecomposer = new TaskDecomposer();
         this.subagentManager = new SubagentManager();
         this.memory = new MemorySystem(config);
+        this.multiPassExecutor = new MultiPassExecutor(getLogger(), this.modelPicker);
+        this.toolVerifier = new ToolVerifier(getLogger());
     }
 
     /**
@@ -213,6 +232,279 @@ export class Orchestrator {
         const folders = vscode.workspace.workspaceFolders;
         if (!folders) return 'No workspace open.';
         return `Workspace: ${folders[0].uri.fsPath}`;
+    }
+
+    /**
+     * Start a background orchestration task.
+     * Returns immediately with a task ID, while the orchestration runs asynchronously.
+     * 
+     * @param request - The user's original request
+     * @param fullContext - Complete context for planning/merge (system prompt + workspace + memory + conversation)
+     * @param subagentContext - Minimal workspace context for subagents (project structure only, no Johann identity)
+     * @param userModel - The LLM model selected by the user
+     * @param token - Cancellation token
+     * @param toolToken - Tool invocation token from the chat request, can be undefined if unavailable
+     * @returns Task ID for tracking progress
+     */
+    async startBackgroundOrchestration(
+        request: string,
+        fullContext: string,
+        subagentContext: string,
+        userModel: vscode.LanguageModelChat,
+        toolToken?: vscode.ChatParticipantToolToken
+    ): Promise<string> {
+        const taskManager = BackgroundTaskManager.getInstance();
+        
+        // Generate session ID
+        const sessionId = this.generateSessionId();
+        const summary = request.substring(0, 100) + (request.length > 100 ? '...' : '');
+        
+        // Create background task
+        const task = await taskManager.createTask(
+            sessionId,
+            request,
+            summary,
+            0 // Initial totalSubtasks - will be updated after planning
+        );
+
+        // Execute orchestration in background
+        // Note: We don't await this - it runs asynchronously
+        this.executeOrchestrationInBackground(
+            task.id,
+            request,
+            fullContext,
+            subagentContext,
+            userModel,
+            task.cancellationToken.token,
+            toolToken
+        );
+
+        return task.id;
+    }
+
+    /**
+     * Execute an orchestration task in the background.
+     * Updates BackgroundTaskManager throughout execution.
+     * This method runs asynchronously and should not be awaited by the caller.
+     */
+    private async executeOrchestrationInBackground(
+        taskId: string,
+        request: string,
+        fullContext: string,
+        subagentContext: string,
+        userModel: vscode.LanguageModelChat,
+        token: vscode.CancellationToken,
+        toolToken?: vscode.ChatParticipantToolToken
+    ): Promise<void> {
+        const taskManager = BackgroundTaskManager.getInstance();
+        const task = taskManager.getTask(taskId);
+        if (!task) {
+            return;
+        }
+
+        const session: JohannSession = {
+            sessionId: task.sessionId,
+            originalRequest: request,
+            plan: null,
+            status: 'planning',
+            escalations: [],
+            startedAt: new Date().toISOString(),
+            workspaceContext: subagentContext,
+        };
+
+        // Create background progress reporter
+        const reporter = new BackgroundProgressReporter(taskId);
+
+        // Initialize session persistence
+        const persist = new SessionPersistence(session.sessionId);
+        const persistReady = await persist.initialize();
+        if (!persistReady) {
+            reporter.emit({
+                type: 'note',
+                message: 'Session persistence unavailable',
+                style: 'warning',
+            });
+        }
+        await persist.writeSession(session);
+        await persist.writeContext(subagentContext);
+
+        // Initialize debug log
+        const debugLog = new DebugConversationLog(session.sessionId);
+        await debugLog.initialize();
+
+        // Ensure memory directory exists
+        await this.memory.ensureMemoryDir();
+
+        // Get memory context
+        const memoryContext = await this.memory.getRecentMemoryContext();
+
+        try {
+            // == PHASE 1: PLANNING ==
+            reporter.phase('Planning', 'Analyzing request and creating plan');
+
+            await debugLog.logEvent('planning', `Starting planning for: ${request.substring(0, 200)}`);
+            await persist.appendExecutionLog('PLANNING', `Starting planning for: ${request.substring(0, 200)}`);
+
+            const plan = await this.taskDecomposer.decompose(
+                request,
+                fullContext,
+                memoryContext,
+                userModel,
+                token,
+                undefined, // No stream in background mode
+                debugLog,
+                persist
+            );
+
+            session.plan = plan;
+            session.status = 'executing';
+
+            // Persist plan
+            await persist.writePlan(plan);
+            await persist.writeSession(session);
+            await persist.appendExecutionLog('PLAN SAVED', `${plan.subtasks.length} subtasks, strategy: ${plan.strategy}`);
+
+            // Update progress reporter with plan
+            reporter.showPlan(plan);
+            reporter.setTotalSubtasks(plan.subtasks.length);
+
+            // == PHASE 2: EXECUTION ==
+            reporter.phase('Executing', `${plan.subtasks.length} subtasks`);
+
+            await debugLog.logEvent('subtask-execution', `Starting execution of ${plan.subtasks.length} subtasks`);
+
+            // Initialize worktree manager for parallel isolation
+            let worktreeManager: WorktreeManager | undefined;
+            if (this.config.useWorktrees && plan.strategy !== 'serial') {
+                const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+                if (workspaceRoot) {
+                    worktreeManager = new WorktreeManager(workspaceRoot, session.sessionId);
+                    const wtInitialized = await worktreeManager.initialize();
+                    if (wtInitialized) {
+                        await debugLog.logEvent('worktree', `Worktree manager initialized (base: ${worktreeManager.getBaseBranch()})`);
+                    } else {
+                        worktreeManager = undefined;
+                        reporter.emit({
+                            type: 'note',
+                            message: 'Git worktree isolation unavailable',
+                            style: 'warning',
+                        });
+                    }
+                }
+            }
+
+            try {
+                const results = await this.executePlan(
+                    plan,
+                    subagentContext,
+                    reporter,
+                    token,
+                    debugLog,
+                    worktreeManager,
+                    persist,
+                    undefined,
+                    toolToken
+                );
+
+                // == PHASE 3: MERGE & RESPOND ==
+                session.status = 'reviewing';
+                await persist.writeSession(session);
+                reporter.phase('Synthesizing', 'Merging subtask results');
+
+                await debugLog.logEvent('merge', 'Starting result synthesis');
+
+                const finalOutput = await this.mergeResults(
+                    request,
+                    plan,
+                    results,
+                    userModel,
+                    token,
+                    undefined, // No stream in background mode
+                    debugLog
+                );
+
+                // Store final output in task summary
+                const summary = reporter.getSummary();
+                await taskManager.updateStatus(
+                    taskId,
+                    'completed',
+                    undefined
+                );
+
+                // Update task with completion summary
+                const completedTask = taskManager.getTask(taskId);
+                if (completedTask) {
+                    completedTask.summary = `${summary.completedSubtasks}/${summary.totalSubtasks} subtasks completed`;
+                }
+            } finally {
+                // Always clean up worktrees
+                if (worktreeManager) {
+                    try {
+                        await worktreeManager.cleanupAll();
+                        await debugLog.logEvent('worktree', 'All worktrees cleaned up');
+                    } catch {
+                        // Don't let cleanup failure break the flow
+                    }
+                }
+            }
+
+            // == PHASE 4: MEMORY ==
+            session.status = 'completed';
+            session.completedAt = new Date().toISOString();
+
+            await persist.markCompleted(session);
+
+            const subtaskResultSummaries = plan.subtasks.map(st => ({
+                title: st.title,
+                model: st.result?.modelUsed || 'unknown',
+                success: st.result?.success ?? false,
+                notes: st.result?.reviewNotes || '',
+            }));
+
+            const overallSuccess = plan.subtasks.every(st => st.result?.success);
+
+            await this.memory.recordTaskCompletion(
+                plan.summary,
+                subtaskResultSummaries,
+                overallSuccess
+            );
+
+            // Record escalation learnings
+            for (const escalation of session.escalations) {
+                if (escalation.attempts.length > 1) {
+                    await this.memory.recordLearning(
+                        `Escalation pattern for subtask ${escalation.subtaskId}`,
+                        `Tried ${escalation.attempts.length} models: ${escalation.attempts.map(a => `${a.modelId} (tier ${a.tier}): ${a.success ? 'OK' : a.reason}`).join(' → ')}`,
+                        ['escalation', 'model-selection']
+                    );
+                }
+            }
+
+            await debugLog.finalize('completed');
+
+        } catch (err) {
+            session.status = 'failed';
+            const classified = classifyError(err);
+
+            await persist.markFailed(session, classified.message);
+            if (session.plan) {
+                await persist.writeEscalations(session.escalations);
+            }
+
+            if (session.plan) {
+                await this.savePlanForRecovery(session, classified);
+            }
+
+            await this.memory.recordError(
+                classified.message,
+                `Session: ${session.sessionId}, Category: ${classified.category}, Request: ${request.substring(0, 200)}`
+            );
+
+            await debugLog.finalize('failed', classified.message);
+
+            // Update background task with failure
+            await taskManager.updateStatus(taskId, 'failed', classified.message);
+        }
     }
 
     /**
@@ -450,7 +742,7 @@ export class Orchestrator {
     private async executePlan(
         plan: OrchestrationPlan,
         workspaceContext: string,
-        reporter: ChatProgressReporter,
+        reporter: ProgressReporter,
         token: vscode.CancellationToken,
         debugLog: DebugConversationLog,
         worktreeManager?: WorktreeManager,
@@ -622,7 +914,7 @@ export class Orchestrator {
         subtask: Subtask,
         dependencyResults: Map<string, SubtaskResult>,
         workspaceContext: string,
-        reporter: ChatProgressReporter,
+        reporter: ProgressReporter,
         token: vscode.CancellationToken,
         debugLog: DebugConversationLog,
         persist?: SessionPersistence,
@@ -698,7 +990,14 @@ export class Orchestrator {
                 },
             });
 
-            // Execute
+            // Execute subtask
+            // TODO: Multi-pass integration point
+            // If subtask.taskType is set and subtask.useMultiPass is true:
+            //   1. Get multi-pass strategy: this.modelPicker.getMultiPassStrategyForTask(subtask.taskType)
+            //   2. Execute with MultiPassExecutor: this.multiPassExecutor.execute(strategy, taskType, complexity, context)
+            //   3. If result.shouldEscalate, log reason and continue to next attempt
+            //   4. Otherwise, return result.finalOutput as SubtaskResult
+            // For now, fall through to standard single-pass execution
             const result = await this.subagentManager.executeSubtask(
                 subtask,
                 modelInfo,
@@ -992,12 +1291,17 @@ export class Orchestrator {
 
     /**
      * Render a user-facing error message with category-specific guidance.
+     * If response is undefined (background mode), error is handled by BackgroundTaskManager.
      */
     private renderErrorForUser(
-        response: vscode.ChatResponseStream,
+        response: vscode.ChatResponseStream | undefined,
         classified: ClassifiedError,
         session: JohannSession
     ): void {
+        if (!response) {
+            // Background mode — error will be shown via notification
+            return;
+        }
         const planProgress = session.plan
             ? (() => {
                 const completed = session.plan.subtasks.filter(st => st.status === 'completed').length;
@@ -1072,5 +1376,9 @@ export class Orchestrator {
      */
     getMemory(): MemorySystem {
         return this.memory;
+    }
+
+    getModelPicker(): ModelPicker {
+        return this.modelPicker;
     }
 }

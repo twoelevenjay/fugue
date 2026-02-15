@@ -58,7 +58,10 @@ export class ChatProgressReporter implements ProgressReporter {
     // Public API
     // -----------------------------------------------------------------------
 
-    /** The underlying ChatResponseStream for raw writes. */
+    /**
+     * The underlying ChatResponseStream for raw writes.
+     * Always available in synchronous (chat) mode.
+     */
     get stream(): vscode.ChatResponseStream {
         return this._stream;
     }

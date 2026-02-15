@@ -4,6 +4,7 @@ import { getConfig, formatConfig, getCopilotAgentSettings, formatCopilotSettings
 import { listDailyNotes, readDailyNotes } from './dailyNotes';
 import { listSessions, getRecentSessionsSummary } from './sessionTranscript';
 import { SessionPersistence, ResumableSession } from './sessionPersistence';
+import { BackgroundTaskManager } from './backgroundTaskManager';
 
 // ============================================================================
 // DIRECTIVES — Slash command / directive parsing for Johann
@@ -77,6 +78,8 @@ export async function handleDirective(
             return await handleYolo(args, response);
         case '/resume':
             return await handleResume(args, response);
+        case '/tasks':
+            return await handleTasks(args, response);
         default:
             response.markdown(`Unknown directive: \`${command}\`. Type \`/help\` for available commands.\n`);
             return { isDirective: true, handled: false };
@@ -102,6 +105,7 @@ async function handleHelp(response: vscode.ChatResponseStream): Promise<Directiv
 | \`/sessions\` | List recent sessions |
 | \`/yolo [on\\|off]\` | Toggle YOLO mode (maximum autonomy) |
 | \`/resume [id] [message]\` | Resume a session, optionally with a course-correction message |
+| \`/tasks [task-id]\` | View background tasks |
 
 `;
 
@@ -412,6 +416,101 @@ ${yoloActive
 - \`/yolo on\` — Show how to enable maximum autonomy
 - \`/yolo off\` — Show how to restore confirmation prompts
 `;
+    response.markdown(output);
+    return { isDirective: true, handled: true, output };
+}
+
+async function handleTasks(args: string, response: vscode.ChatResponseStream): Promise<DirectiveResult> {
+    const taskManager = BackgroundTaskManager.getInstance();
+
+    // If task ID provided, show specific task
+    if (args.trim()) {
+        const taskId = args.trim();
+        const summary = taskManager.getTaskSummary(taskId);
+        response.markdown(summary);
+        return { isDirective: true, handled: true, output: summary };
+    }
+
+    // Otherwise, show all tasks
+    const allTasks = taskManager.getAllTasks();
+
+    if (allTasks.length === 0) {
+        const output = '## Background Tasks\n\nNo active or completed background tasks.\n';
+        response.markdown(output);
+        return { isDirective: true, handled: true, output };
+    }
+
+    const lines: string[] = [];
+    lines.push('## Background Tasks\n');
+
+    // Group by status
+    const running = allTasks.filter(t => t.status === 'running');
+    const paused = allTasks.filter(t => t.status === 'paused');
+    const completed = allTasks.filter(t => t.status === 'completed');
+    const failed = allTasks.filter(t => t.status === 'failed');
+    const cancelled = allTasks.filter(t => t.status === 'cancelled');
+
+    if (running.length > 0) {
+        lines.push(`### $(sync~spin) Running (${running.length})\n`);
+        for (const task of running) {
+            const progress = task.progress?.percentage ?? 0;
+            lines.push(`- **${task.sessionId}** — ${progress}%`);
+            lines.push(`  - ${task.summary}`);
+            lines.push(`  - Phase: ${task.progress?.phase || 'unknown'}`);
+            lines.push('');
+        }
+    }
+
+    if (paused.length > 0) {
+        lines.push(`### $(debug-pause) Paused (${paused.length})\n`);
+        for (const task of paused) {
+            lines.push(`- **${task.sessionId}**`);
+            lines.push(`  - ${task.summary}`);
+            lines.push('');
+        }
+    }
+
+    if (completed.length > 0) {
+        lines.push(`### $(check) Completed (${completed.length})\n`);
+        for (const task of completed) {
+            lines.push(`- **${task.sessionId}**`);
+            lines.push(`  - ${task.summary}`);
+            const startTime = new Date(task.startedAt);
+            const endTime = task.completedAt ? new Date(task.completedAt) : new Date();
+            const duration = Math.round((endTime.getTime() - startTime.getTime()) / 1000);
+            lines.push(`  - Duration: ${duration}s`);
+            lines.push('');
+        }
+    }
+
+    if (failed.length > 0) {
+        lines.push(`### $(error) Failed (${failed.length})\n`);
+        for (const task of failed) {
+            lines.push(`- **${task.sessionId}**`);
+            lines.push(`  - ${task.summary}`);
+            if (task.error) {
+                lines.push(`  - Error: ${task.error.substring(0, 100)}`);
+            }
+            lines.push('');
+        }
+    }
+
+    if (cancelled.length > 0) {
+        lines.push(`### $(circle-slash) Cancelled (${cancelled.length})\n`);
+        for (const task of cancelled) {
+            lines.push(`- **${task.sessionId}**`);
+            lines.push(`  - ${task.summary}`);
+            lines.push('');
+        }
+    }
+
+    lines.push('---\n');
+    lines.push('**Commands:**\n');
+    lines.push(`- \`/tasks <task-id>\` — View details for a specific task\n`);
+    lines.push(`- Run \`Johann: Show Background Tasks\` from command palette for interactive view\n`);
+    lines.push(`- Run \`Johann: Cancel Background Task\` to stop a running task\n`);
+
+    const output = lines.join('\n');
     response.markdown(output);
     return { isDirective: true, handled: true, output };
 }

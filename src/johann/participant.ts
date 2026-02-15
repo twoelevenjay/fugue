@@ -8,7 +8,7 @@ import {
 } from './bootstrap';
 import { assembleSystemPrompt } from './systemPrompt';
 import { handleDirective } from './directives';
-import { getConfig, onConfigChange } from './config';
+import { getConfig, onConfigChange, migrateModelSettingsFromCopilot } from './config';
 import { SessionTranscript } from './sessionTranscript';
 import { logEvent, logUserInfo, getRecentDailyNotesContext } from './dailyNotes';
 import { searchMemory, formatSearchResults } from './memorySearch';
@@ -16,6 +16,7 @@ import { discoverSkills, formatSkillsForPrompt } from './skills';
 import { HeartbeatManager } from './heartbeat';
 import { createLogger, JohannLogger } from './logger';
 import { SubagentRegistry } from './subagentRegistry';
+import { BackgroundTaskManager } from './backgroundTaskManager';
 
 // ============================================================================
 // JOHANN CHAT PARTICIPANT
@@ -153,6 +154,15 @@ export function registerJohannParticipant(
     const logger = createLogger();
     const heartbeat = new HeartbeatManager(logger);
     const disposables: vscode.Disposable[] = [];
+
+    // Attempt to migrate model settings from Copilot (one-time, backwards compatibility)
+    migrateModelSettingsFromCopilot().then(migrated => {
+        if (migrated) {
+            logger.info('Migrated model restrictions from Copilot settings to Johann settings');
+        }
+    }).catch(err => {
+        logger.warn(`Failed to migrate model settings: ${err}`);
+    });
 
     // Start heartbeat if enabled
     heartbeat.start();
@@ -337,15 +347,51 @@ export function registerJohannParticipant(
             );
             await registry.initialize();
 
-            await orchestrator.orchestrate(
-                userMessage,
-                fullContext,
-                subagentContext,
-                model,
-                response,
-                token,
-                request.toolInvocationToken
-            );
+            // Check if background mode is enabled
+            if (config.backgroundModeEnabled) {
+                // Start background orchestration and return immediately
+                const taskId = await orchestrator.startBackgroundOrchestration(
+                    userMessage,
+                    fullContext,
+                    subagentContext,
+                    model,
+                    request.toolInvocationToken
+                );
+
+                response.markdown(
+                    `🔄 **Background orchestration started**\n\n` +
+                    `Task ID: \`${taskId}\`\n\n` +
+                    `Your request is being processed in the background. ` +
+                    `You can continue working while Johann orchestrates the task.\n\n` +
+                    `**View progress:**\n` +
+                    `- Watch the status bar for live updates\n` +
+                    `- Use \`/tasks\` to view all background tasks\n` +
+                    `- Run \`Johann: Show Background Tasks\` from the command palette\n\n` +
+                    `You'll receive a notification when the task completes.`
+                );
+
+                response.button({
+                    command: 'johann.showBackgroundTasks',
+                    title: '$(list-unordered) View All Tasks',
+                });
+
+                response.button({
+                    command: 'johann.showTaskStatus',
+                    title: '$(info) View This Task',
+                    arguments: [taskId],
+                });
+            } else {
+                // Synchronous execution (current behavior)
+                await orchestrator.orchestrate(
+                    userMessage,
+                    fullContext,
+                    subagentContext,
+                    model,
+                    response,
+                    token,
+                    request.toolInvocationToken
+                );
+            }
 
             // === POST-ORCHESTRATION ===
             // Complete bootstrap if first run
@@ -518,6 +564,233 @@ export function registerJohannParticipant(
                 await vscode.window.showTextDocument(doc);
             } catch {
                 vscode.window.showInformationMessage('Johann: No debug logs found.');
+            }
+        })
+    );
+
+    // Model diagnostics command
+    disposables.push(
+        vscode.commands.registerCommand('johann.showModelDiagnostics', async () => {
+            const modelPicker = orchestrator.getModelPicker();
+            const diagnostics = await modelPicker.getModelDiagnostics();
+            
+            const panel = vscode.window.createWebviewPanel(
+                'johannModelDiagnostics',
+                'Johann Model Diagnostics',
+                vscode.ViewColumn.One,
+                {}
+            );
+
+            panel.webview.html = `<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body { 
+            font-family: var(--vscode-font-family); 
+            padding: 20px;
+            color: var(--vscode-foreground);
+            background-color: var(--vscode-editor-background);
+        }
+        pre { 
+            white-space: pre-wrap; 
+            background: var(--vscode-textCodeBlock-background);
+            padding: 10px;
+            border-radius: 4px;
+        }
+        h3 { color: var(--vscode-textLink-foreground); }
+    </style>
+</head>
+<body>
+    <pre>${diagnostics}</pre>
+</body>
+</html>`;
+        })
+    );
+
+    // Disable model picker command
+    disposables.push(
+        vscode.commands.registerCommand('johann.disableModelPicker', async () => {
+            const models = await orchestrator.getModelPicker().getAllModels();
+            
+            if (models.length === 0) {
+                vscode.window.showErrorMessage('No models available. Cannot configure fixed model.');
+                return;
+            }
+
+            const items = models.map(m => ({
+                label: m.name,
+                description: `Tier ${m.tier} — ${m.family}`,
+                detail: m.vendor,
+                modelInfo: m,
+            }));
+
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Select the fixed model to use when picker is disabled',
+                title: 'Disable Model Picker - Choose Fixed Model',
+            });
+
+            if (selected) {
+                const config = vscode.workspace.getConfiguration('johann');
+                await config.update('modelPickerEnabled', false, vscode.ConfigurationTarget.Workspace);
+                await config.update('fixedModel', selected.modelInfo.family, vscode.ConfigurationTarget.Workspace);
+                
+                vscode.window.showInformationMessage(
+                    `Model picker disabled. Johann will now use: ${selected.label}`
+                );
+            }
+        })
+    );
+
+    // Enable model picker command
+    disposables.push(
+        vscode.commands.registerCommand('johann.enableModelPicker', async () => {
+            const config = vscode.workspace.getConfiguration('johann');
+            await config.update('modelPickerEnabled', true, vscode.ConfigurationTarget.Workspace);
+            
+            vscode.window.showInformationMessage('Model picker enabled. Johann will intelligently select models based on task complexity.');
+        })
+    );
+
+    // Background task commands
+    const taskManager = BackgroundTaskManager.getInstance();
+
+    disposables.push(
+        vscode.commands.registerCommand('johann.showBackgroundTasks', async () => {
+            const allTasks = taskManager.getAllTasks();
+
+            if (allTasks.length === 0) {
+                vscode.window.showInformationMessage('Johann: No background tasks.');
+                return;
+            }
+
+            const items = allTasks.map(task => {
+                const statusIcon = 
+                    task.status === 'running' ? '$(sync~spin)' :
+                    task.status === 'completed' ? '$(check)' :
+                    task.status === 'failed' ? '$(error)' :
+                    task.status === 'cancelled' ? '$(circle-slash)' :
+                    '$(debug-pause)';
+
+                const progress = task.progress?.percentage ?? 0;
+                const phase = task.progress?.phase ?? 'Starting';
+
+                return {
+                    label: `${statusIcon} ${task.sessionId}`,
+                    description: `${task.status} — ${progress}%`,
+                    detail: phase,
+                    task,
+                };
+            });
+
+            const selected = await vscode.window.showQuickPick(items, {
+                placeHolder: 'Select a background task to view details',
+            });
+
+            if (selected) {
+                // Show task details in a new document
+                const summary = taskManager.getTaskSummary(selected.task.id);
+                const doc = await vscode.workspace.openTextDocument({
+                    content: summary,
+                    language: 'markdown',
+                });
+                await vscode.window.showTextDocument(doc);
+            }
+        })
+    );
+
+    disposables.push(
+        vscode.commands.registerCommand('johann.showTaskStatus', async (taskId?: string) => {
+            if (!taskId) {
+                // Prompt user to select a task
+                const allTasks = taskManager.getAllTasks();
+                if (allTasks.length === 0) {
+                    vscode.window.showInformationMessage('Johann: No background tasks.');
+                    return;
+                }
+
+                const items = allTasks.map(task => ({
+                    label: task.sessionId,
+                    description: task.status,
+                    taskId: task.id,
+                }));
+
+                const selected = await vscode.window.showQuickPick(items, {
+                    placeHolder: 'Select a task to view status',
+                });
+
+                if (!selected) {
+                    return;
+                }
+
+                taskId = selected.taskId;
+            }
+
+            const summary = taskManager.getTaskSummary(taskId);
+            const doc = await vscode.workspace.openTextDocument({
+                content: summary,
+                language: 'markdown',
+            });
+            await vscode.window.showTextDocument(doc);
+        })
+    );
+
+    disposables.push(
+        vscode.commands.registerCommand('johann.cancelTask', async (taskId?: string) => {
+            if (!taskId) {
+                // Prompt user to select a running task
+                const allTasks = taskManager.getAllTasks()
+                    .filter(t => t.status === 'running' || t.status === 'paused');
+
+                if (allTasks.length === 0) {
+                    vscode.window.showInformationMessage('Johann: No active tasks to cancel.');
+                    return;
+                }
+
+                const items = allTasks.map(task => ({
+                    label: task.sessionId,
+                    description: `${task.status} — ${task.progress?.percentage ?? 0}%`,
+                    taskId: task.id,
+                }));
+
+                const selected = await vscode.window.showQuickPick(items, {
+                    placeHolder: 'Select a task to cancel',
+                });
+
+                if (!selected) {
+                    return;
+                }
+
+                taskId = selected.taskId;
+            }
+
+            const answer = await vscode.window.showWarningMessage(
+                `Cancel task ${taskId}?`,
+                { modal: true },
+                'Cancel Task'
+            );
+
+            if (answer === 'Cancel Task') {
+                const cancelled = await taskManager.cancelTask(taskId);
+                if (cancelled) {
+                    vscode.window.showInformationMessage(`Johann: Task ${taskId} cancelled.`);
+                } else {
+                    vscode.window.showErrorMessage(`Johann: Failed to cancel task ${taskId}.`);
+                }
+            }
+        })
+    );
+
+    disposables.push(
+        vscode.commands.registerCommand('johann.clearCompletedTasks', async () => {
+            const answer = await vscode.window.showWarningMessage(
+                'Clear all completed background tasks?',
+                { modal: true },
+                'Clear'
+            );
+
+            if (answer === 'Clear') {
+                await taskManager.clearCompletedTasks();
+                vscode.window.showInformationMessage('Johann: Completed tasks cleared.');
             }
         })
     );
