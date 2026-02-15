@@ -33,6 +33,7 @@ export type DebugPhase =
     | 'review'
     | 'merge'
     | 'worktree'
+    | 'resume'
     | 'other';
 
 /**

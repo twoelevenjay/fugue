@@ -35,6 +35,20 @@ import { SubagentRegistry } from './subagentRegistry';
 const JOHANN_PARTICIPANT_ID = 'johann';
 
 /**
+ * Metadata returned from a Johann chat response.
+ * Used by the followup provider to suggest contextual next steps.
+ */
+interface JohannChatResult extends vscode.ChatResult {
+    metadata: {
+        command: string;
+        /** Whether the orchestration completed successfully. */
+        success?: boolean;
+        /** Brief description of what was done. */
+        summary?: string;
+    };
+}
+
+/**
  * Build basic workspace context to inject into the orchestrator.
  */
 async function getWorkspaceContext(): Promise<string> {
@@ -161,7 +175,7 @@ export function registerJohannParticipant(
             chatContext: vscode.ChatContext,
             response: vscode.ChatResponseStream,
             token: vscode.CancellationToken
-        ) => {
+        ): Promise<JohannChatResult> => {
             const userMessage = request.prompt.trim();
 
             if (!userMessage) {
@@ -176,14 +190,32 @@ export function registerJohannParticipant(
                     'Type `/help` for available directives.\n' +
                     'All decisions are recorded in `.vscode/johann/` for continuity.\n'
                 );
-                return;
+                return { metadata: { command: 'help' } };
             }
 
             // === DIRECTIVE HANDLING ===
             const directiveResult = await handleDirective(userMessage, response);
             if (directiveResult.isDirective) {
                 logger.info(`Directive handled: ${userMessage.split(' ')[0]}`);
-                return;
+
+                // If /resume returned a session to resume, execute it
+                if (directiveResult.resumeSession) {
+                    const model = await getModel(request);
+                    if (!model) {
+                        response.markdown('**Error:** No language models available for resume.\n');
+                        return { metadata: { command: 'resume', success: false } };
+                    }
+                    const resumed = await orchestrator.resumeSession(
+                        directiveResult.resumeSession,
+                        model,
+                        response,
+                        token
+                    );
+                    if (!resumed) {
+                        response.markdown('Nothing to resume — all subtasks already completed.\n');
+                    }
+                }
+                return { metadata: { command: 'directive' } };
             }
 
             // === MODEL SETUP ===
@@ -193,7 +225,7 @@ export function registerJohannParticipant(
                     '**Error:** No language models available. ' +
                     'Make sure you have GitHub Copilot active and a model selected.\n'
                 );
-                return;
+                return { metadata: { command: 'orchestrate', success: false } };
             }
 
             // === BOOTSTRAP & SYSTEM PROMPT ===
@@ -311,7 +343,8 @@ export function registerJohannParticipant(
                 subagentContext,
                 model,
                 response,
-                token
+                token,
+                request.toolInvocationToken
             );
 
             // === POST-ORCHESTRATION ===
@@ -330,10 +363,65 @@ export function registerJohannParticipant(
             // Log completion
             await logEvent('Request completed', `Finished: ${userMessage.substring(0, 100)}`);
             logger.info(`Request completed: ${userMessage.substring(0, 80)}`);
+
+            return {
+                metadata: {
+                    command: 'orchestrate',
+                    success: true,
+                    summary: userMessage.substring(0, 200),
+                },
+            };
         }
     );
 
     participant.iconPath = new vscode.ThemeIcon('hubot');
+
+    // === FOLLOWUP PROVIDER ===
+    // Suggests contextual next steps after a response, like native Copilot.
+    participant.followupProvider = {
+        provideFollowups(
+            result: JohannChatResult,
+            _context: vscode.ChatContext,
+            _token: vscode.CancellationToken
+        ): vscode.ChatFollowup[] {
+            const followups: vscode.ChatFollowup[] = [];
+
+            if (result.metadata?.command === 'orchestrate') {
+                if (result.metadata.success) {
+                    followups.push({
+                        prompt: 'please continue',
+                        label: 'Continue where you left off',
+                    });
+                    followups.push({
+                        prompt: '/resume',
+                        label: 'Resume last session',
+                    });
+                } else {
+                    followups.push({
+                        prompt: '/resume',
+                        label: 'Retry from last checkpoint',
+                    });
+                }
+            }
+
+            if (result.metadata?.command === 'help') {
+                followups.push({
+                    prompt: '/status',
+                    label: 'Show status',
+                });
+            }
+
+            return followups;
+        },
+    };
+
+    // === FEEDBACK LOGGING ===
+    disposables.push(
+        participant.onDidReceiveFeedback((feedback: vscode.ChatResultFeedback) => {
+            logger.info(`Chat feedback: ${feedback.kind === 1 ? 'helpful' : 'unhelpful'}`);
+        })
+    );
+
     disposables.push(participant);
 
     // Register commands
@@ -388,6 +476,49 @@ export function registerJohannParticipant(
     disposables.push(
         vscode.commands.registerCommand('johann.showLog', () => {
             logger.show();
+        })
+    );
+
+    disposables.push(
+        vscode.commands.registerCommand('johann.showDebugLog', async (uri?: vscode.Uri) => {
+            if (uri) {
+                // Opened via button with URI argument
+                try {
+                    const doc = await vscode.workspace.openTextDocument(uri);
+                    await vscode.window.showTextDocument(doc);
+                    return;
+                } catch {
+                    // Fall through to directory scan
+                }
+            }
+
+            // Fallback: find the most recent debug log
+            const folders = vscode.workspace.workspaceFolders;
+            if (!folders) {
+                vscode.window.showInformationMessage('Johann: No workspace open.');
+                return;
+            }
+
+            const debugDir = vscode.Uri.joinPath(folders[0].uri, '.vscode', 'johann', 'debug');
+            try {
+                const entries = await vscode.workspace.fs.readDirectory(debugDir);
+                const mdFiles = entries
+                    .filter(([name, type]) => type === vscode.FileType.File && name.endsWith('.md'))
+                    .map(([name]) => name)
+                    .sort()
+                    .reverse();
+
+                if (mdFiles.length === 0) {
+                    vscode.window.showInformationMessage('Johann: No debug logs found.');
+                    return;
+                }
+
+                const logUri = vscode.Uri.joinPath(debugDir, mdFiles[0]);
+                const doc = await vscode.workspace.openTextDocument(logUri);
+                await vscode.window.showTextDocument(doc);
+            } catch {
+                vscode.window.showInformationMessage('Johann: No debug logs found.');
+            }
         })
     );
 

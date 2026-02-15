@@ -194,6 +194,384 @@ function formatWorkspaceContext(ctx: WorkspaceContext): string {
 }
 
 // ============================================================================
+// CODEBASE ANALYSIS FOR MISSING INFO
+// ============================================================================
+
+interface ResolutionAttempt {
+    question: PendingQuestion;
+    resolved: boolean;
+    answer?: string;
+    source?: string; // 'codebase' or 'knowledge'
+}
+
+/**
+ * Attempt to resolve missing information by analyzing the codebase.
+ * Uses semantic and keyword search to find relevant files, then asks LLM to extract answers.
+ */
+async function analyzeCodebaseForMissingInfo(
+    missingInfo: PendingQuestion[],
+    contextPacket: ContextPacket,
+    workspaceContext: string,
+    model: vscode.LanguageModelChat,
+    token: vscode.CancellationToken,
+    response: vscode.ChatResponseStream
+): Promise<ResolutionAttempt[]> {
+    const attempts: ResolutionAttempt[] = [];
+
+    response.markdown('🔍 Searching codebase for answers before asking questions...\n\n');
+
+    for (const question of missingInfo) {
+        if (token.isCancellationRequested) { break; }
+
+        // Build search query from question and field
+        const searchTerms = extractSearchTerms(question.question, question.field, contextPacket);
+        
+        response.markdown(`- Analyzing: "${question.question.substring(0, 80)}${question.question.length > 80 ? '...' : ''}"\n`);
+
+        // Search codebase
+        const codebaseFindings = await searchCodebaseForAnswer(searchTerms, token);
+
+        if (codebaseFindings.length > 0) {
+            // Ask LLM to analyze findings and attempt resolution
+            const resolution = await attemptCodebaseResolution(
+                question,
+                codebaseFindings,
+                contextPacket,
+                workspaceContext,
+                model,
+                token
+            );
+
+            attempts.push(resolution);
+        } else {
+            // No codebase findings
+            attempts.push({
+                question,
+                resolved: false,
+            });
+        }
+    }
+
+    response.markdown('\n');
+    return attempts;
+}
+
+/**
+ * Extract search terms from a question to find relevant code.
+ */
+function extractSearchTerms(question: string, field: string, contextPacket: ContextPacket): string[] {
+    const terms: string[] = [];
+    
+    // Extract quoted terms
+    const quotedMatch = question.match(/"([^"]+)"/g);
+    if (quotedMatch) {
+        terms.push(...quotedMatch.map(q => q.replace(/"/g, '')));
+    }
+
+    // Extract technical terms (camelCase, PascalCase, snake_case, kebab-case)
+    const techTerms = question.match(/\b[a-z]+[A-Z][a-zA-Z]*\b|\b[A-Z][a-z]+(?:[A-Z][a-z]+)*\b|\b[a-z]+_[a-z_]+\b|\b[a-z]+-[a-z-]+\b/g);
+    if (techTerms) {
+        terms.push(...techTerms);
+    }
+
+    // Extract from context packet (e.g., if question is about a feature mentioned in goal/currentState)
+    const contextText = `${contextPacket.goal} ${contextPacket.currentState} ${contextPacket.additionalContext}`;
+    const contextWords = contextText.split(/\s+/).filter(w => w.length > 3);
+    const questionWords = question.toLowerCase().split(/\s+/);
+    
+    // Find overlapping significant words
+    const overlapping = contextWords.filter(w => 
+        questionWords.some(qw => qw.includes(w.toLowerCase()) || w.toLowerCase().includes(qw))
+    );
+    terms.push(...overlapping.slice(0, 3));
+
+    // Add the field name as a hint
+    if (field && field !== 'transcription') {
+        terms.push(field);
+    }
+
+    return [...new Set(terms)].filter(t => t.length > 2);
+}
+
+/**
+ * Search the codebase using semantic and grep search.
+ */
+async function searchCodebaseForAnswer(
+    searchTerms: string[],
+    token: vscode.CancellationToken
+): Promise<Array<{ path: string; content: string; source: string }>> {
+    const findings: Array<{ path: string; content: string; source: string }> = new Map();
+
+    if (searchTerms.length === 0) { return []; }
+
+    // Semantic search for the combined query
+    const semanticQuery = searchTerms.join(' ');
+    try {
+        const semanticResults = await vscode.lm.tools.search(semanticQuery);
+        for (const result of semanticResults.slice(0, 3)) {
+            if (token.isCancellationRequested) { break; }
+            if (result.uri.scheme === 'file') {
+                const content = await readFileContent(result.uri, 3000);
+                const key = result.uri.fsPath;
+                if (!findings.has(key)) {
+                    findings.set(key, {
+                        path: vscode.workspace.asRelativePath(result.uri),
+                        content,
+                        source: 'semantic',
+                    });
+                }
+            }
+        }
+    } catch {
+        // Semantic search failed, continue
+    }
+
+    // Grep search for specific terms
+    for (const term of searchTerms.slice(0, 3)) {
+        if (token.isCancellationRequested) { break; }
+        try {
+            const files = await vscode.workspace.findFiles(
+                '**/*.{ts,js,json,md,txt}',
+                '**/node_modules/**',
+                5
+            );
+
+            for (const file of files) {
+                const content = await readFileContent(file, 3000);
+                if (content.toLowerCase().includes(term.toLowerCase())) {
+                    const key = file.fsPath;
+                    if (!findings.has(key)) {
+                        findings.set(key, {
+                            path: vscode.workspace.asRelativePath(file),
+                            content,
+                            source: 'grep',
+                        });
+                    }
+                }
+                if (findings.size >= 5) { break; }
+            }
+        } catch {
+            // Continue
+        }
+        if (findings.size >= 5) { break; }
+    }
+
+    return Array.from(findings.values());
+}
+
+/**
+ * Ask LLM to analyze codebase findings and attempt to answer the question.
+ */
+async function attemptCodebaseResolution(
+    question: PendingQuestion,
+    findings: Array<{ path: string; content: string; source: string }>,
+    contextPacket: ContextPacket,
+    workspaceContext: string,
+    model: vscode.LanguageModelChat,
+    token: vscode.CancellationToken
+): Promise<ResolutionAttempt> {
+    const findingsText = findings.map(f => 
+        `--- ${f.path} (found via ${f.source}) ---\n${f.content}`
+    ).join('\n\n');
+
+    const resolutionPrompt = `You are analyzing codebase files to answer a missing information question.
+
+QUESTION: ${question.question}
+FIELD: ${question.field}
+
+CONTEXT FROM USER'S REQUEST:
+Goal: ${contextPacket.goal}
+Current State: ${contextPacket.currentState}
+${contextPacket.additionalContext ? `Additional Context: ${contextPacket.additionalContext}` : ''}
+
+CODEBASE FILES FOUND:
+${findingsText}
+
+${workspaceContext ? `WORKSPACE CONTEXT:\n${workspaceContext}\n\n` : ''}
+
+TASK: Analyze the codebase files and determine if they contain enough information to answer the question.
+
+CRITICAL RULES:
+1. If the files clearly answer the question, provide the answer.
+2. If the files provide partial information but not enough to fully answer, respond with "PARTIAL" and explain what's unclear.
+3. If the files don't answer the question, respond with "UNRESOLVED".
+4. DO NOT GUESS or make assumptions. Only answer if the codebase explicitly provides the information.
+5. DO NOT use training knowledge here - only what's in the codebase files.
+
+Return JSON:
+{
+  "resolved": true/false,
+  "answer": "The answer from the codebase, or empty string if unresolved",
+  "confidence": "HIGH" or "PARTIAL" or "UNRESOLVED",
+  "reasoning": "Brief explanation of why you could/couldn't answer from the codebase"
+}
+
+Return ONLY valid JSON.`;
+
+    try {
+        const result = await sendToLLM(model, resolutionPrompt, '', token);
+        const parsed = parseJSON<{
+            resolved: boolean;
+            answer: string;
+            confidence: string;
+            reasoning: string;
+        }>(result);
+
+        if (parsed && parsed.resolved && parsed.confidence === 'HIGH' && parsed.answer) {
+            return {
+                question,
+                resolved: true,
+                answer: parsed.answer,
+                source: 'codebase',
+            };
+        }
+    } catch {
+        // Resolution failed
+    }
+
+    return {
+        question,
+        resolved: false,
+    };
+}
+
+/**
+ * Attempt to resolve missing information using training knowledge (only if unambiguous).
+ */
+async function attemptKnowledgeResolution(
+    unresolvedQuestions: PendingQuestion[],
+    contextPacket: ContextPacket,
+    model: vscode.LanguageModelChat,
+    token: vscode.CancellationToken,
+    response: vscode.ChatResponseStream
+): Promise<ResolutionAttempt[]> {
+    const attempts: ResolutionAttempt[] = [];
+
+    if (unresolvedQuestions.length === 0) { return attempts; }
+
+    response.markdown('🧠 Attempting knowledge resolution (only unambiguous facts)...\n\n');
+
+    for (const question of unresolvedQuestions) {
+        if (token.isCancellationRequested) { break; }
+
+        const knowledgePrompt = `You are attempting to answer a question using ONLY your training knowledge.
+
+QUESTION: ${question.question}
+FIELD: ${question.field}
+
+CONTEXT FROM USER'S REQUEST:
+Goal: ${contextPacket.goal}
+Current State: ${contextPacket.currentState}
+
+CRITICAL RULES:
+1. ONLY answer if the question asks for a FACTUAL, UNAMBIGUOUS, WIDELY-ESTABLISHED fact.
+   Examples of what you CAN answer:
+   - "Is React compatible with TypeScript?" → YES (unambiguous fact)
+   - "What is the default port for PostgreSQL?" → 5432 (unambiguous fact)
+   - "Does npm support workspaces?" → YES (unambiguous fact)
+
+2. DO NOT answer if:
+   - The question requires project-specific knowledge (file paths, variable names, architecture decisions)
+   - There are multiple possible answers depending on context
+   - The answer depends on versions, configurations, or implementation details
+   - You are not 100% certain
+   - The question involves compatibility between specific versions or less common packages
+
+3. If you cannot answer with absolute certainty, respond with "UNRESOLVED".
+4. DO NOT GUESS. DO NOT ASSUME. If in doubt, mark as UNRESOLVED.
+
+Return JSON:
+{
+  "resolved": true/false,
+  "answer": "The unambiguous factual answer, or empty string if unresolved",
+  "certainty": "ABSOLUTE" or "UNCERTAIN",
+  "reasoning": "Brief explanation"
+}
+
+Return ONLY valid JSON.`;
+
+        try {
+            const result = await sendToLLM(model, knowledgePrompt, '', token);
+            const parsed = parseJSON<{
+                resolved: boolean;
+                answer: string;
+                certainty: string;
+                reasoning: string;
+            }>(result);
+
+            if (parsed && parsed.resolved && parsed.certainty === 'ABSOLUTE' && parsed.answer) {
+                response.markdown(`  ✓ Resolved: "${question.question.substring(0, 60)}..." from training knowledge\n`);
+                attempts.push({
+                    question,
+                    resolved: true,
+                    answer: parsed.answer,
+                    source: 'knowledge',
+                });
+            } else {
+                attempts.push({
+                    question,
+                    resolved: false,
+                });
+            }
+        } catch {
+            attempts.push({
+                question,
+                resolved: false,
+            });
+        }
+    }
+
+    response.markdown('\n');
+    return attempts;
+}
+
+/**
+ * Merge resolved answers into the context packet.
+ */
+async function mergeResolvedAnswers(
+    contextPacket: ContextPacket,
+    resolvedAttempts: ResolutionAttempt[],
+    model: vscode.LanguageModelChat,
+    token: vscode.CancellationToken
+): Promise<ContextPacket> {
+    if (resolvedAttempts.length === 0) { return contextPacket; }
+
+    const answersText = resolvedAttempts.map(a => 
+        `Q: ${a.question.question}\nField: ${a.question.field}\nAnswer (from ${a.source}): ${a.answer}`
+    ).join('\n\n');
+
+    const mergePrompt = `You are integrating newly discovered information into a context packet.
+
+EXISTING CONTEXT PACKET:
+${JSON.stringify(contextPacket, null, 2)}
+
+NEWLY RESOLVED INFORMATION (from codebase analysis or factual knowledge):
+${answersText}
+
+TASK: Update the context packet by adding the new information to the appropriate fields.
+- If a field was empty, fill it in
+- If adding to an array (constraints, inputsArtifacts, etc.), append the new items
+- If adding to additionalContext, append the new information
+- Preserve all existing information
+- DO NOT duplicate information
+
+Return the updated context packet as JSON with the same structure.
+Return ONLY valid JSON.`;
+
+    try {
+        const result = await sendToLLM(model, mergePrompt, '', token);
+        const parsed = parseJSON<ContextPacket>(result);
+        if (parsed) {
+            return parsed;
+        }
+    } catch {
+        // Fallback: return original
+    }
+
+    return contextPacket;
+}
+
+// ============================================================================
 // LLM INTERACTION
 // ============================================================================
 
@@ -488,13 +866,30 @@ CRITICAL RULES - PRESERVE ALL DISTINCT INFORMATION:
    - Remove filler: um, uh, you know, like, basically
    - Fix obvious STT artifacts: "type script" → "TypeScript", "get hub" → "GitHub" (note in suspectedTranscriptionIssues)
 7. DO NOT REMOVE: distinct facts, examples, analogies, relationships, technical concepts, or anything that adds context - even if it could be stated more briefly.
-8. Only add to missingInfo if information is GENUINELY unclear or missing and cannot be inferred.
-9. Questions must be SPECIFIC to their request, not generic.
-10. If the output format is implied (e.g., "implement hooks" implies code + documentation), fill it in.
-11. isComplete should be true if you have enough info to write a good prompt.
-12. DO NOT ask about file extensions, programming languages, or obvious technical details.
-13. DO NOT GUESS on ambiguous transcription issues — ask the user instead.
-14. Return ONLY valid JSON, no markdown, no explanations.`;
+
+CRITICAL RULES - MISSING INFORMATION:
+8. BE EXTREMELY CONSERVATIVE about adding questions to missingInfo. After you extract the context packet, the system will automatically:
+   - Search the codebase for answers (files, source code, configs)
+   - Attempt to resolve using certain, unambiguous factual knowledge
+   - ONLY ask the user as a last resort
+9. Only add to missingInfo if information is GENUINELY unclear or missing and CANNOT be inferred from:
+   - The user's description (even if implied)
+   - The workspace context provided
+   - Standard practices and conventions
+   - Logical defaults
+10. Questions must be SPECIFIC to their request, not generic. BAD: "What language?" GOOD: "You mentioned the authentication system - does it use JWT or session-based tokens?"
+11. DO NOT ask about:
+   - File extensions or programming languages if detectable from context
+   - Framework compatibility (this will be checked via knowledge resolution)
+   - Standard configurations or defaults
+   - Implementation details that are typically decided during coding
+   - Version numbers unless critical to the task
+12. If the output format is implied (e.g., "implement hooks" implies code + documentation), fill it in - don't ask.
+13. isComplete should be true if you have enough info to write a good prompt without additional clarification.
+14. DO NOT GUESS on ambiguous transcription issues — those SHOULD go in missingInfo with field "transcription".
+15. Return ONLY valid JSON, no markdown, no explanations.
+
+REMEMBER: The user wants minimal interruptions. Extract everything you can, mark as complete if possible, and only add essential questions to missingInfo.`;
 }
 
 function getCompilePrompt(workspaceContext: string): string {
@@ -761,6 +1156,34 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(copyCommand);
 
+    // Register send to Johann command
+    const sendToJohannCommand = vscode.commands.registerCommand('ramble.sendToJohann', async () => {
+        const lastPrompt = context.workspaceState.get<string>(LAST_PROMPT_KEY);
+        if (lastPrompt) {
+            await vscode.commands.executeCommand('workbench.action.chat.open', {
+                query: `@johann ${lastPrompt}`
+            });
+        } else {
+            vscode.window.showWarningMessage('No compiled prompt available yet.');
+        }
+    });
+
+    context.subscriptions.push(sendToJohannCommand);
+
+    // Register send to Copilot command
+    const sendToCopilotCommand = vscode.commands.registerCommand('ramble.sendToCopilot', async () => {
+        const lastPrompt = context.workspaceState.get<string>(LAST_PROMPT_KEY);
+        if (lastPrompt) {
+            await vscode.commands.executeCommand('workbench.action.chat.open', {
+                query: lastPrompt
+            });
+        } else {
+            vscode.window.showWarningMessage('No compiled prompt available yet.');
+        }
+    });
+
+    context.subscriptions.push(sendToCopilotCommand);
+
     // Register refresh context command
     const refreshCommand = vscode.commands.registerCommand('ramble.refreshContext', async () => {
         const workspaceCtx = await gatherWorkspaceContext();
@@ -848,7 +1271,7 @@ export function activate(context: vscode.ExtensionContext) {
                 session.contextPacket = parsed.contextPacket;
 
                 // Validate and filter missingInfo — drop any entries with undefined fields
-                const validMissingInfo = (parsed.missingInfo || []).filter(
+                let validMissingInfo = (parsed.missingInfo || []).filter(
                     (q): q is PendingQuestion =>
                         q != null &&
                         typeof q.question === 'string' && q.question.length > 0 &&
@@ -858,17 +1281,80 @@ export function activate(context: vscode.ExtensionContext) {
                     index: typeof q.index === 'number' ? q.index : idx + 1,
                 }));
 
+                // 3-TIER RESOLUTION: Try to resolve missing info before asking user
                 if (!parsed.isComplete && validMissingInfo.length > 0 && session.questionRound < MAX_QUESTION_ROUNDS) {
-                    session.pendingQuestions = validMissingInfo;
-                    session.questionRound++;
-                    session.state = 'WAITING_FOR_ANSWERS';
-                    await context.workspaceState.update(STATE_KEY, session);
+                    // Tier 1: Codebase analysis
+                    const codebaseAttempts = await analyzeCodebaseForMissingInfo(
+                        validMissingInfo,
+                        session.contextPacket,
+                        workspaceContext,
+                        model,
+                        token,
+                        response
+                    );
 
-                    response.markdown('Thanks! A few more clarifications needed:\n\n');
-                    for (const q of validMissingInfo) {
-                        response.markdown(`**Q${q.index}:** ${q.question}\n\n`);
+                    // Merge resolved answers into context packet
+                    const codebaseResolved = codebaseAttempts.filter(a => a.resolved);
+                    if (codebaseResolved.length > 0) {
+                        response.markdown(`✓ Resolved ${codebaseResolved.length} question(s) from codebase\n\n`);
+                        // Update context packet with resolved answers
+                        session.contextPacket = await mergeResolvedAnswers(
+                            session.contextPacket,
+                            codebaseResolved,
+                            model,
+                            token
+                        );
                     }
-                    return;
+
+                    // Tier 2: Knowledge resolution (for unresolved questions only)
+                    const unresolvedAfterCodebase = codebaseAttempts
+                        .filter(a => !a.resolved)
+                        .map(a => a.question);
+
+                    let stillUnresolved = unresolvedAfterCodebase;
+                    if (unresolvedAfterCodebase.length > 0) {
+                        const knowledgeAttempts = await attemptKnowledgeResolution(
+                            unresolvedAfterCodebase,
+                            session.contextPacket,
+                            model,
+                            token,
+                            response
+                        );
+
+                        const knowledgeResolved = knowledgeAttempts.filter(a => a.resolved);
+                        if (knowledgeResolved.length > 0) {
+                            response.markdown(`✓ Resolved ${knowledgeResolved.length} question(s) from training knowledge\n\n`);
+                            session.contextPacket = await mergeResolvedAnswers(
+                                session.contextPacket,
+                                knowledgeResolved,
+                                model,
+                                token
+                            );
+                        }
+
+                        stillUnresolved = knowledgeAttempts
+                            .filter(a => !a.resolved)
+                            .map(a => a.question);
+                    }
+
+                    // Tier 3: Ask user (only for still unresolved)
+                    if (stillUnresolved.length > 0) {
+                        session.pendingQuestions = stillUnresolved.map((q, idx) => ({
+                            ...q,
+                            index: idx + 1,
+                        }));
+                        session.questionRound++;
+                        session.state = 'WAITING_FOR_ANSWERS';
+                        await context.workspaceState.update(STATE_KEY, session);
+
+                        response.markdown('I still need a few clarifications:\n\n');
+                        for (const q of session.pendingQuestions) {
+                            response.markdown(`**Q${q.index}:** ${q.question}\n\n`);
+                        }
+                        return;
+                    }
+
+                    // All questions resolved! Continue to compilation
                 }
 
                 // Complete - compile the prompt
@@ -886,7 +1372,15 @@ export function activate(context: vscode.ExtensionContext) {
                 response.markdown('\n---\n\n## Compiled Prompt\n\n```text\n' + compiledPrompt + '\n```\n\n');
                 response.button({
                     command: 'ramble.copyLast',
-                    title: 'Copy compiled prompt',
+                    title: '📋 Copy prompt',
+                });
+                response.button({
+                    command: 'ramble.sendToJohann',
+                    title: '🤖 Send to @johann',
+                });
+                response.button({
+                    command: 'ramble.sendToCopilot',
+                    title: '💬 Send to Copilot',
                 });
                 return { metadata: { compiled: true, prompt: compiledPrompt } };
 
@@ -945,7 +1439,7 @@ export function activate(context: vscode.ExtensionContext) {
             response.markdown(formatContextPacketMarkdown(parsed.contextPacket));
 
             // Validate missingInfo — drop entries with undefined/empty fields
-            const validMissing = (parsed.missingInfo || []).filter(
+            let validMissing = (parsed.missingInfo || []).filter(
                 (q): q is PendingQuestion =>
                     q != null &&
                     typeof q.question === 'string' && q.question.length > 0 &&
@@ -955,18 +1449,83 @@ export function activate(context: vscode.ExtensionContext) {
                 index: typeof q.index === 'number' ? q.index : idx + 1,
             }));
 
+            // 3-TIER RESOLUTION: Try to resolve missing info before asking user
             if (!parsed.isComplete && validMissing.length > 0) {
-                session.pendingQuestions = validMissing;
-                session.questionRound = 1;
-                session.state = 'WAITING_FOR_ANSWERS';
-                await context.workspaceState.update(STATE_KEY, session);
+                response.markdown('\n---\n\n');
 
-                response.markdown('\n---\n\n**I need a few clarifications:**\n\n');
-                for (const q of validMissing) {
-                    response.markdown(`**Q${q.index}:** ${q.question}\n\n`);
+                // Tier 1: Codebase analysis
+                const codebaseAttempts = await analyzeCodebaseForMissingInfo(
+                    validMissing,
+                    session.contextPacket,
+                    workspaceContext,
+                    model,
+                    token,
+                    response
+                );
+
+                // Merge resolved answers into context packet
+                const codebaseResolved = codebaseAttempts.filter(a => a.resolved);
+                if (codebaseResolved.length > 0) {
+                    response.markdown(`✓ Resolved ${codebaseResolved.length} question(s) from codebase\n\n`);
+                    session.contextPacket = await mergeResolvedAnswers(
+                        session.contextPacket,
+                        codebaseResolved,
+                        model,
+                        token
+                    );
                 }
-                response.markdown('\nJust reply with your answers - I\'ll figure out which question each answer is for.\n');
-                return;
+
+                // Tier 2: Knowledge resolution (for unresolved questions only)
+                const unresolvedAfterCodebase = codebaseAttempts
+                    .filter(a => !a.resolved)
+                    .map(a => a.question);
+
+                let stillUnresolved = unresolvedAfterCodebase;
+                if (unresolvedAfterCodebase.length > 0) {
+                    const knowledgeAttempts = await attemptKnowledgeResolution(
+                        unresolvedAfterCodebase,
+                        session.contextPacket,
+                        model,
+                        token,
+                        response
+                    );
+
+                    const knowledgeResolved = knowledgeAttempts.filter(a => a.resolved);
+                    if (knowledgeResolved.length > 0) {
+                        response.markdown(`✓ Resolved ${knowledgeResolved.length} question(s) from training knowledge\n\n`);
+                        session.contextPacket = await mergeResolvedAnswers(
+                            session.contextPacket,
+                            knowledgeResolved,
+                            model,
+                            token
+                        );
+                    }
+
+                    stillUnresolved = knowledgeAttempts
+                        .filter(a => !a.resolved)
+                        .map(a => a.question);
+                }
+
+                // Tier 3: Ask user (only for still unresolved)
+                if (stillUnresolved.length > 0) {
+                    session.pendingQuestions = stillUnresolved.map((q, idx) => ({
+                        ...q,
+                        index: idx + 1,
+                    }));
+                    session.questionRound = 1;
+                    session.state = 'WAITING_FOR_ANSWERS';
+                    await context.workspaceState.update(STATE_KEY, session);
+
+                    response.markdown('**I still need a few clarifications:**\n\n');
+                    for (const q of session.pendingQuestions) {
+                        response.markdown(`**Q${q.index}:** ${q.question}\n\n`);
+                    }
+                    response.markdown('\nJust reply with your answers - I\'ll figure out which question each answer is for.\n');
+                    return;
+                }
+
+                // All questions resolved! Continue to compilation
+                response.markdown('✓ All questions resolved automatically!\n\n');
             }
 
             // Complete - compile immediately
@@ -983,7 +1542,15 @@ export function activate(context: vscode.ExtensionContext) {
             response.markdown('## Compiled Prompt\n\n```text\n' + compiledPrompt + '\n```\n\n');
             response.button({
                 command: 'ramble.copyLast',
-                title: 'Copy compiled prompt',
+                title: '📋 Copy prompt',
+            });
+            response.button({
+                command: 'ramble.sendToJohann',
+                title: '🤖 Send to @johann',
+            });
+            response.button({
+                command: 'ramble.sendToCopilot',
+                title: '💬 Send to Copilot',
             });
 
             return { metadata: { compiled: true, prompt: compiledPrompt } };
@@ -993,19 +1560,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
     });
 
-    // Add followup provider: after compiling a prompt, offer to send it to @johann
-    participant.followupProvider = {
-        provideFollowups(result: vscode.ChatResult, _context: vscode.ChatContext, _token: vscode.CancellationToken) {
-            if (result.metadata?.compiled && result.metadata?.prompt) {
-                return [{
-                    prompt: result.metadata.prompt as string,
-                    label: 'Send compiled prompt to @johann',
-                    participant: 'johann',
-                }];
-            }
-            return [];
-        }
-    };
+    // Note: Followup provider removed - buttons are now shown after prompt compilation instead
 
     context.subscriptions.push(participant);
 

@@ -68,6 +68,10 @@
       {
         "command": "johann.showLog",
         "title": "Johann: Show Log Output"
+      },
+      {
+        "command": "johann.showDebugLog",
+        "title": "Johann: Open Debug Log"
       }
     ],
     "configuration": {

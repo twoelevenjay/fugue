@@ -1,17 +1,23 @@
 import * as vscode from 'vscode';
 import { Subtask, SubtaskResult, ModelInfo } from './types';
-import { withRetry, EXECUTION_RETRY_POLICY, REVIEW_RETRY_POLICY, extractErrorMessage, classifyError } from './retry';
+import { withRetry, REVIEW_RETRY_POLICY, classifyError } from './retry';
 import { DebugConversationLog } from './debugConversationLog';
 
 // ============================================================================
 // SUBAGENT MANAGER — Spawns and manages individual subagent executions
 //
-// Each subagent is a single LLM invocation with:
-// - Its own model (chosen by the model picker)
-// - Its own prompt (the subtask description)
-// - Context from dependent subtasks' results
-// - Success criteria to evaluate against
+// Each subagent is a tool-using LLM agent that:
+// - Has access to ALL VS Code language model tools (file creation, editing,
+//   terminal commands, search, etc.) via the vscode.lm.tools API
+// - Runs in an agentic loop: prompt → tool calls → results → prompt → ...
+// - Continues until the model produces a final text response with no tool calls
+// - Has its own model (chosen by the model picker)
+// - Has context from dependent subtasks' results
+// - Has success criteria to evaluate against
 // ============================================================================
+
+/** Maximum number of tool-calling loop iterations to prevent runaway agents. */
+const MAX_TOOL_ROUNDS = 50;
 
 const SUBAGENT_SYSTEM_PREFIX = `You are a GitHub Copilot coding agent executing a specific subtask assigned to you by an orchestrator.
 
@@ -76,8 +82,25 @@ Return ONLY valid JSON.`;
 
 export class SubagentManager {
     /**
+     * Discover available VS Code LM tools and convert to LanguageModelChatTool format.
+     * Filters out tools that aren't useful for coding tasks.
+     */
+    private getAvailableTools(): vscode.LanguageModelChatTool[] {
+        return vscode.lm.tools.map(tool => ({
+            name: tool.name,
+            description: tool.description,
+            inputSchema: tool.inputSchema,
+        }));
+    }
+
+    /**
      * Execute a single subtask using the given model.
-     * Streams the LLM output live to the response stream.
+     * Runs a full agentic tool-calling loop:
+     *   1. Send prompt + tool definitions to the model
+     *   2. If the model returns tool calls, execute them via vscode.lm.invokeTool()
+     *   3. Feed tool results back as messages
+     *   4. Repeat until the model produces a final text-only response
+     *   5. Return the accumulated text output
      */
     async executeSubtask(
         subtask: Subtask,
@@ -86,7 +109,8 @@ export class SubagentManager {
         workspaceContext: string,
         token: vscode.CancellationToken,
         stream?: vscode.ChatResponseStream,
-        debugLog?: DebugConversationLog
+        debugLog?: DebugConversationLog,
+        toolToken?: vscode.ChatParticipantToolToken
     ): Promise<SubtaskResult> {
         const startTime = Date.now();
 
@@ -94,7 +118,16 @@ export class SubagentManager {
             // Build the prompt with context from dependencies
             const prompt = this.buildSubagentPrompt(subtask, dependencyResults, workspaceContext);
 
-            const messages = [
+            // Discover available tools
+            const tools = this.getAvailableTools();
+
+            const options: vscode.LanguageModelChatRequestOptions = {
+                tools: tools.length > 0 ? tools : undefined,
+                toolMode: tools.length > 0 ? vscode.LanguageModelChatToolMode.Auto : undefined,
+            };
+
+            // Build the conversation messages — will grow as we loop
+            const messages: vscode.LanguageModelChatMessage[] = [
                 vscode.LanguageModelChatMessage.User(prompt)
             ];
 
@@ -103,47 +136,128 @@ export class SubagentManager {
                 stream.markdown(`\n<details><summary>📋 ${subtask.title} — <code>${modelInfo.name}</code> output</summary>\n\n`);
             }
 
-            const output = await withRetry(
-                async () => {
-                    const callStart = Date.now();
-                    const response = await modelInfo.model.sendRequest(messages, {}, token);
-                    let text = '';
-                    for await (const chunk of response.text) {
-                        text += chunk;
+            let fullOutput = '';
+            let round = 0;
+            let totalToolCalls = 0;
+
+            // === AGENTIC TOOL-CALLING LOOP ===
+            while (round < MAX_TOOL_ROUNDS) {
+                if (token.isCancellationRequested) break;
+                round++;
+
+                const callStart = Date.now();
+                const response = await modelInfo.model.sendRequest(messages, options, token);
+
+                // Collect text parts and tool call parts from the response stream
+                const toolCalls: vscode.LanguageModelToolCallPart[] = [];
+                let roundText = '';
+
+                for await (const part of response.stream) {
+                    if (part instanceof vscode.LanguageModelTextPart) {
+                        roundText += part.value;
+                        fullOutput += part.value;
                         if (stream) {
-                            stream.markdown(chunk);
+                            stream.markdown(part.value);
                         }
+                    } else if (part instanceof vscode.LanguageModelToolCallPart) {
+                        toolCalls.push(part);
                     }
+                }
 
-                    // Debug log the subtask execution call
-                    if (debugLog) {
-                        await debugLog.logLLMCall({
-                            timestamp: new Date(callStart).toISOString(),
-                            phase: 'subtask-execution',
-                            label: subtask.title,
-                            model: modelInfo.id || modelInfo.name || 'unknown',
-                            promptMessages: [prompt],
-                            responseText: text,
-                            durationMs: Date.now() - callStart,
-                        });
-                    }
+                // Debug log this round
+                if (debugLog) {
+                    const toolCallSummary = toolCalls.length > 0
+                        ? ` | Tool calls: ${toolCalls.map(tc => tc.name).join(', ')}`
+                        : '';
+                    await debugLog.logLLMCall({
+                        timestamp: new Date(callStart).toISOString(),
+                        phase: 'subtask-execution',
+                        label: `${subtask.title} (round ${round}${toolCallSummary})`,
+                        model: modelInfo.id || modelInfo.name || 'unknown',
+                        promptMessages: round === 1
+                            ? [prompt]
+                            : [`(continuation round ${round}, ${messages.length} messages in context)`],
+                        responseText: roundText + (toolCalls.length > 0 ? `\n[${toolCalls.length} tool call(s)]` : ''),
+                        durationMs: Date.now() - callStart,
+                    });
+                }
 
-                    return text;
-                },
-                EXECUTION_RETRY_POLICY,
-                token,
-                (attempt, maxRetries, error, delayMs) => {
-                    if (stream) {
-                        stream.markdown(
-                            `\n\n> ⚠️ **${error.category} error** during execution (attempt ${attempt}/${maxRetries}): ` +
-                            `${error.message.substring(0, 150)}\n> Retrying in ${(delayMs / 1000).toFixed(1)}s...\n\n`
+                // If no tool calls, the model is done — break out of the loop
+                if (toolCalls.length === 0) {
+                    break;
+                }
+
+                totalToolCalls += toolCalls.length;
+
+                // Add the assistant's response (with tool calls) to the conversation
+                const assistantParts: (vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart)[] = [];
+                if (roundText) {
+                    assistantParts.push(new vscode.LanguageModelTextPart(roundText));
+                }
+                for (const tc of toolCalls) {
+                    assistantParts.push(tc);
+                }
+                messages.push(vscode.LanguageModelChatMessage.Assistant(assistantParts));
+
+                // Execute each tool call and feed results back
+                for (const tc of toolCalls) {
+                    if (token.isCancellationRequested) break;
+
+                    try {
+                        if (stream) {
+                            stream.markdown(`\n> 🔧 Calling tool: \`${tc.name}\`\n`);
+                        }
+
+                        const toolResult = await vscode.lm.invokeTool(tc.name, {
+                            input: tc.input as object,
+                            toolInvocationToken: toolToken,
+                        }, token);
+
+                        // Extract text content from the tool result for logging
+                        const resultText = this.extractToolResultText(toolResult);
+
+                        if (stream && resultText) {
+                            // Show a short summary of the tool result
+                            const preview = resultText.length > 200
+                                ? resultText.substring(0, 200) + '…'
+                                : resultText;
+                            stream.markdown(`> ✅ Result: ${preview}\n\n`);
+                        }
+
+                        fullOutput += `\n[Tool: ${tc.name}] ${resultText}\n`;
+
+                        // Feed the tool result back to the conversation
+                        messages.push(
+                            vscode.LanguageModelChatMessage.User([
+                                new vscode.LanguageModelToolResultPart(tc.callId, toolResult.content as (vscode.LanguageModelTextPart | vscode.LanguageModelDataPart)[])
+                            ])
+                        );
+                    } catch (toolErr) {
+                        const errMsg = toolErr instanceof Error ? toolErr.message : String(toolErr);
+
+                        if (stream) {
+                            stream.markdown(`\n> ❌ Tool \`${tc.name}\` failed: ${errMsg.substring(0, 150)}\n\n`);
+                        }
+
+                        fullOutput += `\n[Tool: ${tc.name}] ERROR: ${errMsg}\n`;
+
+                        // Feed error back to the model so it can recover
+                        messages.push(
+                            vscode.LanguageModelChatMessage.User([
+                                new vscode.LanguageModelToolResultPart(tc.callId, [
+                                    new vscode.LanguageModelTextPart(`Error executing tool "${tc.name}": ${errMsg}`)
+                                ])
+                            ])
                         );
                     }
                 }
-            );
+            }
 
             // Close the collapsible section
             if (stream) {
+                if (totalToolCalls > 0) {
+                    stream.markdown(`\n\n> **${totalToolCalls} tool call(s)** executed across **${round} round(s)**\n`);
+                }
                 stream.markdown('\n\n</details>\n\n');
             }
 
@@ -152,7 +266,7 @@ export class SubagentManager {
             return {
                 success: true, // Preliminary — will be reviewed
                 modelUsed: modelInfo.id,
-                output,
+                output: fullOutput,
                 reviewNotes: '',
                 durationMs,
                 timestamp: new Date().toISOString(),
@@ -201,6 +315,19 @@ export class SubagentManager {
                 timestamp: new Date().toISOString(),
             };
         }
+    }
+
+    /**
+     * Extract readable text from a LanguageModelToolResult.
+     */
+    private extractToolResultText(result: vscode.LanguageModelToolResult): string {
+        const parts: string[] = [];
+        for (const item of result.content) {
+            if (item instanceof vscode.LanguageModelTextPart) {
+                parts.push(item.value);
+            }
+        }
+        return parts.join('\n');
     }
 
     /**

@@ -104,16 +104,29 @@ async function writeFile(uri: vscode.Uri, content: string): Promise<void> {
  * Initialize the bootstrap workspace on first run.
  * Copies template files into .vscode/johann/ if they don't exist.
  * Returns true if this was a first run (BOOTSTRAP.md was created).
+ *
+ * IMPORTANT: BOOTSTRAP.md is a one-shot sentinel. Once `completeBootstrap()`
+ * deletes it, it must NOT be re-created. We detect a true first run by
+ * checking whether the Johann directory itself existed before this call.
  */
 export async function initializeBootstrapWorkspace(
     baseUri: vscode.Uri
 ): Promise<boolean> {
+    // Check if the Johann directory already exists BEFORE ensuring dirs.
+    // If it exists, this is NOT a first run — even if BOOTSTRAP.md is gone.
+    const dirAlreadyExists = await fileExists(baseUri);
+
     await ensureDirectories(baseUri);
 
     let isFirstRun = false;
-    const bootstrapUri = vscode.Uri.joinPath(baseUri, 'BOOTSTRAP.md');
 
     for (const [filename, template] of Object.entries(BOOTSTRAP_TEMPLATES)) {
+        // Skip re-creating BOOTSTRAP.md once the workspace is established.
+        // It's a one-shot sentinel that gets deleted by completeBootstrap().
+        if (filename === 'BOOTSTRAP.md' && dirAlreadyExists) {
+            continue;
+        }
+
         const fileUri = vscode.Uri.joinPath(baseUri, filename);
         const exists = await fileExists(fileUri);
 

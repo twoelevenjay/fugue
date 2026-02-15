@@ -31,3 +31,16 @@ export { HeartbeatManager } from './heartbeat';
 export type { HeartbeatCheck } from './heartbeat';
 export { JohannLogger, createLogger, getLogger } from './logger';
 export type { LogLevel } from './logger';
+export { ChatProgressReporter, buildFileTree } from './chatProgressReporter';
+export type {
+    ProgressEvent,
+    ProgressReporter,
+    TaskStartedEvent,
+    TaskProgressEvent,
+    TaskCompletedEvent,
+    TaskFailedEvent,
+    FileSetDiscoveredEvent,
+    NoteEvent,
+} from './progressEvents';
+export { SessionPersistence } from './sessionPersistence';
+export type { PersistedSubtask, PersistedSession, ResumableSession } from './sessionPersistence';

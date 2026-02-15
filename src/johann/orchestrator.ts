@@ -23,6 +23,8 @@ import {
 } from './retry';
 import { DebugConversationLog } from './debugConversationLog';
 import { WorktreeManager, WorktreeMergeResult } from './worktreeManager';
+import { ChatProgressReporter } from './chatProgressReporter';
+import { SessionPersistence, ResumableSession } from './sessionPersistence';
 
 // ============================================================================
 // ORCHESTRATOR — The top-level controller
@@ -66,6 +68,154 @@ export class Orchestrator {
     }
 
     /**
+     * Resume and complete an interrupted session from disk.
+     * Skips already-completed subtasks. Planning cost is never re-paid.
+     *
+     * Returns false if there is nothing to resume.
+     */
+    async resumeSession(
+        resumable: ResumableSession,
+        userModel: vscode.LanguageModelChat,
+        response: vscode.ChatResponseStream,
+        token: vscode.CancellationToken
+    ): Promise<boolean> {
+        if (!resumable.plan || resumable.pendingSubtaskIds.length === 0) {
+            return false;
+        }
+
+        const reporter = new ChatProgressReporter(response);
+
+        // Re-open the same session persistence directory
+        const persist = new SessionPersistence(resumable.sessionId);
+        await persist.initialize();
+
+        // Rebuild JohannSession from disk state
+        const session: JohannSession = {
+            sessionId: resumable.sessionId,
+            originalRequest: resumable.originalRequest,
+            plan: resumable.plan,
+            status: 'executing',
+            escalations: resumable.escalations,
+            startedAt: resumable.startedAt,
+            workspaceContext: resumable.workspaceContext,
+        };
+
+        await persist.writeSession(session);
+
+        const plan = resumable.plan;
+
+        const completed = resumable.completedSubtaskIds.length;
+        const total = plan.subtasks.length;
+        reporter.phase('Resuming', `${completed}/${total} subtasks done, ${resumable.pendingSubtaskIds.length} remaining`);
+
+        // If a resume message was provided, log it and prepend to workspace context
+        // so subagents get the course-correction instruction
+        const resumeMessage = resumable.resumeMessage;
+        if (resumeMessage) {
+            await persist.appendExecutionLog('RESUME WITH MESSAGE', resumeMessage);
+        }
+
+        // Initialize debug log for the resumed run
+        const debugLog = new DebugConversationLog(resumable.sessionId + '-resume');
+        await debugLog.initialize();
+        reporter.setDebugLogUri(debugLog.getLogUri());
+
+        await debugLog.logEvent('resume', `Resuming session with ${completed}/${total} subtasks completed${resumeMessage ? ` — message: ${resumeMessage}` : ''}`);
+
+        // Pre-populate results from completed subtasks
+        const results = new Map<string, SubtaskResult>(resumable.subtaskResults);
+
+        try {
+            // == EXECUTION (RESUMED) ==
+            reporter.phase('Executing', `${resumable.pendingSubtaskIds.length} remaining subtasks`);
+
+            // Use workspace context from disk, plus any course-correction message
+            let workspaceContext = resumable.workspaceContext || await this.getMinimalWorkspaceContext();
+            if (resumeMessage) {
+                workspaceContext = `=== COURSE CORRECTION (from user on resume) ===\n${resumeMessage}\n\n---\n\n${workspaceContext}`;
+            }
+
+            // Execute remaining subtasks using the same executePlan logic
+            // (executePlan already skips completed tasks via the `completed` set)
+            const newResults = await this.executePlan(
+                plan,
+                workspaceContext,
+                reporter,
+                token,
+                debugLog,
+                undefined, // no worktree manager for resume (keep it simple)
+                persist,
+                results   // pass prior results so dependencies are satisfied
+            );
+
+            // Merge all results together
+            for (const [k, v] of newResults) {
+                results.set(k, v);
+            }
+
+            // == MERGE & RESPOND ==
+            session.status = 'reviewing';
+            await persist.writeSession(session);
+            reporter.phase('Synthesizing', 'Merging subtask results');
+
+            await this.mergeResults(
+                session.originalRequest,
+                plan,
+                results,
+                userModel,
+                token,
+                reporter.stream,
+                debugLog
+            );
+
+            reporter.showButtons();
+
+            // == MEMORY ==
+            session.status = 'completed';
+            session.completedAt = new Date().toISOString();
+            await persist.markCompleted(session);
+
+            const subtaskResultSummaries = plan.subtasks.map(st => ({
+                title: st.title,
+                model: st.result?.modelUsed || 'unknown',
+                success: st.result?.success ?? false,
+                notes: st.result?.reviewNotes || '',
+            }));
+            const overallSuccess = plan.subtasks.every(st => st.result?.success);
+
+            await this.memory.recordTaskCompletion(
+                plan.summary,
+                subtaskResultSummaries,
+                overallSuccess
+            );
+
+            await debugLog.finalize('completed');
+        } catch (err) {
+            session.status = 'failed';
+            const classified = classifyError(err);
+
+            await persist.markFailed(session, classified.message);
+            if (session.plan) {
+                await persist.writeEscalations(session.escalations);
+            }
+
+            this.renderErrorForUser(reporter.stream, classified, session);
+            await debugLog.finalize('failed', classified.message);
+        }
+
+        return true;
+    }
+
+    /**
+     * Get minimal workspace context (fallback for resume when context.txt is empty).
+     */
+    private async getMinimalWorkspaceContext(): Promise<string> {
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders) return 'No workspace open.';
+        return `Workspace: ${folders[0].uri.fsPath}`;
+    }
+
+    /**
      * Main entry point — orchestrate a user request.
      * Streams progress updates to the response stream.
      *
@@ -75,6 +225,7 @@ export class Orchestrator {
      * @param userModel - The LLM model selected by the user
      * @param response - Chat response stream for live output
      * @param token - Cancellation token
+     * @param toolToken - Tool invocation token from the chat request, needed for subagents to call tools
      */
     async orchestrate(
         request: string,
@@ -82,7 +233,8 @@ export class Orchestrator {
         subagentContext: string,
         userModel: vscode.LanguageModelChat,
         response: vscode.ChatResponseStream,
-        token: vscode.CancellationToken
+        token: vscode.CancellationToken,
+        toolToken?: vscode.ChatParticipantToolToken
     ): Promise<void> {
         const session: JohannSession = {
             sessionId: this.generateSessionId(),
@@ -97,15 +249,29 @@ export class Orchestrator {
         // Track total LLM requests for awareness
         let totalLlmRequests = 0;
 
+        // Create progress reporter for structured chat output
+        const reporter = new ChatProgressReporter(response);
+
+        // Initialize session persistence — everything goes to disk
+        const persist = new SessionPersistence(session.sessionId);
+        const persistReady = await persist.initialize();
+        if (!persistReady) {
+            response.markdown(
+                '\n\n> **⚠️ Warning:** Session persistence failed to initialize. ' +
+                'The plan will only exist in memory and cannot be resumed if interrupted.\n\n'
+            );
+        }
+        await persist.writeSession(session);
+        await persist.writeContext(subagentContext);
+
         // Check Copilot settings and warn if low limits
         const copilotSettings = getCopilotAgentSettings();
         if (copilotSettings.readable && copilotSettings.maxRequests > 0 && copilotSettings.maxRequests < 50) {
-            response.markdown(
-                `> ⚠️ **Copilot request limit is set to ${copilotSettings.maxRequests}.** ` +
-                `Complex orchestrations may be interrupted. ` +
-                `Consider increasing \`github.copilot.chat.agent.maxRequests\` ` +
-                `or type \`/yolo on\` for guidance.\n\n`
-            );
+            reporter.emit({
+                type: 'note',
+                message: `**Copilot request limit is set to ${copilotSettings.maxRequests}.** Complex orchestrations may be interrupted. Consider increasing \`github.copilot.chat.agent.maxRequests\` or type \`/yolo on\` for guidance.`,
+                style: 'warning',
+            });
         }
 
         // Ensure memory directory exists
@@ -115,15 +281,18 @@ export class Orchestrator {
         const debugLog = new DebugConversationLog(session.sessionId);
         await debugLog.initialize();
 
+        // Set debug log URI on reporter for the "Open Debug Log" button
+        reporter.setDebugLogUri(debugLog.getLogUri());
+
         // Get memory context
         const memoryContext = await this.memory.getRecentMemoryContext();
 
         try {
             // == PHASE 1: PLANNING ==
-            response.markdown('### Planning\n\n');
-            response.markdown('Analyzing your request and creating an execution plan...\n\n');
+            reporter.phase('Planning', 'Analyzing request and creating plan');
 
             await debugLog.logEvent('planning', `Starting planning for: ${request.substring(0, 200)}`);
+            await persist.appendExecutionLog('PLANNING', `Starting planning for: ${request.substring(0, 200)}`);
 
             const plan = await this.taskDecomposer.decompose(
                 request,
@@ -131,22 +300,29 @@ export class Orchestrator {
                 memoryContext,
                 userModel,
                 token,
-                response,
-                debugLog
+                reporter.stream,
+                debugLog,
+                persist
             );
 
             session.plan = plan;
             session.status = 'executing';
 
+            // PERSIST — Plan to disk IMMEDIATELY. This is the most critical write.
+            // Planning LLM cost is paid once and never repeated on resume.
+            await persist.writePlan(plan);
+            await persist.writeSession(session);
+            await persist.appendExecutionLog('PLAN SAVED', `${plan.subtasks.length} subtasks, strategy: ${plan.strategy}`);
+
             // Show the plan
-            response.markdown(this.formatPlanSummary(plan));
+            reporter.showPlan(plan);
 
             // Discover available models
             const modelSummary = await this.modelPicker.getModelSummary();
-            response.markdown(`\n\n<details><summary>Available Models</summary>\n\n\`\`\`\n${modelSummary}\n\`\`\`\n\n</details>\n\n`);
+            reporter.showModels(modelSummary);
 
             // == PHASE 2: EXECUTION ==
-            response.markdown('### Executing\n\n');
+            reporter.phase('Executing', `${plan.subtasks.length} subtasks`);
 
             await debugLog.logEvent('subtask-execution', `Starting execution of ${plan.subtasks.length} subtasks`);
 
@@ -161,7 +337,7 @@ export class Orchestrator {
                         await debugLog.logEvent('worktree', `Worktree manager initialized (base: ${worktreeManager.getBaseBranch()})`);
                     } else {
                         worktreeManager = undefined;
-                        response.markdown('> ℹ️ Git worktree isolation unavailable (not a git repo or git not found). Parallel subtasks will share the workspace.\n\n');
+                        reporter.emit({ type: 'note', message: 'Git worktree isolation unavailable (not a git repo or git not found). Parallel subtasks will share the workspace.' });
                     }
                 }
             }
@@ -169,11 +345,12 @@ export class Orchestrator {
             try {
                 // Pass subagentContext (minimal workspace context without Johann's identity)
                 // to prevent subagents from confusing themselves with Johann
-                const results = await this.executePlan(plan, subagentContext, response, token, debugLog, worktreeManager);
+                const results = await this.executePlan(plan, subagentContext, reporter, token, debugLog, worktreeManager, persist, undefined, toolToken);
 
                 // == PHASE 3: MERGE & RESPOND ==
                 session.status = 'reviewing';
-                response.markdown('\n### Synthesizing Results\n\n');
+                await persist.writeSession(session);
+                reporter.phase('Synthesizing', 'Merging subtask results');
 
                 await debugLog.logEvent('merge', 'Starting result synthesis');
 
@@ -183,9 +360,12 @@ export class Orchestrator {
                     results,
                     userModel,
                     token,
-                    response,
+                    reporter.stream,
                     debugLog
                 );
+
+                // Render action buttons
+                reporter.showButtons();
             } finally {
                 // Always clean up worktrees, even on error
                 if (worktreeManager) {
@@ -201,6 +381,9 @@ export class Orchestrator {
             // == PHASE 4: MEMORY ==
             session.status = 'completed';
             session.completedAt = new Date().toISOString();
+
+            // PERSIST — Mark session complete on disk
+            await persist.markCompleted(session);
 
             const subtaskResultSummaries = plan.subtasks.map(st => ({
                 title: st.title,
@@ -235,13 +418,19 @@ export class Orchestrator {
             session.status = 'failed';
             const classified = classifyError(err);
 
+            // PERSIST — Mark session failed on disk with error details
+            await persist.markFailed(session, classified.message);
+            if (session.plan) {
+                await persist.writeEscalations(session.escalations);
+            }
+
             // Save the plan to memory if we got that far, so it can be resumed
             if (session.plan) {
                 await this.savePlanForRecovery(session, classified);
             }
 
             // Provide category-specific error guidance
-            this.renderErrorForUser(response, classified, session);
+            this.renderErrorForUser(reporter.stream, classified, session);
 
             await this.memory.recordError(
                 classified.message,
@@ -261,13 +450,16 @@ export class Orchestrator {
     private async executePlan(
         plan: OrchestrationPlan,
         workspaceContext: string,
-        response: vscode.ChatResponseStream,
+        reporter: ChatProgressReporter,
         token: vscode.CancellationToken,
         debugLog: DebugConversationLog,
-        worktreeManager?: WorktreeManager
+        worktreeManager?: WorktreeManager,
+        persist?: SessionPersistence,
+        priorResults?: Map<string, SubtaskResult>,
+        toolToken?: vscode.ChatParticipantToolToken
     ): Promise<Map<string, SubtaskResult>> {
-        const results = new Map<string, SubtaskResult>();
-        const completed = new Set<string>();
+        const results = new Map<string, SubtaskResult>(priorResults || []);
+        const completed = new Set<string>(priorResults ? priorResults.keys() : []);
 
         // Execute subtasks respecting dependencies
         while (completed.size < plan.subtasks.length) {
@@ -291,7 +483,7 @@ export class Orchestrator {
                 // Create worktrees for filesystem isolation if available
                 const useWorktrees = worktreeManager?.isReady() ?? false;
                 if (useWorktrees) {
-                    response.markdown(`  ⚡ Running ${ready.length} subtasks in parallel (git worktree isolation)...\n`);
+                    reporter.emit({ type: 'note', message: `⚡ Running ${ready.length} subtasks in parallel (git worktree isolation)` });
 
                     // Create a worktree per subtask
                     for (const subtask of ready) {
@@ -300,29 +492,46 @@ export class Orchestrator {
                             subtask.worktreePath = wt.worktreePath;
                         } catch (err) {
                             const msg = err instanceof Error ? err.message : String(err);
-                            response.markdown(`  ⚠️ Worktree creation failed for "${subtask.title}": ${msg.substring(0, 100)}. Running without isolation.\n`);
+                            reporter.emit({ type: 'note', message: `Worktree creation failed for "${subtask.title}": ${msg.substring(0, 100)}. Running without isolation.`, style: 'warning' });
                         }
                     }
                 } else {
-                    response.markdown(`  ⚡ Running ${ready.length} subtasks in parallel...\n`);
+                    reporter.emit({ type: 'note', message: `⚡ Running ${ready.length} subtasks in parallel` });
                 }
 
                 // Execute all ready subtasks concurrently
                 const promises = ready.map(async (subtask) => {
                     if (token.isCancellationRequested) return;
 
+                    if (persist) {
+                        await persist.appendExecutionLog('SUBTASK START', `${subtask.id}: ${subtask.title} (${subtask.complexity})`);
+                        await persist.writeStatusMarkdown(plan, subtask.id);
+                    }
+
                     const result = await this.executeSubtaskWithEscalation(
                         subtask,
                         results,
                         workspaceContext,
-                        response,
+                        reporter,
                         token,
-                        debugLog
+                        debugLog,
+                        persist,
+                        toolToken
                     );
 
                     results.set(subtask.id, result);
                     subtask.result = result;
                     completed.add(subtask.id);
+
+                    // PERSIST — subtask result to disk
+                    if (persist) {
+                        await persist.writeSubtaskResult(subtask.id, result, subtask);
+                        await persist.appendExecutionLog(
+                            result.success ? 'SUBTASK DONE' : 'SUBTASK FAILED',
+                            `${subtask.id}: ${subtask.title} — ${result.modelUsed} (${(result.durationMs / 1000).toFixed(1)}s)`
+                        );
+                        await persist.writeStatusMarkdown(plan);
+                    }
                 });
 
                 await Promise.all(promises);
@@ -331,7 +540,7 @@ export class Orchestrator {
                 if (useWorktrees) {
                     const worktreeSubtasks = ready.filter(st => st.worktreePath);
                     if (worktreeSubtasks.length > 0) {
-                        response.markdown('\n  🔀 Merging parallel results back to main branch...\n');
+                        reporter.emit({ type: 'task-started', id: 'merge-batch', label: 'Merging parallel results' });
 
                         const mergeResults = await worktreeManager!.mergeAllSequentially(
                             worktreeSubtasks.map(st => st.id)
@@ -340,9 +549,9 @@ export class Orchestrator {
                         // Report merge results
                         for (const mr of mergeResults) {
                             if (!mr.success) {
-                                response.markdown(`  ⚠️ **Merge conflict** for "${mr.subtaskId}": ${mr.error}\n`);
+                                reporter.emit({ type: 'note', message: `**Merge conflict** for "${mr.subtaskId}": ${mr.error}`, style: 'warning' });
                                 if (mr.conflictFiles && mr.conflictFiles.length > 0) {
-                                    response.markdown(`    Conflicting files: ${mr.conflictFiles.map(f => `\`${f}\``).join(', ')}\n`);
+                                    reporter.emit({ type: 'fileset-discovered', label: 'Conflicting files', files: mr.conflictFiles });
                                 }
                                 // Mark the subtask as failed due to merge conflict
                                 const subtask = ready.find(st => st.id === mr.subtaskId);
@@ -351,7 +560,7 @@ export class Orchestrator {
                                     subtask.result.reviewNotes += ` [MERGE CONFLICT: ${mr.error}]`;
                                 }
                             } else if (mr.hasChanges) {
-                                response.markdown(`  ✅ Merged: ${mr.subtaskId}\n`);
+                                reporter.emit({ type: 'note', message: `Merged: ${mr.subtaskId}`, style: 'success' });
                             }
                         }
 
@@ -361,7 +570,7 @@ export class Orchestrator {
                             subtask.worktreePath = undefined;
                         }
 
-                        response.markdown('\n');
+                        reporter.emit({ type: 'task-completed', id: 'merge-batch' });
                     }
                 }
             } else {
@@ -369,18 +578,35 @@ export class Orchestrator {
                 for (const subtask of ready) {
                     if (token.isCancellationRequested) break;
 
+                    if (persist) {
+                        await persist.appendExecutionLog('SUBTASK START', `${subtask.id}: ${subtask.title} (${subtask.complexity})`);
+                        await persist.writeStatusMarkdown(plan, subtask.id);
+                    }
+
                     const result = await this.executeSubtaskWithEscalation(
                         subtask,
                         results,
                         workspaceContext,
-                        response,
+                        reporter,
                         token,
-                        debugLog
+                        debugLog,
+                        persist,
+                        toolToken
                     );
 
                     results.set(subtask.id, result);
                     subtask.result = result;
                     completed.add(subtask.id);
+
+                    // PERSIST — subtask result to disk
+                    if (persist) {
+                        await persist.writeSubtaskResult(subtask.id, result, subtask);
+                        await persist.appendExecutionLog(
+                            result.success ? 'SUBTASK DONE' : 'SUBTASK FAILED',
+                            `${subtask.id}: ${subtask.title} — ${result.modelUsed} (${(result.durationMs / 1000).toFixed(1)}s)`
+                        );
+                        await persist.writeStatusMarkdown(plan);
+                    }
                 }
             }
         }
@@ -396,9 +622,11 @@ export class Orchestrator {
         subtask: Subtask,
         dependencyResults: Map<string, SubtaskResult>,
         workspaceContext: string,
-        response: vscode.ChatResponseStream,
+        reporter: ChatProgressReporter,
         token: vscode.CancellationToken,
-        debugLog: DebugConversationLog
+        debugLog: DebugConversationLog,
+        persist?: SessionPersistence,
+        toolToken?: vscode.ChatParticipantToolToken
     ): Promise<SubtaskResult> {
         const escalation: EscalationRecord = {
             subtaskId: subtask.id,
@@ -422,6 +650,11 @@ export class Orchestrator {
             subtask.attempts++;
             subtask.status = 'in-progress';
 
+            // PERSIST — subtask status change
+            if (persist) {
+                await persist.writeSubtaskUpdate(subtask);
+            }
+
             // Pick model
             let modelInfo: ModelInfo | undefined;
             if (subtask.attempts === 1) {
@@ -439,7 +672,7 @@ export class Orchestrator {
             }
 
             if (!modelInfo) {
-                response.markdown(`  - **${subtask.title}:** No more models available to try.\n`);
+                reporter.emit({ type: 'task-failed', id: subtask.id, error: 'No more models available', label: subtask.title });
                 subtask.status = 'failed';
                 return {
                     success: false,
@@ -454,7 +687,16 @@ export class Orchestrator {
             subtask.assignedModel = modelInfo.id;
             triedModelIds.push(modelInfo.id);
 
-            response.markdown(`  - **${subtask.title}** → \`${modelInfo.name}\` (Tier ${modelInfo.tier})${subtask.attempts > 1 ? ` [attempt ${subtask.attempts}]` : ''}...`);
+            reporter.emit({
+                type: 'task-started',
+                id: subtask.id,
+                label: subtask.title,
+                metadata: {
+                    model: modelInfo.name,
+                    tier: String(modelInfo.tier),
+                    ...(subtask.attempts > 1 ? { attempt: String(subtask.attempts) } : {}),
+                },
+            });
 
             // Execute
             const result = await this.subagentManager.executeSubtask(
@@ -463,12 +705,13 @@ export class Orchestrator {
                 dependencyResults,
                 workspaceContext,
                 token,
-                response,
-                debugLog
+                reporter.stream,
+                debugLog,
+                toolToken
             );
 
             if (!result.success) {
-                response.markdown(` execution failed.\n`);
+                reporter.emit({ type: 'task-progress', id: subtask.id, message: 'Execution failed, escalating…' });
                 escalation.attempts.push({
                     modelId: modelInfo.id,
                     tier: modelInfo.tier,
@@ -480,12 +723,16 @@ export class Orchestrator {
 
             // Review
             subtask.status = 'reviewing';
+            // PERSIST — subtask entering review
+            if (persist) {
+                await persist.writeSubtaskUpdate(subtask);
+            }
             const review = await this.subagentManager.reviewSubtaskOutput(
                 subtask,
                 result,
                 modelInfo.model, // Use the same model for review
                 token,
-                response,
+                reporter.stream,
                 debugLog
             );
 
@@ -501,17 +748,26 @@ export class Orchestrator {
 
             if (review.success) {
                 subtask.status = 'completed';
-                response.markdown(` done. (${(result.durationMs / 1000).toFixed(1)}s)\n`);
+                // PERSIST — subtask completed
+                if (persist) {
+                    await persist.writeSubtaskUpdate(subtask);
+                }
+                reporter.emit({ type: 'task-completed', id: subtask.id, durationMs: result.durationMs });
                 return result;
             }
 
             // Failed review — will escalate
             subtask.status = 'escalated';
-            response.markdown(` needs escalation (${review.reason}).\n`);
+            // PERSIST — subtask escalated
+            if (persist) {
+                await persist.writeSubtaskUpdate(subtask);
+            }
+            reporter.emit({ type: 'task-progress', id: subtask.id, message: `Escalating: ${review.reason}` });
         }
 
         // All attempts exhausted
         subtask.status = 'failed';
+        reporter.emit({ type: 'task-failed', id: subtask.id, error: `Failed after ${subtask.attempts} attempts`, label: subtask.title });
         return {
             success: false,
             modelUsed: triedModelIds[triedModelIds.length - 1] || 'none',

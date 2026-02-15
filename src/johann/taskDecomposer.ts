@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { OrchestrationPlan, Subtask, TaskComplexity, ModelInfo } from './types';
 import { withRetry, PLANNING_RETRY_POLICY, classifyError, extractErrorMessage } from './retry';
 import { DebugConversationLog } from './debugConversationLog';
+import { SessionPersistence } from './sessionPersistence';
 
 // ============================================================================
 // TASK DECOMPOSER — Breaks user requests into orchestrated subtask plans
@@ -78,7 +79,8 @@ Return ONLY valid JSON. No markdown, no explanations.`;
 export class TaskDecomposer {
     /**
      * Decompose a user request into an orchestration plan.
-     * Streams the planning output live to the response stream.
+     * Streams the planning output live to the response stream
+     * AND to disk via SessionPersistence (if provided).
      */
     async decompose(
         request: string,
@@ -87,7 +89,8 @@ export class TaskDecomposer {
         model: vscode.LanguageModelChat,
         token: vscode.CancellationToken,
         stream?: vscode.ChatResponseStream,
-        debugLog?: DebugConversationLog
+        debugLog?: DebugConversationLog,
+        persist?: SessionPersistence
     ): Promise<OrchestrationPlan> {
         const userPrompt = this.buildDecompositionPrompt(request, workspaceContext, memoryContext);
 
@@ -109,6 +112,10 @@ export class TaskDecomposer {
                     result += chunk;
                     if (stream) {
                         stream.markdown(chunk);
+                    }
+                    // Stream plan chunks to disk as they arrive
+                    if (persist) {
+                        await persist.appendPlanStream(chunk);
                     }
                 }
 

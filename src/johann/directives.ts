@@ -3,6 +3,7 @@ import { searchMemory, formatSearchResults } from './memorySearch';
 import { getConfig, formatConfig, getCopilotAgentSettings, formatCopilotSettings } from './config';
 import { listDailyNotes, readDailyNotes } from './dailyNotes';
 import { listSessions, getRecentSessionsSummary } from './sessionTranscript';
+import { SessionPersistence, ResumableSession } from './sessionPersistence';
 
 // ============================================================================
 // DIRECTIVES — Slash command / directive parsing for Johann
@@ -32,6 +33,8 @@ export interface DirectiveResult {
     handled: boolean;
     /** The output to send to the response stream */
     output?: string;
+    /** If the directive is /resume, carries the session to resume */
+    resumeSession?: ResumableSession;
 }
 
 /**
@@ -72,6 +75,8 @@ export async function handleDirective(
             return await handleSessions(response);
         case '/yolo':
             return await handleYolo(args, response);
+        case '/resume':
+            return await handleResume(args, response);
         default:
             response.markdown(`Unknown directive: \`${command}\`. Type \`/help\` for available commands.\n`);
             return { isDirective: true, handled: false };
@@ -96,6 +101,7 @@ async function handleHelp(response: vscode.ChatResponseStream): Promise<Directiv
 | \`/notes [date]\` | Show daily notes (today or specific date) |
 | \`/sessions\` | List recent sessions |
 | \`/yolo [on\\|off]\` | Toggle YOLO mode (maximum autonomy) |
+| \`/resume [id] [message]\` | Resume a session, optionally with a course-correction message |
 
 `;
 
@@ -240,6 +246,86 @@ async function handleSessions(response: vscode.ChatResponseStream): Promise<Dire
         response.markdown('No session transcripts found.\n');
     }
     return { isDirective: true, handled: true, output };
+}
+
+async function handleResume(args: string, response: vscode.ChatResponseStream): Promise<DirectiveResult> {
+    const resumable = await SessionPersistence.findResumable();
+
+    if (resumable.length === 0) {
+        response.markdown('No interrupted sessions found to resume.\n');
+        return { isDirective: true, handled: true };
+    }
+
+    const argParts = args.trim().split(/\s+/);
+    const firstArg = argParts[0] || '';
+
+    // Check if the first arg is a session ID or a message
+    let targetSession: ResumableSession | undefined;
+    let resumeMessage = '';
+
+    if (firstArg) {
+        // Try to match it as a session ID
+        const match = resumable.find(s => s.sessionId === firstArg || s.sessionId.endsWith(firstArg));
+        if (match) {
+            targetSession = match;
+            // Everything after the session ID is the message
+            resumeMessage = argParts.slice(1).join(' ').trim();
+        } else {
+            // Not a session ID — treat the ENTIRE args as a message for the most recent session
+            targetSession = resumable[0];
+            resumeMessage = args.trim();
+        }
+    } else {
+        // No args at all — pick the most recent (or only) session
+        targetSession = resumable[0];
+    }
+
+    if (!targetSession) {
+        response.markdown('No resumable session found.\n');
+        return { isDirective: true, handled: true };
+    }
+
+    // Attach the resume message so the orchestrator can use it
+    if (resumeMessage) {
+        targetSession.resumeMessage = resumeMessage;
+    }
+
+    const completed = targetSession.completedSubtaskIds.length;
+    const total = completed + targetSession.pendingSubtaskIds.length;
+
+    if (resumable.length > 1 && !firstArg) {
+        response.markdown(`Found ${resumable.length} interrupted sessions. Resuming the most recent:\n\n`);
+    } else if (resumable.length === 1 && !firstArg) {
+        response.markdown(`Found 1 interrupted session. Resuming automatically.\n\n`);
+    }
+
+    response.markdown(
+        `**Session:** \`${targetSession.sessionId}\`\n` +
+        `**Request:** ${targetSession.originalRequest.substring(0, 120)}\n` +
+        `**Progress:** ${completed}/${total} subtasks completed\n`
+    );
+
+    if (resumeMessage) {
+        response.markdown(`**Course correction:** ${resumeMessage}\n`);
+    }
+
+    response.markdown('\n');
+
+    // Show other resumable sessions if any
+    if (resumable.length > 1) {
+        const others = resumable.filter(s => s.sessionId !== targetSession!.sessionId);
+        if (others.length > 0) {
+            response.markdown('Other resumable sessions:\n');
+            for (const s of others.slice(0, 4)) {
+                const c = s.completedSubtaskIds.length;
+                const t = c + s.pendingSubtaskIds.length;
+                response.markdown(`- \`/resume ${s.sessionId}\` — ${s.originalRequest.substring(0, 60)} (${c}/${t} done)\n`);
+            }
+            response.markdown('\n');
+        }
+    }
+
+    return { isDirective: true, handled: true, resumeSession: targetSession };
 }
 
 async function handleYolo(args: string, response: vscode.ChatResponseStream): Promise<DirectiveResult> {
