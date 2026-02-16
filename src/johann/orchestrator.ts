@@ -31,7 +31,10 @@ import { BackgroundTaskManager } from './backgroundTaskManager';
 import { ProgressReporter } from './progressEvents';
 import { SessionPersistence, ResumableSession } from './sessionPersistence';
 import { MultiPassExecutor } from './multiPassExecutor';
+import { getMultiPassStrategy } from './multiPassStrategies';
 import { ToolVerifier } from './toolVerifier';
+import { getExecutionWaves, getDownstreamTasks, validateGraph } from './graphManager';
+import { HookRunner, createDefaultHookRunner } from './hooks';
 
 // ============================================================================
 // ORCHESTRATOR — The top-level controller
@@ -76,6 +79,7 @@ export class Orchestrator {
     private config: OrchestratorConfig;
     private multiPassExecutor: MultiPassExecutor;
     private toolVerifier: ToolVerifier;
+    private hookRunner: HookRunner;
 
     constructor(config: OrchestratorConfig = DEFAULT_CONFIG) {
         this.config = config;
@@ -85,6 +89,7 @@ export class Orchestrator {
         this.memory = new MemorySystem(config);
         this.multiPassExecutor = new MultiPassExecutor(getLogger(), this.modelPicker);
         this.toolVerifier = new ToolVerifier(getLogger());
+        this.hookRunner = createDefaultHookRunner();
     }
 
     /**
@@ -185,7 +190,8 @@ export class Orchestrator {
                 persist,
                 results,   // pass prior results so dependencies are satisfied
                 undefined, // no toolToken for resume
-                resumeLedgerReady ? resumeLedger : undefined
+                resumeLedgerReady ? resumeLedger : undefined,
+                this.hookRunner
             );
 
             // Merge all results together
@@ -433,7 +439,8 @@ export class Orchestrator {
                     persist,
                     undefined,
                     toolToken,
-                    ledgerReady ? ledger : undefined
+                    ledgerReady ? ledger : undefined,
+                    this.hookRunner
                 );
 
                 // == PHASE 3: MERGE & RESPOND ==
@@ -611,10 +618,13 @@ export class Orchestrator {
 
         try {
             // == PHASE 1: PLANNING ==
+            await this.hookRunner.run('on_session_start', { request, session });
             reporter.phase('Planning', 'Analyzing request and creating plan');
 
             await debugLog.logEvent('planning', `Starting planning for: ${request.substring(0, 200)}`);
             await persist.appendExecutionLog('PLANNING', `Starting planning for: ${request.substring(0, 200)}`);
+
+            await this.hookRunner.run('before_planning', { request, session });
 
             const plan = await this.taskDecomposer.decompose(
                 request,
@@ -629,6 +639,8 @@ export class Orchestrator {
 
             session.plan = plan;
             session.status = 'executing';
+
+            await this.hookRunner.run('after_planning', { request, session, plan });
 
             // PERSIST — Plan to disk IMMEDIATELY. This is the most critical write.
             // Planning LLM cost is paid once and never repeated on resume.
@@ -675,7 +687,7 @@ export class Orchestrator {
             try {
                 // Pass subagentContext (minimal workspace context without Johann's identity)
                 // to prevent subagents from confusing themselves with Johann
-                const results = await this.executePlan(plan, subagentContext, reporter, token, debugLog, worktreeManager, persist, undefined, toolToken, ledger2Ready ? ledger2 : undefined);
+                const results = await this.executePlan(plan, subagentContext, reporter, token, debugLog, worktreeManager, persist, undefined, toolToken, ledger2Ready ? ledger2 : undefined, this.hookRunner);
 
                 // == PHASE 3: MERGE & RESPOND ==
                 session.status = 'reviewing';
@@ -683,6 +695,8 @@ export class Orchestrator {
                 reporter.phase('Synthesizing', 'Merging subtask results');
 
                 await debugLog.logEvent('merge', 'Starting result synthesis');
+
+                await this.hookRunner.run('before_merge', { request, session, plan });
 
                 const finalOutput = await this.mergeResults(
                     request,
@@ -693,6 +707,8 @@ export class Orchestrator {
                     reporter.stream,
                     debugLog
                 );
+
+                await this.hookRunner.run('after_merge', { request, session, plan });
 
                 // Render action buttons
                 reporter.showButtons();
@@ -742,11 +758,14 @@ export class Orchestrator {
             }
 
             // Finalize debug log on success
+            await this.hookRunner.run('on_session_end', { request, session, plan });
             await debugLog.finalize('completed');
 
         } catch (err) {
             session.status = 'failed';
             const classified = classifyError(err);
+
+            await this.hookRunner.run('on_error', { request, session, error: new Error(classified.message) });
 
             // PERSIST — Mark session failed on disk with error details
             await persist.markFailed(session, classified.message);
@@ -768,6 +787,7 @@ export class Orchestrator {
             );
 
             // Finalize debug log on failure
+            await this.hookRunner.run('on_session_end', { request, session });
             await debugLog.finalize('failed', classified.message);
         }
     }
@@ -787,60 +807,85 @@ export class Orchestrator {
         persist?: SessionPersistence,
         priorResults?: Map<string, SubtaskResult>,
         toolToken?: vscode.ChatParticipantToolToken,
-        ledger?: ExecutionLedger
+        ledger?: ExecutionLedger,
+        hookRunner?: HookRunner
     ): Promise<Map<string, SubtaskResult>> {
         const results = new Map<string, SubtaskResult>(priorResults || []);
         const completed = new Set<string>(priorResults ? priorResults.keys() : []);
+        const blocked = new Set<string>(); // Tasks cancelled due to upstream failure
 
-        // Execute subtasks respecting dependencies
-        while (completed.size < plan.subtasks.length) {
+        // ── Validate the dependency graph ──────────────────────────────────
+        const validation = validateGraph(plan);
+        if (!validation.valid) {
+            const issues: string[] = [];
+            if (validation.cycles.length > 0) {
+                issues.push(`Cycles: ${validation.cycles.map(c => c.join(' → ')).join('; ')}`);
+            }
+            if (validation.missingDeps.length > 0) {
+                issues.push(`Missing deps: ${validation.missingDeps.map(m => `${m.taskId} → ${m.missingDep}`).join(', ')}`);
+            }
+            if (validation.orphans.length > 0) {
+                issues.push(`Orphans: ${validation.orphans.join(', ')}`);
+            }
+            throw new Error(`Invalid task graph: ${issues.join('. ')}`);
+        }
+
+        // ── Compute execution waves ────────────────────────────────────────
+        const waves = getExecutionWaves(plan);
+        await debugLog.logEvent('other', `DAG: ${waves.length} waves, max parallelism: ${Math.max(...waves.map(w => w.taskIds.length))}`);
+
+        for (const wave of waves) {
             if (token.isCancellationRequested) {
                 throw new vscode.CancellationError();
             }
 
-            // Find ready subtasks (all dependencies completed)
-            const ready = plan.subtasks.filter(
-                st => !completed.has(st.id) &&
-                    st.dependsOn.every(dep => completed.has(dep))
+            // Filter out already-completed (resume case) and blocked tasks
+            const pendingIds = wave.taskIds.filter(
+                id => !completed.has(id) && !blocked.has(id)
             );
 
-            if (ready.length === 0) {
-                const pending = plan.subtasks
-                    .filter(st => !completed.has(st.id))
-                    .map(st => st.id);
-                throw new Error(
-                    `Execution stalled: no runnable subtasks. Pending: ${pending.join(', ')}.`
-                );
+            if (pendingIds.length === 0) {
+                continue; // Entire wave already done or blocked
             }
 
-            // Execute ready subtasks — parallel when enabled and multiple are ready
-            if (this.config.allowParallelExecution && ready.length > 1 &&
+            const pendingSubtasks = pendingIds
+                .map(id => plan.subtasks.find(st => st.id === id)!)
+                .filter(Boolean);
+
+            // ── Parallel execution when multiple tasks in a wave ───────────
+            if (this.config.allowParallelExecution && pendingSubtasks.length > 1 &&
                 (plan.strategy === 'parallel' || plan.strategy === 'mixed')) {
 
-                // Create worktrees for filesystem isolation if available
                 const useWorktrees = worktreeManager?.isReady() ?? false;
                 if (useWorktrees) {
-                    reporter.emit({ type: 'note', message: `⚡ Running ${ready.length} subtasks in parallel (git worktree isolation)` });
+                    reporter.emit({
+                        type: 'note',
+                        message: `⚡ Wave ${wave.level}: running ${pendingSubtasks.length} subtasks in parallel (git worktree isolation)`,
+                    });
 
-                    // Create a worktree per subtask
-                    for (const subtask of ready) {
+                    for (const subtask of pendingSubtasks) {
                         try {
                             const wt = await worktreeManager!.createWorktree(subtask.id);
                             subtask.worktreePath = wt.worktreePath;
                         } catch (err) {
                             const msg = err instanceof Error ? err.message : String(err);
-                            reporter.emit({ type: 'note', message: `Worktree creation failed for "${subtask.title}": ${msg.substring(0, 100)}. Running without isolation.`, style: 'warning' });
+                            reporter.emit({
+                                type: 'note',
+                                message: `Worktree creation failed for "${subtask.title}": ${msg.substring(0, 100)}. Running without isolation.`,
+                                style: 'warning',
+                            });
                         }
                     }
                 } else {
-                    reporter.emit({ type: 'note', message: `⚡ Running ${ready.length} subtasks in parallel` });
+                    reporter.emit({
+                        type: 'note',
+                        message: `⚡ Wave ${wave.level}: running ${pendingSubtasks.length} subtasks in parallel`,
+                    });
                 }
 
-                // Execute all ready subtasks concurrently
-                const promises = ready.map(async (subtask) => {
+                const promises = pendingSubtasks.map(async (subtask) => {
                     if (token.isCancellationRequested) return;
 
-                    // Register worktree in ledger for parallel awareness
                     if (ledger && subtask.worktreePath) {
                         await ledger.registerWorktree(subtask.id, subtask.worktreePath);
                     }
@@ -851,22 +896,14 @@ export class Orchestrator {
                     }
 
                     const result = await this.executeSubtaskWithEscalation(
-                        subtask,
-                        results,
-                        workspaceContext,
-                        reporter,
-                        token,
-                        debugLog,
-                        persist,
-                        toolToken,
-                        ledger
+                        subtask, results, workspaceContext, reporter, token,
+                        debugLog, persist, toolToken, ledger, hookRunner
                     );
 
                     results.set(subtask.id, result);
                     subtask.result = result;
                     completed.add(subtask.id);
 
-                    // Update ledger with completion status
                     if (ledger) {
                         if (result.success) {
                             await ledger.markCompleted(subtask.id, result.output);
@@ -875,7 +912,6 @@ export class Orchestrator {
                         }
                     }
 
-                    // PERSIST — subtask result to disk
                     if (persist) {
                         await persist.writeSubtaskResult(subtask.id, result, subtask);
                         await persist.appendExecutionLog(
@@ -884,29 +920,65 @@ export class Orchestrator {
                         );
                         await persist.writeStatusMarkdown(plan);
                     }
+
+                    // ── Error propagation: block downstream tasks ──────────
+                    if (!result.success) {
+                        const downstream = getDownstreamTasks(plan, subtask.id);
+                        for (const dId of downstream) {
+                            if (!completed.has(dId)) {
+                                blocked.add(dId);
+                                const dSt = plan.subtasks.find(s => s.id === dId);
+                                if (dSt) {
+                                    dSt.status = 'failed';
+                                    dSt.result = {
+                                        success: false,
+                                        modelUsed: 'none',
+                                        output: '',
+                                        reviewNotes: `Blocked: upstream task "${subtask.title}" (${subtask.id}) failed`,
+                                        durationMs: 0,
+                                        timestamp: new Date().toISOString(),
+                                    };
+                                    results.set(dId, dSt.result);
+                                }
+                            }
+                        }
+                        reporter.emit({
+                            type: 'note',
+                            message: downstream.length > 0
+                                ? `Task "${subtask.title}" failed — ${downstream.length} downstream task(s) blocked`
+                                : `Task "${subtask.title}" failed (no downstream dependents)`,
+                            style: 'warning',
+                        });
+                    }
                 });
 
                 await Promise.all(promises);
 
-                // Merge worktree branches back to the main branch sequentially
+                // Merge worktree branches back sequentially
                 if (useWorktrees) {
-                    const worktreeSubtasks = ready.filter(st => st.worktreePath);
+                    const worktreeSubtasks = pendingSubtasks.filter(st => st.worktreePath);
                     if (worktreeSubtasks.length > 0) {
-                        reporter.emit({ type: 'task-started', id: 'merge-batch', label: 'Merging parallel results' });
+                        reporter.emit({ type: 'task-started', id: `merge-wave-${wave.level}`, label: `Merging wave ${wave.level} results` });
 
                         const mergeResults = await worktreeManager!.mergeAllSequentially(
                             worktreeSubtasks.map(st => st.id)
                         );
 
-                        // Report merge results
                         for (const mr of mergeResults) {
                             if (!mr.success) {
-                                reporter.emit({ type: 'note', message: `**Merge conflict** for "${mr.subtaskId}": ${mr.error}`, style: 'warning' });
+                                reporter.emit({
+                                    type: 'note',
+                                    message: `**Merge conflict** for "${mr.subtaskId}": ${mr.error}`,
+                                    style: 'warning',
+                                });
                                 if (mr.conflictFiles && mr.conflictFiles.length > 0) {
-                                    reporter.emit({ type: 'fileset-discovered', label: 'Conflicting files', files: mr.conflictFiles });
+                                    reporter.emit({
+                                        type: 'fileset-discovered',
+                                        label: 'Conflicting files',
+                                        files: mr.conflictFiles,
+                                    });
                                 }
-                                // Mark the subtask as failed due to merge conflict
-                                const subtask = ready.find(st => st.id === mr.subtaskId);
+                                const subtask = pendingSubtasks.find(st => st.id === mr.subtaskId);
                                 if (subtask?.result) {
                                     subtask.result.success = false;
                                     subtask.result.reviewNotes += ` [MERGE CONFLICT: ${mr.error}]`;
@@ -916,18 +988,17 @@ export class Orchestrator {
                             }
                         }
 
-                        // Clean up worktrees for this batch
                         for (const subtask of worktreeSubtasks) {
                             await worktreeManager!.cleanupWorktree(subtask.id);
                             subtask.worktreePath = undefined;
                         }
 
-                        reporter.emit({ type: 'task-completed', id: 'merge-batch' });
+                        reporter.emit({ type: 'task-completed', id: `merge-wave-${wave.level}` });
                     }
                 }
             } else {
-                // Serial execution
-                for (const subtask of ready) {
+                // ── Serial execution ───────────────────────────────────────
+                for (const subtask of pendingSubtasks) {
                     if (token.isCancellationRequested) break;
 
                     if (persist) {
@@ -936,22 +1007,14 @@ export class Orchestrator {
                     }
 
                     const result = await this.executeSubtaskWithEscalation(
-                        subtask,
-                        results,
-                        workspaceContext,
-                        reporter,
-                        token,
-                        debugLog,
-                        persist,
-                        toolToken,
-                        ledger
+                        subtask, results, workspaceContext, reporter, token,
+                        debugLog, persist, toolToken, ledger, hookRunner
                     );
 
                     results.set(subtask.id, result);
                     subtask.result = result;
                     completed.add(subtask.id);
 
-                    // Update ledger with completion status
                     if (ledger) {
                         if (result.success) {
                             await ledger.markCompleted(subtask.id, result.output);
@@ -960,7 +1023,6 @@ export class Orchestrator {
                         }
                     }
 
-                    // PERSIST — subtask result to disk
                     if (persist) {
                         await persist.writeSubtaskResult(subtask.id, result, subtask);
                         await persist.appendExecutionLog(
@@ -968,6 +1030,36 @@ export class Orchestrator {
                             `${subtask.id}: ${subtask.title} — ${result.modelUsed} (${(result.durationMs / 1000).toFixed(1)}s)`
                         );
                         await persist.writeStatusMarkdown(plan);
+                    }
+
+                    // ── Error propagation: block downstream tasks ──────────
+                    if (!result.success) {
+                        const downstream = getDownstreamTasks(plan, subtask.id);
+                        for (const dId of downstream) {
+                            if (!completed.has(dId)) {
+                                blocked.add(dId);
+                                const dSt = plan.subtasks.find(s => s.id === dId);
+                                if (dSt) {
+                                    dSt.status = 'failed';
+                                    dSt.result = {
+                                        success: false,
+                                        modelUsed: 'none',
+                                        output: '',
+                                        reviewNotes: `Blocked: upstream task "${subtask.title}" (${subtask.id}) failed`,
+                                        durationMs: 0,
+                                        timestamp: new Date().toISOString(),
+                                    };
+                                    results.set(dId, dSt.result);
+                                }
+                            }
+                        }
+                        if (downstream.length > 0) {
+                            reporter.emit({
+                                type: 'note',
+                                message: `Task "${subtask.title}" failed — ${downstream.length} downstream task(s) blocked`,
+                                style: 'warning',
+                            });
+                        }
                     }
                 }
             }
@@ -993,7 +1085,8 @@ export class Orchestrator {
         debugLog: DebugConversationLog,
         persist?: SessionPersistence,
         toolToken?: vscode.ChatParticipantToolToken,
-        ledger?: ExecutionLedger
+        ledger?: ExecutionLedger,
+        hookRunner?: HookRunner
     ): Promise<SubtaskResult> {
         const escalation: EscalationRecord = {
             subtaskId: subtask.id,
@@ -1001,6 +1094,11 @@ export class Orchestrator {
         };
 
         const triedModelIds: string[] = [];
+
+        // Fire before_subtask hook (once, before any attempts)
+        if (hookRunner) {
+            await hookRunner.run('before_subtask', { subtask });
+        }
 
         while (subtask.attempts < subtask.maxAttempts) {
             if (token.isCancellationRequested) {
@@ -1066,13 +1164,60 @@ export class Orchestrator {
             });
 
             // Execute subtask
-            // TODO: Multi-pass integration point
-            // If subtask.taskType is set and subtask.useMultiPass is true:
-            //   1. Get multi-pass strategy: this.modelPicker.getMultiPassStrategyForTask(subtask.taskType)
-            //   2. Execute with MultiPassExecutor: this.multiPassExecutor.execute(strategy, taskType, complexity, context)
-            //   3. If result.shouldEscalate, log reason and continue to next attempt
-            //   4. Otherwise, return result.finalOutput as SubtaskResult
-            // For now, fall through to standard single-pass execution
+            // Multi-pass execution: if the subtask opts in and has a TaskType,
+            // route through MultiPassExecutor for structured verification.
+            if (subtask.useMultiPass && subtask.taskType) {
+                const strategy = getMultiPassStrategy(subtask.taskType);
+                if (strategy) {
+                    getLogger().info(`Using multi-pass strategy "${strategy.type}" for subtask ${subtask.id}`);
+                    reporter.emit({ type: 'task-progress', id: subtask.id, message: `Multi-pass: ${strategy.type}` });
+
+                    // Mark running in ledger before execution
+                    if (ledger) {
+                        await ledger.markRunning(subtask.id, modelInfo.id, subtask.worktreePath || undefined);
+                    }
+
+                    const mpResult = await this.multiPassExecutor.execute(
+                        strategy,
+                        subtask.taskType,
+                        subtask.complexity,
+                        {
+                            taskDescription: subtask.description,
+                            relevantFiles: undefined, // TODO: gather from dependency results
+                            previousAttempts: escalation.attempts.map(a => a.reason || ''),
+                        }
+                    );
+
+                    if (mpResult.success && !mpResult.shouldEscalate) {
+                        subtask.status = 'completed';
+                        if (persist) {
+                            await persist.writeSubtaskUpdate(subtask);
+                        }
+                        reporter.emit({ type: 'task-completed', id: subtask.id, durationMs: mpResult.metadata.timeMs });
+                        return {
+                            success: true,
+                            modelUsed: mpResult.metadata.modelsUsed.join(', '),
+                            output: mpResult.finalOutput,
+                            reviewNotes: `Multi-pass (${strategy.type}): ${mpResult.metadata.totalPasses} passes`,
+                            durationMs: mpResult.metadata.timeMs,
+                            timestamp: new Date().toISOString(),
+                        };
+                    }
+
+                    // Multi-pass failed or wants escalation — fall through to next attempt
+                    getLogger().info(`Multi-pass escalation for ${subtask.id}: ${mpResult.escalationReason}`);
+                    escalation.attempts.push({
+                        modelId: modelInfo.id,
+                        tier: modelInfo.tier,
+                        success: false,
+                        reason: mpResult.escalationReason || 'Multi-pass did not converge',
+                    });
+                    continue;
+                }
+                // No strategy for this TaskType — fall through to single-pass
+            }
+
+            // Standard single-pass execution
 
             // Mark subtask as running in the ledger (captures model + working directory)
             if (ledger) {
@@ -1138,6 +1283,9 @@ export class Orchestrator {
                     await persist.writeSubtaskUpdate(subtask);
                 }
                 reporter.emit({ type: 'task-completed', id: subtask.id, durationMs: result.durationMs });
+                if (hookRunner) {
+                    await hookRunner.run('after_subtask', { subtask, subtaskResult: result });
+                }
                 return result;
             }
 
@@ -1153,7 +1301,7 @@ export class Orchestrator {
         // All attempts exhausted
         subtask.status = 'failed';
         reporter.emit({ type: 'task-failed', id: subtask.id, error: `Failed after ${subtask.attempts} attempts`, label: subtask.title });
-        return {
+        const failResult: SubtaskResult = {
             success: false,
             modelUsed: triedModelIds[triedModelIds.length - 1] || 'none',
             output: '',
@@ -1161,6 +1309,10 @@ export class Orchestrator {
             durationMs: 0,
             timestamp: new Date().toISOString(),
         };
+        if (hookRunner) {
+            await hookRunner.run('after_subtask', { subtask, subtaskResult: failResult });
+        }
+        return failResult;
     }
 
     /**

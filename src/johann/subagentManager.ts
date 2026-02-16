@@ -4,6 +4,10 @@ import { withRetry, REVIEW_RETRY_POLICY, classifyError } from './retry';
 import { DebugConversationLog } from './debugConversationLog';
 import { getConfig } from './config';
 import { ExecutionLedger } from './executionLedger';
+import { extractSummary, distillContext, SUMMARY_BLOCK_INSTRUCTION } from './contextDistiller';
+import { Skill, loadSkillContent } from './skills';
+import { MessageBus, parseHiveSignals, HIVE_SIGNAL_INSTRUCTION } from './messageBus';
+import { HookRunner } from './hooks';
 
 // ============================================================================
 // SUBAGENT MANAGER — Spawns and manages individual subagent executions
@@ -396,7 +400,10 @@ export class SubagentManager {
         stream?: vscode.ChatResponseStream,
         debugLog?: DebugConversationLog,
         toolToken?: vscode.ChatParticipantToolToken,
-        ledger?: ExecutionLedger
+        ledger?: ExecutionLedger,
+        skills?: Skill[],
+        messageBus?: MessageBus,
+        hookRunner?: HookRunner
     ): Promise<SubtaskResult> {
         const startTime = Date.now();
 
@@ -418,7 +425,7 @@ export class SubagentManager {
             }
 
             // Build the prompt with context from dependencies + dynamic ledger state
-            const prompt = this.buildSubagentPrompt(subtask, dependencyResults, dynamicContext);
+            const prompt = this.buildSubagentPrompt(subtask, dependencyResults, dynamicContext, skills);
 
             // Discover available tools
             const tools = this.getAvailableTools();
@@ -495,6 +502,15 @@ export class SubagentManager {
                         responseText: roundText + (toolCalls.length > 0 ? `\n[${toolCalls.length} tool call(s)]` : ''),
                         durationMs: Date.now() - callStart,
                     });
+                }
+
+                // === HIVE SIGNAL EXTRACTION ===
+                // Parse HIVE_SIGNAL patterns from model output and forward to message bus
+                if (roundText.length > 0 && messageBus) {
+                    const signals = parseHiveSignals(roundText);
+                    if (signals.length > 0) {
+                        await messageBus.processSignals(subtask.id, signals);
+                    }
                 }
 
                 // === HALLUCINATION / CORRUPTION GUARD ===
@@ -683,6 +699,25 @@ export class SubagentManager {
                         }
                     } catch {
                         // Non-critical — agent continues without the update
+                    }
+                }
+
+                // ============================================================
+                // CONTEXT LIMIT DETECTION — Pre-compaction flush trigger
+                // Estimate token usage and fire on_context_limit when
+                // approaching 85% of the model's context window.
+                // ============================================================
+                if (hookRunner) {
+                    // Rough estimate: ~4 chars per token for English text/code
+                    const estimatedTokens = Math.ceil(fullOutput.length / 4);
+                    const contextLimit = modelInfo.model.maxInputTokens;
+                    if (contextLimit && estimatedTokens > contextLimit * 0.85) {
+                        await hookRunner.run('on_context_limit', {
+                            subtaskId: subtask.id,
+                            round,
+                            estimatedTokens,
+                            contextLimit,
+                        });
                     }
                 }
             }
@@ -876,11 +911,22 @@ ${result.output.substring(0, 10000)}
     private buildSubagentPrompt(
         subtask: Subtask,
         dependencyResults: Map<string, SubtaskResult>,
-        workspaceContext: string
+        workspaceContext: string,
+        skills?: Skill[]
     ): string {
         const parts: string[] = [];
 
         parts.push(SUBAGENT_SYSTEM_PREFIX);
+
+        // Inject skill-specific instructions if a skill applies to this task
+        if (subtask.skillHint && skills) {
+            const skillContent = loadSkillContent(skills, subtask.skillHint);
+            if (skillContent) {
+                parts.push(`=== SKILL: ${subtask.skillHint} ===`);
+                parts.push(skillContent);
+                parts.push('');
+            }
+        }
 
         if (workspaceContext) {
             parts.push('=== WORKSPACE CONTEXT ===');
@@ -904,17 +950,26 @@ ${result.output.substring(0, 10000)}
             parts.push('');
         }
 
-        // Include results from dependencies (with increased limit now that ledger provides structure)
+        // Include distilled results from dependencies (compact, structured)
         if (subtask.dependsOn.length > 0) {
-            parts.push('=== RESULTS FROM PREVIOUS SUBTASKS ===');
-            for (const depId of subtask.dependsOn) {
-                const depResult = dependencyResults.get(depId);
-                if (depResult && depResult.success) {
-                    parts.push(`\n--- Result from "${depId}" ---`);
-                    parts.push(depResult.output.substring(0, 8000));
+            const hasDeps = subtask.dependsOn.some(depId => {
+                const r = dependencyResults.get(depId);
+                return r && r.success;
+            });
+
+            if (hasDeps) {
+                parts.push('=== DEPENDENCY CONTEXT (distilled) ===');
+                for (const depId of subtask.dependsOn) {
+                    const depResult = dependencyResults.get(depId);
+                    if (depResult && depResult.success) {
+                        const summary = extractSummary(depResult.output);
+                        const distilled = distillContext(summary, 400);
+                        parts.push(`\n[${depId}]`);
+                        parts.push(distilled);
+                    }
                 }
+                parts.push('');
             }
-            parts.push('');
         }
 
         parts.push('=== YOUR TASK ===');
@@ -933,6 +988,12 @@ ${result.output.substring(0, 10000)}
         parts.push('');
         parts.push('REMINDER: Check the CURRENT WORKSPACE STATE above before creating files or directories.');
         parts.push('If a path already exists, use it — do not create duplicates.');
+
+        // Append summary block instruction so the model emits structured metadata
+        parts.push(SUMMARY_BLOCK_INSTRUCTION);
+
+        // Append inter-agent communication instructions
+        parts.push(HIVE_SIGNAL_INSTRUCTION);
 
         return parts.join('\n');
     }

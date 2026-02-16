@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { BackgroundTask, BackgroundTaskStatus, BackgroundTaskProgress } from './types';
+import { safeWrite } from './safeIO';
 
 // ============================================================================
 // BACKGROUND TASK MANAGER
@@ -386,7 +387,7 @@ export class BackgroundTaskManager {
         const content = JSON.stringify(metadata, null, 2);
         
         try {
-            await vscode.workspace.fs.writeFile(taskUri, Buffer.from(content, 'utf-8'));
+            await safeWrite(taskUri, content);
         } catch {
             // Ignore write errors
         }

@@ -32,6 +32,18 @@ export interface Skill {
     dirUri: vscode.Uri;
     /** Supporting files found in the skill directory */
     supportingFiles: string[];
+    /** Keywords for inference-based routing */
+    keywords: string[];
+}
+
+/**
+ * Lightweight skill listing entry — used in system prompts without
+ * loading the full instruction body (lazy loading pattern from OpenClaw).
+ */
+export interface SkillListing {
+    name: string;
+    description: string;
+    keywords: string[];
 }
 
 /**
@@ -73,7 +85,7 @@ async function loadSkill(name: string, dirUri: vscode.Uri): Promise<Skill | unde
         const bytes = await vscode.workspace.fs.readFile(skillMdUri);
         const content = new TextDecoder().decode(bytes);
 
-        const { description, instructions } = parseSkillMd(content, name);
+        const { description, instructions, keywords } = parseSkillMd(content, name);
 
         // Find supporting files
         const entries = await vscode.workspace.fs.readDirectory(dirUri);
@@ -91,6 +103,7 @@ async function loadSkill(name: string, dirUri: vscode.Uri): Promise<Skill | unde
             instructions,
             dirUri,
             supportingFiles,
+            keywords,
         };
     } catch {
         // No SKILL.md — not a valid skill
@@ -119,7 +132,7 @@ async function loadSkill(name: string, dirUri: vscode.Uri): Promise<Skill | unde
  * Instructions here...
  * ```
  */
-function parseSkillMd(content: string, fallbackName: string): { description: string; instructions: string } {
+function parseSkillMd(content: string, fallbackName: string): { description: string; instructions: string; keywords: string[] } {
     // Try YAML front matter first
     const frontMatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
     if (frontMatterMatch) {
@@ -129,7 +142,14 @@ function parseSkillMd(content: string, fallbackName: string): { description: str
         const descMatch = frontMatter.match(/description:\s*(.+)/i);
         const description = descMatch ? descMatch[1].trim() : fallbackName;
 
-        return { description, instructions: body };
+        // Parse keywords from YAML — supports both inline and list formats:
+        //   keywords: api, rest, endpoint
+        //   keywords:
+        //     - api
+        //     - rest
+        const keywords = parseYamlKeywords(frontMatter);
+
+        return { description, instructions: body, keywords };
     }
 
     // Try blockquote description
@@ -158,7 +178,38 @@ function parseSkillMd(content: string, fallbackName: string): { description: str
 
     const instructions = lines.slice(instructionStart).join('\n').trim();
 
-    return { description, instructions };
+    return { description, instructions, keywords: [] };
+}
+
+/**
+ * Parse keywords from YAML front matter.
+ * Handles:
+ *   keywords: api, rest, endpoint
+ *   keywords: [api, rest, endpoint]
+ *   keywords:
+ *     - api
+ *     - rest
+ */
+function parseYamlKeywords(frontMatter: string): string[] {
+    // Inline format: keywords: word1, word2
+    const inlineMatch = frontMatter.match(/^keywords:\s*(.+)$/mi);
+    if (inlineMatch) {
+        const value = inlineMatch[1].trim();
+        // Handle [bracketed] format
+        const cleaned = value.replace(/^\[|\]$/g, '');
+        return cleaned.split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+    }
+
+    // List format: keywords:\n  - word1\n  - word2
+    const listMatch = frontMatter.match(/^keywords:\s*\n((?:\s+-\s+.+\n?)+)/mi);
+    if (listMatch) {
+        return listMatch[1]
+            .split('\n')
+            .map(line => line.replace(/^\s+-\s+/, '').trim().toLowerCase())
+            .filter(Boolean);
+    }
+
+    return [];
 }
 
 /**
@@ -221,4 +272,104 @@ When this skill is triggered:
     await vscode.workspace.fs.writeFile(skillMdUri, new TextEncoder().encode(skillMd));
 
     return loadSkill(name, skillDir);
+}
+
+// ============================================================================
+// Lazy Listing — for system prompt injection (OpenClaw pattern)
+// ============================================================================
+
+/**
+ * Get a lightweight listing of all skills — names, descriptions, keywords —
+ * without loading full instruction bodies.
+ *
+ * This is what goes into the system prompt so the LLM knows what skills
+ * exist. Full content is loaded on demand via `loadSkillContent()`.
+ */
+export function getSkillListing(skills: Skill[]): SkillListing[] {
+    return skills.map(s => ({
+        name: s.name,
+        description: s.description,
+        keywords: s.keywords,
+    }));
+}
+
+/**
+ * Format skill listings as an XML block for system prompt injection.
+ * The model can see available skills and request full content when needed.
+ */
+export function formatSkillListingXml(skills: Skill[]): string {
+    if (skills.length === 0) {
+        return '';
+    }
+
+    const lines = ['<available_skills>'];
+    for (const s of skills) {
+        const kw = s.keywords.length > 0 ? ` keywords="${s.keywords.join(', ')}"` : '';
+        lines.push(`  <skill name="${s.name}" description="${s.description}"${kw} />`);
+    }
+    lines.push('</available_skills>');
+    return lines.join('\n');
+}
+
+/**
+ * Load full skill content by name (lazy loading).
+ * Returns the full instruction body, or undefined if not found.
+ */
+export function loadSkillContent(skills: Skill[], name: string): string | undefined {
+    const skill = skills.find(s => s.name === name);
+    return skill?.instructions;
+}
+
+// ============================================================================
+// Keyword-Based Skill Inference (from CLI System pattern)
+// ============================================================================
+
+/**
+ * Infer the most relevant skill for a task description using keyword matching.
+ *
+ * Tokenizes the task description, counts keyword hits per skill, and returns
+ * the best match (if any). A minimum of 1 keyword match is required.
+ *
+ * @param description  The subtask description to analyze
+ * @param skills       Available skills with keywords
+ * @returns The skill name that best matches, or undefined if no match
+ */
+export function inferSkillFromDescription(
+    description: string,
+    skills: Skill[],
+): string | undefined {
+    if (skills.length === 0) {
+        return undefined;
+    }
+
+    const descLower = description.toLowerCase();
+    const descTokens = new Set(descLower.split(/\W+/).filter(t => t.length > 2));
+
+    let bestSkill: string | undefined;
+    let bestScore = 0;
+
+    for (const skill of skills) {
+        if (skill.keywords.length === 0) {
+            continue;
+        }
+
+        let score = 0;
+        for (const keyword of skill.keywords) {
+            // Exact token match scores higher
+            if (descTokens.has(keyword)) {
+                score += 2;
+            }
+            // Substring match (e.g., "endpoint" in "api endpoints")
+            else if (descLower.includes(keyword)) {
+                score += 1;
+            }
+        }
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestSkill = skill.name;
+        }
+    }
+
+    return bestScore >= 1 ? bestSkill : undefined;
 }

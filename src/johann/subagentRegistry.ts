@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getJohannWorkspaceUri } from './bootstrap';
+import { safeWrite } from './safeIO';
 
 // ============================================================================
 // SUBAGENT REGISTRY — Persistent tracking of spawned subagents
@@ -127,8 +128,7 @@ export class SubagentRegistry {
         };
 
         this.entries.push(entry);
-        // Don't await — fire and forget
-        this.save().catch(() => {});
+        this.scheduleSave();
         return entry;
     }
 
@@ -139,7 +139,7 @@ export class SubagentRegistry {
         const entry = this.entries.find(e => e.id === subagentId);
         if (entry) {
             entry.status = 'running';
-            this.save().catch(() => {});
+            this.scheduleSave();
         }
     }
 
@@ -160,7 +160,7 @@ export class SubagentRegistry {
             entry.success = success;
             entry.outputSummary = outputSummary.substring(0, 1000); // Truncate
             entry.reviewNotes = reviewNotes;
-            this.save().catch(() => {});
+            this.scheduleSave();
         }
     }
 
@@ -172,7 +172,7 @@ export class SubagentRegistry {
         if (entry) {
             entry.status = 'cancelled';
             entry.completedAt = new Date().toISOString();
-            this.save().catch(() => {});
+            this.scheduleSave();
         }
     }
 
@@ -266,6 +266,23 @@ export class SubagentRegistry {
     // PRIVATE
     // ========================================================================
 
+    /**
+     * Debounce timer for save operations.
+     * Rapid state transitions (spawned → running → completed) are coalesced
+     * into a single disk write instead of racing.
+     */
+    private saveTimer: ReturnType<typeof setTimeout> | undefined;
+    private savePromise: Promise<void> | undefined;
+
+    private scheduleSave(): void {
+        if (this.saveTimer) {
+            clearTimeout(this.saveTimer);
+        }
+        this.saveTimer = setTimeout(() => {
+            this.savePromise = this.save();
+        }, 100); // 100ms debounce — coalesces rapid state changes
+    }
+
     private async save(): Promise<void> {
         if (!this.registryUri) return;
 
@@ -277,10 +294,7 @@ export class SubagentRegistry {
 
         try {
             const content = JSON.stringify(snapshot, null, 2);
-            await vscode.workspace.fs.writeFile(
-                this.registryUri,
-                new TextEncoder().encode(content)
-            );
+            await safeWrite(this.registryUri, content);
         } catch {
             // Silently fail
         }

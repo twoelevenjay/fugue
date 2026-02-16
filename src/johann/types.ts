@@ -86,6 +86,8 @@ export interface Subtask {
     worktreePath?: string;
     /** Whether to use multi-pass execution for this subtask */
     useMultiPass?: boolean;
+    /** Skill hint for routing — auto-inferred or manually set */
+    skillHint?: string;
 }
 
 /**

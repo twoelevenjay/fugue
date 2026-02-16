@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getJohannWorkspaceUri } from './bootstrap';
+import { safeAppend } from './safeIO';
 
 // ============================================================================
 // SESSION TRANSCRIPTS — JSONL conversation recording
@@ -215,20 +216,9 @@ export class SessionTranscript {
         const line = JSON.stringify(entry) + '\n';
 
         try {
-            // Read existing content and append
-            let existing = '';
-            try {
-                const bytes = await vscode.workspace.fs.readFile(this.transcriptUri);
-                existing = new TextDecoder().decode(bytes);
-            } catch {
-                // File doesn't exist yet
-            }
-
-            const updated = existing + line;
-            await vscode.workspace.fs.writeFile(
-                this.transcriptUri,
-                new TextEncoder().encode(updated)
-            );
+            // Use safeAppend to prevent data races during parallel execution.
+            // The per-file mutex in safeIO serializes concurrent appends.
+            await safeAppend(this.transcriptUri, line, '', false);
         } catch {
             // Silently fail — transcripts are non-critical
         }
