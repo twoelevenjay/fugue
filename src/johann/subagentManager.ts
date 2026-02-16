@@ -897,6 +897,23 @@ export class SubagentManager {
             };
         }
 
+        // Smart truncation: prioritize the END of the output (which contains the summary block)
+        // but also include the beginning for context
+        const MAX_REVIEW_LENGTH = 20000;
+        let outputForReview = result.output;
+
+        if (result.output.length > MAX_REVIEW_LENGTH) {
+            // Show last 15K chars (includes summary block) + first 4K chars (context)
+            // with a clear marker in between
+            const endChars = 15000;
+            const startChars = 4000;
+            const start = result.output.substring(0, startChars);
+            const end = result.output.substring(result.output.length - endChars);
+            outputForReview = start +
+                `\n\n... [Output truncated: ${result.output.length - startChars - endChars} chars omitted] ...\n\n` +
+                end;
+        }
+
         const reviewPrompt = `
 === SUBTASK ===
 Title: ${subtask.title}
@@ -906,7 +923,7 @@ Description: ${subtask.description}
 ${subtask.successCriteria.map((c, i) => `${i + 1}. ${c}`).join('\n')}
 
 === OUTPUT TO REVIEW ===
-${result.output.substring(0, 10000)}
+${outputForReview}
 `;
 
         try {
