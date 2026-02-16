@@ -11,6 +11,7 @@ import { HookRunner } from './hooks';
 import { RateLimitGuard } from './rateLimitGuard';
 import { FlowCorrectionManager } from './flowCorrection';
 import { DelegationGuard, buildDelegationConstraintBlock, getDelegationPolicy } from './delegationPolicy';
+import { SelfHealingDetector } from './selfHealing';
 
 // ============================================================================
 // SUBAGENT MANAGER — Spawns and manages individual subagent executions
@@ -77,6 +78,17 @@ CRITICAL RULES:
 6. **Prefer file tools over shell file-writing.** Use create/edit/patch file tools for source changes. Avoid brittle shell redirection patterns (heredoc, long echo/printf chains) unless absolutely necessary.
 7. **Recover quickly from terminal issues.** If a shell command pattern fails twice (e.g., heredoc corruption), stop repeating it and switch to safer tools.
 
+FORBIDDEN OUTPUTS (these indicate failure):
+- "Please run..."
+- "You should..."
+- "The user needs to..."
+- "Ask the user to..."
+- "Tell [someone] to..."
+- "Make sure to..."
+- Any instruction directed at a human rather than being an action you take yourself.
+
+If your task requires running a command, YOU run it. If it requires starting a service, YOU start it. If it requires checking system state, YOU check it. You are FULLY AUTONOMOUS.
+
 SITUATIONAL AWARENESS (CRITICAL — READ CAREFULLY):
 - You will receive a CURRENT WORKSPACE STATE section showing the LIVE directory structure.
   Files and directories listed there ALREADY EXIST. Do NOT recreate them.
@@ -118,16 +130,18 @@ REVIEW CHECKLIST — You MUST evaluate ALL of these before making a judgment:
 
 1. **Did real work happen?** The subagent was supposed to USE TOOLS to create files, run commands, and make actual workspace changes. If the output is just instructions, prose, step-by-step guides, or code in markdown blocks telling someone what to do (rather than reporting what was actually done), mark as FAILURE. Look for phrases like "Create a file", "Run the following", "Add this code" — these indicate the agent described work instead of doing it.
 
-2. **No stubs or placeholders.** Search for these red flags in any code output:
+2. **No user-directed instructions.** If the output contains phrases like "Please run...", "You should...", "The user needs to...", "Ask the user to...", "Tell the user to...", "Make sure to run...", or any other instructions directed at a human rather than a report of actions taken, mark as FAILURE. The agent must ACT, not INSTRUCT.
+
+3. **No stubs or placeholders.** Search for these red flags in any code output:
    - Comments like "// TODO", "// Implement", "// Add logic here", "/* Placeholder */"
    - Empty function bodies or functions returning only hardcoded dummy values
    - Components with "Implement rendering logic here" style comments
    - Hooks or utilities that are skeletal shells without real logic
    If ANY are found in critical functionality, mark as FAILURE.
 
-3. **Success criteria met.** Check each criterion individually. ALL must be substantially met.
+4. **Success criteria met.** Check each criterion individually. ALL must be substantially met.
 
-4. **Code correctness.** Look for:
+5. **Code correctness.** Look for:
    - Missing imports or obviously wrong import paths
    - Variables or functions used before definition
    - Type mismatches (in TypeScript)
@@ -135,7 +149,7 @@ REVIEW CHECKLIST — You MUST evaluate ALL of these before making a judgment:
    - Missing error handling for likely failure points
    - Interfaces/types that don't match between files
 
-5. **Completeness.** Are all requested files, components, and features present? Is anything mentioned in the task description but missing from the output?
+6. **Completeness.** Are all requested files, components, and features present? Is anything mentioned in the task description but missing from the output?
 
 Return a JSON object:
 {
@@ -144,6 +158,7 @@ Return a JSON object:
   "suggestions": ["Specific actionable improvement 1", "..."],
   "checklist": {
     "realWorkDone": true/false,
+    "noUserDirectedInstructions": true/false,
     "noStubs": true/false,
     "criteriaMet": true/false,
     "codeCorrect": true/false,
@@ -861,7 +876,8 @@ export class SubagentManager {
         reviewModel: vscode.LanguageModelChat,
         token: vscode.CancellationToken,
         stream?: vscode.ChatResponseStream,
-        debugLog?: DebugConversationLog
+        debugLog?: DebugConversationLog,
+        selfHealing?: SelfHealingDetector
     ): Promise<{ success: boolean; reason: string; suggestions: string[] }> {
         // If the execution itself failed, no need to review
         if (!result.success) {
@@ -940,7 +956,24 @@ ${result.output.substring(0, 10000)}
             }
 
             // Parse the review result
-            return this.parseReviewResult(reviewOutput);
+            const review = this.parseReviewResult(reviewOutput);
+
+            // === SELF-HEALING: Detect failure patterns ===
+            if (selfHealing && !review.success && reviewOutput) {
+                try {
+                    // Pass the raw review output (which has the checklist) along with subtask info
+                    selfHealing.detectFromReview(
+                        subtask.id,
+                        subtask.description,
+                        this.parseReviewJson(reviewOutput), // Parse just the JSON for checklist analysis
+                        result.output
+                    );
+                } catch {
+                    // Detection failed — non-critical, continue
+                }
+            }
+
+            return review;
         } catch {
             // If review fails, default to REJECTING the output — don't rubber-stamp
             return {
@@ -1059,6 +1092,58 @@ ${result.output.substring(0, 10000)}
      * Handles both the legacy format and new checklist format.
      */
     private parseReviewResult(rawOutput: string): { success: boolean; reason: string; suggestions: string[] } {
+        const parsed = this.parseReviewJson(rawOutput);
+        if (!parsed) {
+            // Fallback to failure if parsing fails
+            return {
+                success: false,
+                reason: 'Could not parse review output — defaulting to failure for safety',
+                suggestions: [],
+            };
+        }
+
+        // If the review includes a checklist, ALL checklist items must pass
+        // for the overall review to pass. This prevents rubber-stamp reviews.
+        let success = Boolean(parsed.success);
+        const checklist = parsed.checklist as Record<string, boolean> | undefined;
+        if (checklist && typeof checklist === 'object') {
+            const checklistValues = Object.values(checklist);
+            const allPassed = checklistValues.every(v => v === true);
+            if (!allPassed && success) {
+                // Override: if any checklist item failed, the review fails
+                success = false;
+                const failedItems = Object.entries(checklist)
+                    .filter(([, v]) => v !== true)
+                    .map(([k]) => k);
+                parsed.reason = `Review checklist failures: ${failedItems.join(', ')}. ${parsed.reason || ''}`;
+            }
+        }
+
+        // Preserve flow-correction signals from the raw output.
+        // These are HTML comments like <!--CORRECTION:taskId:problem:hint-->
+        // that live OUTSIDE the JSON block. We append them to `reason` so
+        // they survive into result.reviewNotes and the orchestrator can
+        // parse them with FlowCorrectionManager.parseCorrectionSignals().
+        let reason = String(parsed.reason || '');
+        const correctionSignals = rawOutput.match(/<!--CORRECTION:[^>]+-->/g);
+        if (correctionSignals && correctionSignals.length > 0) {
+            reason += '\n' + correctionSignals.join('\n');
+        }
+
+        return {
+            success,
+            reason,
+            suggestions: Array.isArray(parsed.suggestions)
+                ? parsed.suggestions.map(String)
+                : [],
+        };
+    }
+
+    /**
+     * Parse just the JSON from review output.
+     * Returns the parsed object or undefined if parsing fails.
+     */
+    private parseReviewJson(rawOutput: string): Record<string, unknown> | undefined {
         try {
             let jsonStr = rawOutput.trim();
             const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -1074,56 +1159,13 @@ ${result.output.substring(0, 10000)}
                 if (objMatch) {
                     parsed = JSON.parse(objMatch[0]);
                 } else {
-                    throw new Error('No JSON found');
+                    return undefined;
                 }
             }
 
-            // If the review includes a checklist, ALL checklist items must pass
-            // for the overall review to pass. This prevents rubber-stamp reviews.
-            let success = Boolean(parsed.success);
-            const checklist = parsed.checklist as Record<string, boolean> | undefined;
-            if (checklist && typeof checklist === 'object') {
-                const checklistValues = Object.values(checklist);
-                const allPassed = checklistValues.every(v => v === true);
-                if (!allPassed && success) {
-                    // Override: if any checklist item failed, the review fails
-                    success = false;
-                    const failedItems = Object.entries(checklist)
-                        .filter(([, v]) => v !== true)
-                        .map(([k]) => k);
-                    parsed.reason = `Review checklist failures: ${failedItems.join(', ')}. ${parsed.reason || ''}`;
-                }
-            }
-
-            // Preserve flow-correction signals from the raw output.
-            // These are HTML comments like <!--CORRECTION:taskId:problem:hint-->
-            // that live OUTSIDE the JSON block. We append them to `reason` so
-            // they survive into result.reviewNotes and the orchestrator can
-            // parse them with FlowCorrectionManager.parseCorrectionSignals().
-            let reason = String(parsed.reason || '');
-            const correctionSignals = rawOutput.match(/<!--CORRECTION:[^>]+-->/g);
-            if (correctionSignals && correctionSignals.length > 0) {
-                reason += '\n' + correctionSignals.join('\n');
-            }
-
-            return {
-                success,
-                reason,
-                suggestions: Array.isArray(parsed.suggestions)
-                    ? parsed.suggestions.map(String)
-                    : [],
-            };
+            return parsed;
         } catch {
-            // If we can't parse, default to FAILURE (not success)
-            // A review that can't be parsed should not rubber-stamp the output
-            // Still check for correction signals even in unparseable output
-            const correctionSignals = rawOutput.match(/<!--CORRECTION:[^>]+-->/g);
-            const correctionSuffix = correctionSignals ? '\n' + correctionSignals.join('\n') : '';
-            return {
-                success: false,
-                reason: 'Could not parse review output — defaulting to failure for safety' + correctionSuffix,
-                suggestions: [],
-            };
+            return undefined;
         }
     }
 }

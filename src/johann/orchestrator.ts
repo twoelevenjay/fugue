@@ -13,7 +13,7 @@ import { ModelPicker } from './modelPicker';
 import { TaskDecomposer } from './taskDecomposer';
 import { SubagentManager } from './subagentManager';
 import { MemorySystem } from './memory';
-import { getCopilotAgentSettings } from './config';
+import { getCopilotAgentSettings, getConfig } from './config';
 import { getLogger } from './logger';
 import {
     classifyError,
@@ -38,6 +38,10 @@ import { getExecutionWaves, getDownstreamTasks, validateGraph } from './graphMan
 import { HookRunner, createDefaultHookRunner } from './hooks';
 import { FlowCorrectionManager } from './flowCorrection';
 import { DelegationGuard, getDelegationPolicy, buildDelegationConstraintBlock, DelegationPolicy } from './delegationPolicy';
+import { SelfHealingDetector, DetectedFailure } from './selfHealing';
+import { LocalSkillStore, GlobalSkillStore } from './skillStore';
+import { SkillValidator } from './skillValidator';
+import { SkillDoc } from './skillTypes';
 
 // ============================================================================
 // ORCHESTRATOR — The top-level controller
@@ -72,7 +76,25 @@ RULES:
 - Verify consistency between subtask outputs: do imports match? Do interfaces align? Are there integration gaps?
 - If you spot integration issues, flag them clearly with specific details.
 - Do NOT re-output all the code verbatim. The files already exist. Summarize what was created and highlight any issues.
-- Be thorough but organized.`;
+- Be thorough but organized.
+
+CRITICAL — AGENTIC OUTPUT ONLY:
+Your response must report what WAS DONE, not what the user should do.
+
+FORBIDDEN PHRASES (these indicate you are passing through failed subtask output):
+❌ "Please run..."
+❌ "You should..."
+❌ "You need to..."
+❌ "Make sure to..."
+❌ "Ask [someone] to..."
+❌ "The user should..."
+
+If a subtask's output contains these phrases, it means the subtask FAILED to act agentically.
+DO NOT echo those instructions to the user. Instead, report:
+- "⚠️ Subtask X failed to execute autonomously — it returned instructions instead of taking action."
+- Suggest re-running with corrected instructions.
+
+The user expects a report of completed actions, not a to-do list.`;
 
 export class Orchestrator {
     private modelPicker: ModelPicker;
@@ -86,6 +108,9 @@ export class Orchestrator {
     private rateLimitGuard: RateLimitGuard;
     private flowCorrection: FlowCorrectionManager;
     private delegationGuard: DelegationGuard;
+    private selfHealing: SelfHealingDetector;
+    private skillStore: LocalSkillStore;
+    private skillValidator: SkillValidator;
 
     constructor(config: OrchestratorConfig = DEFAULT_CONFIG) {
         this.config = config;
@@ -99,6 +124,9 @@ export class Orchestrator {
         this.rateLimitGuard = new RateLimitGuard();
         this.flowCorrection = new FlowCorrectionManager();
         this.delegationGuard = new DelegationGuard();
+        this.selfHealing = new SelfHealingDetector();
+        this.skillStore = new LocalSkillStore();
+        this.skillValidator = new SkillValidator();
     }
 
     /**
@@ -1445,7 +1473,8 @@ export class Orchestrator {
                 modelInfo.model, // Use the same model for review
                 token,
                 reporter.stream,
-                debugLog
+                debugLog,
+                this.selfHealing  // Pass self-healing detector
             );
 
             result.success = review.success;
@@ -1470,6 +1499,35 @@ export class Orchestrator {
                 }
                 this.delegationGuard.releaseDelegation();
                 return result;
+            }
+
+            // === SELF-HEALING: Create skills from detected failures ===
+            const detectedFailures = this.selfHealing.getDetectedFailures();
+            if (detectedFailures.length > 0 && getConfig().skillAutonomousCreation) {
+                for (const failure of detectedFailures) {
+                    try {
+                        const skill = await this.selfHealing.createSkillFromFailure(
+                            failure,
+                            this.skillStore,
+                            this.skillValidator
+                        );
+                        if (skill) {
+                            reporter.emit({
+                                type: 'note',
+                                message: `🛠️ **Self-healing:** Created skill "${skill.metadata.slug}" to prevent ${failure.type} in future runs`,
+                                style: 'success',
+                            });
+
+                            // Offer to promote to global (async, non-blocking)
+                            this.offerSkillPromotion(skill).catch(() => {
+                                // Ignore promotion failures
+                            });
+                        }
+                    } catch (err) {
+                        // Skill creation failed — log but don't block escalation
+                        getLogger().warn(`Self-healing skill creation failed: ${err}`);
+                    }
+                }
             }
 
             // Failed review — will escalate
@@ -1802,5 +1860,26 @@ export class Orchestrator {
 
     getModelPicker(): ModelPicker {
         return this.modelPicker;
+    }
+
+    /**
+     * Offer to promote a skill to global scope via user notification.
+     * Non-blocking — shows a notification with "Promote" button.
+     */
+    private async offerSkillPromotion(skill: SkillDoc): Promise<void> {
+        const answer = await vscode.window.showInformationMessage(
+            `🛠️ Self-healing created skill "${skill.metadata.slug}" to prevent ${skill.metadata.tags.join(', ')}. Promote to global to help all projects?`,
+            'Promote to Global',
+            'Keep Local'
+        );
+
+        if (answer === 'Promote to Global') {
+            // To promote, we'd need access to globalStorageUri which lives in the extension context
+            // For now, just notify the user that they can promote manually
+            vscode.window.showInformationMessage(
+                `To promote "${skill.metadata.slug}" to global, run the "Johann: Promote Skill to Global" command.`
+            );
+            getLogger().info(`User requested promotion for skill "${skill.metadata.slug}"`);
+        }
     }
 }

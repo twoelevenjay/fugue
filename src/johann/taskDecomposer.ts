@@ -37,7 +37,27 @@ RULES:
 - Mixed strategy means some tasks can run in parallel, others must be serial.
 - Keep subtask count reasonable (1-10). More subtasks = more overhead.
 
-## Subtask Descriptions
+## Subtask Descriptions — AGENTIC EXECUTION ONLY
+
+CRITICAL RULES FOR SUBTASK DESCRIPTIONS:
+
+**Subtask descriptions are COMMAND PROMPTS for autonomous agents, NOT instructions for the user.**
+
+1. **NEVER write descriptions that tell the USER to do something.** Phrases like "Please run...", "You should...", "The user needs to...", "Ask the user to...", "Tell the user..." are STRICTLY FORBIDDEN.
+
+2. **ALWAYS write descriptions that tell the AGENT to DO something.** Use imperative commands: "Run \`ddev start\`", "Create the file...", "Install dependencies with...", "Check if Docker is running and start it if not..."
+
+3. **Agents have FULL AUTONOMY.** They can run terminal commands, create files, edit code, start services, check system state — everything. If Docker isn't running, the agent can launch it. If DDEV isn't started, the agent can start it. If dependencies aren't installed, the agent can install them.
+
+WRONG (user-directed):
+❌ "description": "Please run \`ddev start\` to start the DDEV environment"
+❌ "description": "Ask the user to ensure Docker Desktop is running"
+❌ "description": "Tell the user to run \`npm install\`"
+
+RIGHT (agent-directed):
+✅ "description": "Check if DDEV is running with \`ddev describe\`. If not running, execute \`ddev start\` to start the DDEV environment. Wait for startup confirmation."
+✅ "description": "Check if Docker Desktop is running with \`docker info\`. If not, launch /Applications/Docker.app (macOS) or equivalent. Wait for Docker daemon to be ready."
+✅ "description": "Run \`npm install\` to install dependencies. Verify package-lock.json was updated successfully."
 
 CRITICAL: Subtask descriptions are the PROMPTS sent to Copilot sessions. They must:
 
