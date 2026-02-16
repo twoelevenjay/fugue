@@ -3,6 +3,7 @@ import { Subtask, SubtaskResult, ModelInfo } from './types';
 import { withRetry, REVIEW_RETRY_POLICY, classifyError } from './retry';
 import { DebugConversationLog } from './debugConversationLog';
 import { getConfig } from './config';
+import { ExecutionLedger } from './executionLedger';
 
 // ============================================================================
 // SUBAGENT MANAGER — Spawns and manages individual subagent executions
@@ -48,6 +49,18 @@ CRITICAL RULES:
 5. **Report what you DID.** Your final response should summarize what you actually did (files created, commands run, changes made), not what should be done.
 6. **Prefer file tools over shell file-writing.** Use create/edit/patch file tools for source changes. Avoid brittle shell redirection patterns (heredoc, long echo/printf chains) unless absolutely necessary.
 7. **Recover quickly from terminal issues.** If a shell command pattern fails twice (e.g., heredoc corruption), stop repeating it and switch to safer tools.
+
+SITUATIONAL AWARENESS (CRITICAL — READ CAREFULLY):
+- You will receive a CURRENT WORKSPACE STATE section showing the LIVE directory structure.
+  Files and directories listed there ALREADY EXIST. Do NOT recreate them.
+- You will receive a COMPLETED SUBTASKS section showing what previous agents have done.
+  Do NOT redo their work. Build UPON what they created, using the paths they established.
+- If a previous subtask created a directory (e.g., "frontend/"), navigate INTO it — do NOT create
+  a new one. Check the workspace snapshot first.
+- If you are running in PARALLEL with other agents, you will see their status.
+  Avoid modifying files they are likely editing. Each parallel agent has its own worktree.
+- BEFORE creating any file or directory, CHECK the workspace snapshot. If it already exists,
+  use or modify it instead of creating a duplicate.
 
 IF YOU OUTPUT INSTRUCTIONS OR PROSE INSTEAD OF MAKING ACTUAL CHANGES WITH YOUR TOOLS, YOU HAVE FAILED THE TASK.
 
@@ -298,13 +311,30 @@ export class SubagentManager {
         token: vscode.CancellationToken,
         stream?: vscode.ChatResponseStream,
         debugLog?: DebugConversationLog,
-        toolToken?: vscode.ChatParticipantToolToken
+        toolToken?: vscode.ChatParticipantToolToken,
+        ledger?: ExecutionLedger
     ): Promise<SubtaskResult> {
         const startTime = Date.now();
 
         try {
-            // Build the prompt with context from dependencies
-            const prompt = this.buildSubagentPrompt(subtask, dependencyResults, workspaceContext);
+            // Capture fresh workspace snapshot if ledger is available
+            let dynamicContext = workspaceContext;
+            if (ledger?.isReady()) {
+                // Snapshot the directory the subagent will operate in
+                const snapshotDir = subtask.worktreePath || undefined;
+                const freshSnapshot = await ledger.captureWorkspaceSnapshot(snapshotDir);
+                // Build rich execution context from the ledger
+                const ledgerContext = ledger.buildContextForSubagent(
+                    subtask.id,
+                    freshSnapshot,
+                    true
+                );
+                // Dynamic context = ledger context + original workspace metadata
+                dynamicContext = ledgerContext + '\n\n' + workspaceContext;
+            }
+
+            // Build the prompt with context from dependencies + dynamic ledger state
+            const prompt = this.buildSubagentPrompt(subtask, dependencyResults, dynamicContext);
 
             // Discover available tools
             const tools = this.getAvailableTools();
@@ -647,7 +677,13 @@ ${result.output.substring(0, 10000)}
     }
 
     /**
-     * Build the full prompt for a subagent, including dependency context.
+     * Build the full prompt for a subagent, including dependency context
+     * and dynamic execution state from the ledger.
+     *
+     * The workspaceContext parameter may already contain ledger context
+     * (current workspace snapshot + completed subtask summaries + parallel
+     * agent awareness) if the ExecutionLedger was available. This gives
+     * every subagent a real-time view of the orchestration state.
      */
     private buildSubagentPrompt(
         subtask: Subtask,
@@ -680,14 +716,14 @@ ${result.output.substring(0, 10000)}
             parts.push('');
         }
 
-        // Include results from dependencies
+        // Include results from dependencies (with increased limit now that ledger provides structure)
         if (subtask.dependsOn.length > 0) {
             parts.push('=== RESULTS FROM PREVIOUS SUBTASKS ===');
             for (const depId of subtask.dependsOn) {
                 const depResult = dependencyResults.get(depId);
                 if (depResult && depResult.success) {
                     parts.push(`\n--- Result from "${depId}" ---`);
-                    parts.push(depResult.output.substring(0, 5000));
+                    parts.push(depResult.output.substring(0, 8000));
                 }
             }
             parts.push('');
@@ -704,6 +740,11 @@ ${result.output.substring(0, 10000)}
                 parts.push(`- ${criterion}`);
             }
         }
+
+        // Final reminder about workspace awareness
+        parts.push('');
+        parts.push('REMINDER: Check the CURRENT WORKSPACE STATE above before creating files or directories.');
+        parts.push('If a path already exists, use it — do not create duplicates.');
 
         return parts.join('\n');
     }

@@ -78,12 +78,21 @@ export class ModelPicker {
 
     /**
      * Check if a model is allowed based on configuration settings.
+     * Checks both blockedModels patterns AND the allowOpusEscalation gate.
      */
     private isModelAllowed(modelInfo: ModelInfo): boolean {
         const config = getConfig();
         const searchStr = `${modelInfo.id} ${modelInfo.family} ${modelInfo.name}`.toLowerCase();
 
-        // Check blocked models first (takes precedence)
+        // Gate 1: Block Opus models unless explicitly enabled.
+        // Opus models have costMultiplier >= 3 (category 'opus' in MODEL_TIER_MAP).
+        // This prevents Opus from appearing in available models, being selected
+        // for any complexity level, or showing up in model summaries.
+        if (modelInfo.costMultiplier >= 3 && !(config.allowOpusEscalation ?? false)) {
+            return false;
+        }
+
+        // Gate 2: Check blocked models list (takes precedence over everything else)
         if (config.blockedModels.length > 0) {
             for (const pattern of config.blockedModels) {
                 try {
@@ -502,14 +511,25 @@ export class ModelPicker {
             lines.push('');
         }
         
+        // Opus status
+        if (config.allowOpusEscalation) {
+            lines.push('⚡ **Opus escalation:** ENABLED (3×+ cost models available)');
+        } else {
+            lines.push('🔒 **Opus escalation:** DISABLED (Opus/O1-Pro models hidden)');
+        }
+        lines.push('');
+
         // Model restrictions
         if (config.blockedModels.length > 0) {
             lines.push(`🚫 **Blocked models:** ${config.blockedModels.join(', ')}`);
             lines.push('');
         }
         
-        if (config.blockedModels.length === 0) {
-            lines.push('ℹ️ No model restrictions configured (all available models allowed)');
+        if (config.blockedModels.length === 0 && !config.allowOpusEscalation) {
+            lines.push('ℹ️ No additional model restrictions (Opus blocked by default)');
+            lines.push('');
+        } else if (config.blockedModels.length === 0 && config.allowOpusEscalation) {
+            lines.push('ℹ️ No model restrictions — all discovered models allowed (including Opus)');
             lines.push('');
         }
         
@@ -542,6 +562,7 @@ export class ModelPicker {
         lines.push('**Configuration:**');
         lines.push(`- Model Picker: ${config.modelPickerEnabled ? 'Enabled' : 'Disabled'}`);
         lines.push(`- Fixed Model: ${config.fixedModel || '(not set)'}`);
+        lines.push(`- Opus Escalation: ${config.allowOpusEscalation ? 'ENABLED' : 'DISABLED (default)'}`);
         lines.push(`- Blocked Patterns: ${config.blockedModels.length > 0 ? config.blockedModels.join(', ') : '(none)'}`);
         lines.push('');
         

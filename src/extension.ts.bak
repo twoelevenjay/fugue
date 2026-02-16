@@ -977,6 +977,167 @@ CRITICAL RULES - CONSERVATIVE APPROACH:
 14. Return ONLY valid JSON, no markdown, no explanations.
 
 REMEMBER: Your job is to identify GENUINE ambiguities that would lead to different implementation approaches. Use the systematic checklist above - don't rely on intuition alone. The user wants thorough context engineering, not minimal interruptions at the cost of clarity.`;
+The user is very likely dictating via a talk-to-text system (e.g., Wispr Flow). This means:
+- The input will read like natural speech: rambling, stream-of-consciousness, with filler words.
+- Talk-to-text systems frequently introduce TRANSCRIPTION ERRORS:
+  • Homophones and near-homophones (e.g., "Johan" vs "Johann", "your" vs "you're", "their" vs "there")
+  • Mangled technical terms (e.g., "typescript" → "type script", "GitHub" → "get hub")
+  • Proper names and brand names may be wrong (e.g., a library called "Prisma" transcribed as "prism")
+  • Words that sound similar but mean different things in context
+  • Repeated or phantom words inserted by the STT engine
+
+When you detect a potential transcription discrepancy:
+1. FIRST — Check the WORKSPACE CONTEXT below. If a word looks like a mangled version of a file name, folder, package, variable, or project name that exists in the workspace, silently resolve it to the correct term and note the correction in "suspectedTranscriptionIssues".
+2. SECOND — Use your training knowledge. If a technical term, library name, or well-known concept is clearly misspelled/misheard, silently resolve it and note the correction.
+3. LAST RESORT — If you CANNOT confidently resolve the discrepancy from the codebase or your knowledge, DO NOT GUESS. Instead, add it as a follow-up question in "missingInfo" with field "transcription" so the user can clarify.
+
+Examples:
+- User says "the yohan agent" but workspace has a folder called "johann" → resolve to "johann", note in suspectedTranscriptionIssues: "Resolved 'yohan' → 'johann' (matches workspace folder src/johann/)"
+- User says "we're using prism for the database" and package.json has "prisma" → resolve to "Prisma", note the correction
+- User says "the flack API" and you're unsure if they mean Flask or Flack → ask in missingInfo: "You mentioned 'flack API' — did you mean Flask (Python web framework) or something else?"
+
+${workspaceContext ? `IMPORTANT - WORKSPACE CONTEXT:
+The user is working in a specific workspace. Use this context to understand references like project names, paths, and terminology. This is your PRIMARY source for resolving potential transcription errors:
+
+${workspaceContext}
+
+---
+
+` : ''}Analyze the user's request and return a JSON object with this EXACT structure:
+{
+  "contextPacket": {
+    "goal": "The main goal/objective. Preserve all specifics mentioned - if they said 'hooks inspired by WordPress action and filter hooks', include that exact framing.",
+    "currentState": "COMPREHENSIVE description of current state. Include ALL mentioned: what exists, relationships between systems, what APIs are built, what's missing.",
+    "constraints": ["Array of ALL constraints, requirements, architectural decisions, and rules mentioned - err on the side of including too much"],
+    "inputsArtifacts": ["Array of ACTUAL files, repos, and artifacts that EXIST in the user's workspace and are relevant to the task. Use the WORKSPACE CONTEXT to identify real paths. DO NOT list files from external systems, reference material, or example architectures the user described — those belong in additionalContext instead."],
+    "outputFormat": "What format they need the output in (code, docs, analysis, etc.) - or empty string if not mentioned",
+    "successCriteria": ["Array of success criteria or what 'done' looks like - or empty array if not mentioned"],
+    "nonGoals": ["Things explicitly mentioned as out of scope"],
+    "additionalContext": "ALL other relevant context - examples given, analogies used (like WordPress), technical concepts explained (action hooks vs filter hooks), relationships between components, lifecycle concepts, etc. BE THOROUGH.",
+    "suspectedTranscriptionIssues": ["Array of transcription issues detected and how they were resolved. Format: 'Resolved X → Y (reason)' for auto-resolved, or empty if none found. Unresolvable issues go in missingInfo instead."]
+  },
+  "missingInfo": [
+    {
+      "index": 1,
+      "question": "A specific, contextual question about what's missing",
+      "field": "Which field this would fill (goal, outputFormat, successCriteria, constraint, transcription, etc.)"
+    }
+  ],
+  "isComplete": true/false
+}
+
+CRITICAL RULES - PRESERVE ALL DISTINCT INFORMATION:
+1. PRESERVE ALL DISTINCT FACTS - If the user mentioned "action hooks and filter hooks inspired by WordPress", that concept must appear. If they mentioned "Pre-Backend, Mid-Backend, Post-Backend", those must appear.
+2. PRESERVE RELATIONSHIPS - If user explains how System A relates to System B (e.g., "shell provides hooks API to boilerplate"), that relationship must be captured.
+3. PRESERVE EXAMPLES - If user gave examples (HID devices, webcam, digital scale, convention panels), include ALL of them.
+4. PRESERVE TECHNICAL CONCEPTS - If user explained a concept (action hooks = execute code at lifecycle point, filter hooks = pass value through for modification), preserve that explanation.
+5. USE THE WORKSPACE CONTEXT - Resolve aliases/keys to full paths when referenced. Also use it to catch and correct talk-to-text errors on project-specific terms.
+6. OK TO CONDENSE:
+   - Deduplicate: If the same fact is mentioned twice, keep one instance
+   - Organize: If fragments about the same topic are scattered, merge them together
+   - Paraphrase: "sometimes, always, most of the time" → "frequently"
+   - Remove filler: um, uh, you know, like, basically
+   - Fix obvious STT artifacts: "type script" → "TypeScript", "get hub" → "GitHub" (note in suspectedTranscriptionIssues)
+7. DO NOT REMOVE: distinct facts, examples, analogies, relationships, technical concepts, or anything that adds context - even if it could be stated more briefly.
+
+CRITICAL RULES - GENERATING CLARIFYING QUESTIONS:
+Follow this SYSTEMATIC PROCESS to identify what questions to ask:
+
+STEP 1 - IDENTIFY AMBIGUITIES (check each category):
+a) **Multiple interpretations**: Does any part of the request have 2+ valid interpretations?
+   - Example: "update the dashboard" → which dashboard? (user dashboard, admin panel, analytics view)
+   - Example: "add authentication" → OAuth, JWT, session-based, API keys, or combination?
+   
+b) **Vague scope boundaries**: Where exactly does the work start/stop?
+   - Example: "integrate payment processing" → full checkout flow or just payment capture? refunds? webhooks?
+   - Example: "improve performance" → optimize what specific bottleneck? [page load, API response, database queries]
+   
+c) **Underspecified behavior**: How should edge cases or alternatives be handled?
+   - Example: "validate user input" → what happens on validation failure? [show errors inline, redirect, modal]
+   - Example: "sync data between systems" → real-time or batch? conflict resolution strategy?
+   
+d) **Missing critical context for decision-making**: What information would materially change the implementation approach?
+   - Example: "add search functionality" → full-text search across 1K records or faceted search across millions?
+   - Example: User mentions "integrate with the API" without specifying WHICH API (internal vs external, REST vs GraphQL)
+
+e) **Contradictory statements**: Did user say things that conflict?
+   - Example: "keep it simple" but then describes 8 complex integration points
+   - Example: "don't change the data model" but requests features that require new relationships
+
+f) **Unclear pronouns or references**: "Add it to that system" - what is "it" and "that system"?
+   - Only ask if you truly can't resolve from context
+
+STEP 2 - FILTER OUT NON-QUESTIONS:
+DO NOT ask about:
+- Things clearly implied by context ("implement feature X" → obviously need code + tests)
+- Standard practices (file extensions, common patterns)  
+- Details typically decided during implementation (exact variable names, folder structure for new features)
+- Information that will be automatically resolved (framework compatibility checks, codebase searches)
+- Clarifications where any reasonable choice would work fine
+
+STEP 3 - CRAFT SPECIFIC, CONTEXTUAL QUESTIONS:
+For each ambiguity that passed Step 2:
+✓ GOOD: Grounded in their specific request
+  "You mentioned updating the user profile page - should this include avatar upload or just text fields?"
+  "The notification system you described - should it support email, in-app, or both?"
+  
+✗ BAD: Generic or detached from their context
+  "What features do you want?"
+  "What programming language?"
+  "How should this work?"
+
+STEP 4 - EXAMPLES OF GOOD VS BAD QUESTIONS:
+
+EXAMPLE 1 - User says: "Add a settings page"
+❌ BAD: "What should the settings page include?" (too generic)
+✓ GOOD: "You mentioned a settings page - should it manage user preferences, system configuration, or both? Are there specific settings you need (e.g., notifications, privacy, integrations)?"
+
+EXAMPLE 2 - User says: "Make the app work offline"  
+❌ BAD: "How should offline mode work?" (too broad)
+✓ GOOD: "For offline functionality - should users be able to create/edit data offline (requires conflict resolution) or just view previously loaded data?"
+
+EXAMPLE 3 - User says: "Refactor the authentication code"
+❌ BAD: "Why do you want to refactor it?" (questioning their intent)
+✓ GOOD: "You mentioned refactoring authentication - are you aiming to add new auth methods (OAuth, SSO), improve security, or simplify the code structure?"
+
+EXAMPLE 4 - User mentions "the API" without clarification
+❌ BAD: "What API?" (too terse)
+✓ GOOD: "You referenced 'the API' - did you mean the internal backend API at /api/v1, or are you integrating with an external third-party API?"
+
+EXAMPLE 5 - User says: "Build a recommendation system"
+❌ BAD: "What algorithm should we use?" (implementation detail)
+✓ GOOD: "For recommendations - are you thinking simple collaborative filtering based on user behavior, or do you need real-time personalization with ML models? This affects whether we need external services or can handle it in-app."
+
+STEP 5 - DETERMINE isComplete:
+Set "isComplete": false if ANY of these are true:
+- The goal itself is ambiguous (could be interpreted 2+ fundamentally different ways)
+- Multiple valid implementation approaches exist and user's preference would significantly change the work
+- You identified critical missing context using the checklist in Step 1
+- There are unresolved transcription errors that affect meaning
+
+Set "isComplete": true if:
+- You have a clear, singular understanding of what they want
+- Any remaining uncertainties are normal implementation details
+- You could write a comprehensive prompt that would lead to good results
+
+CRITICAL RULES - CONSERVATIVE APPROACH:
+8. BE CONSERVATIVE about marking complete with weak context. After you extract the context packet, the system will automatically:
+   - Search the codebase for answers (files, source code, configs)
+   - Attempt to resolve using certain, unambiguous factual knowledge
+   - ONLY ask the user as a last resort
+9. However, DO ask about genuine ambiguities that change the implementation approach — don't assume you know what they meant.
+10. Questions must be SPECIFIC to their request, not generic. BAD: "What language?" GOOD: "You mentioned the authentication system - does it use JWT or session-based tokens?"
+11. DO NOT ask about:
+   - File extensions or programming languages if detectable from context
+   - Framework compatibility (this will be checked via knowledge resolution)
+   - Standard configurations or defaults
+   - Implementation details that are typically decided during coding
+   - Version numbers unless critical to the task
+12. If the output format is implied (e.g., "implement hooks" implies code + documentation), fill it in - don't ask.
+13. DO NOT GUESS on ambiguous transcription issues — those SHOULD go in missingInfo with field "transcription".
+14. Return ONLY valid JSON, no markdown, no explanations.
+
+REMEMBER: Your job is to identify GENUINE ambiguities that would lead to different implementation approaches. Use the systematic checklist above - don't rely on intuition alone. The user wants thorough context engineering, not minimal interruptions at the cost of clarity.`;
 }
 
 function getCompilePrompt(workspaceContext: string): string {

@@ -103,7 +103,7 @@
       }
     ],
     "configuration": {
-      "title": "Johann — Orchestration Agent",
+      "title": "Fugue — Johann Orchestration Settings",
       "properties": {
         "johann.maxSubtasks": {
           "type": "number",
@@ -368,7 +368,8 @@
           "type": "boolean",
           "default": false,
           "order": 270,
-          "description": "Allow escalation to expensive Opus models (3× or higher cost) when cheaper models fail. Default: false. Enable only if you explicitly want to use Opus models."
+          "description": "Allow Opus and O1-Pro models (3× or higher cost). When disabled (default), these models are completely hidden — they won't appear in model lists, won't be selected for any task, and won't be escalated to.",
+          "markdownDescription": "**Allow expensive Opus models (3× or higher cost).**\n\nWhen **disabled** (default):\n- Claude Opus 4.1/4.5/4.6 and O1-Pro are completely hidden\n- They won't appear in model lists or diagnostics\n- They won't be selected for any task complexity\n- They won't be escalated to when cheaper models fail\n\nWhen **enabled**:\n- Opus models become available for selection and escalation\n- Johann may use them for `expert` complexity tasks or when all cheaper models fail\n\n⚠️ Only enable if you explicitly want to use premium-tier models."
         }
       }
     }

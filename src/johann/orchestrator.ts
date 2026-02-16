@@ -24,6 +24,7 @@ import {
 } from './retry';
 import { DebugConversationLog } from './debugConversationLog';
 import { WorktreeManager, WorktreeMergeResult } from './worktreeManager';
+import { ExecutionLedger } from './executionLedger';
 import { ChatProgressReporter } from './chatProgressReporter';
 import { BackgroundProgressReporter } from './backgroundProgressReporter';
 import { BackgroundTaskManager } from './backgroundTaskManager';
@@ -154,6 +155,24 @@ export class Orchestrator {
                 workspaceContext = `=== COURSE CORRECTION (from user on resume) ===\n${resumeMessage}\n\n---\n\n${workspaceContext}`;
             }
 
+            // Initialize ledger for resumed session
+            const resumeLedger = new ExecutionLedger(
+                resumable.sessionId,
+                resumable.originalRequest,
+                plan.summary
+            );
+            const resumeLedgerReady = await resumeLedger.initialize();
+            if (resumeLedgerReady) {
+                resumeLedger.registerSubtasks(plan.subtasks.map(st => ({ id: st.id, title: st.title })));
+                // Mark already-completed subtasks in the ledger
+                for (const completedId of resumable.completedSubtaskIds) {
+                    const result = results.get(completedId);
+                    if (result) {
+                        await resumeLedger.markCompleted(completedId, result.output);
+                    }
+                }
+            }
+
             // Execute remaining subtasks using the same executePlan logic
             // (executePlan already skips completed tasks via the `completed` set)
             const newResults = await this.executePlan(
@@ -164,7 +183,9 @@ export class Orchestrator {
                 debugLog,
                 undefined, // no worktree manager for resume (keep it simple)
                 persist,
-                results   // pass prior results so dependencies are satisfied
+                results,   // pass prior results so dependencies are satisfied
+                undefined, // no toolToken for resume
+                resumeLedgerReady ? resumeLedger : undefined
             );
 
             // Merge all results together
@@ -373,6 +394,14 @@ export class Orchestrator {
 
             await debugLog.logEvent('subtask-execution', `Starting execution of ${plan.subtasks.length} subtasks`);
 
+            // Initialize the Execution Ledger for shared real-time context
+            const ledger = new ExecutionLedger(session.sessionId, request, plan.summary);
+            const ledgerReady = await ledger.initialize();
+            if (ledgerReady) {
+                ledger.registerSubtasks(plan.subtasks.map(st => ({ id: st.id, title: st.title })));
+                await debugLog.logEvent('other', `Execution ledger initialized with ${plan.subtasks.length} subtasks`);
+            }
+
             // Initialize worktree manager for parallel isolation
             let worktreeManager: WorktreeManager | undefined;
             if (this.config.useWorktrees && plan.strategy !== 'serial') {
@@ -403,7 +432,8 @@ export class Orchestrator {
                     worktreeManager,
                     persist,
                     undefined,
-                    toolToken
+                    toolToken,
+                    ledgerReady ? ledger : undefined
                 );
 
                 // == PHASE 3: MERGE & RESPOND ==
@@ -618,6 +648,14 @@ export class Orchestrator {
 
             await debugLog.logEvent('subtask-execution', `Starting execution of ${plan.subtasks.length} subtasks`);
 
+            // Initialize the Execution Ledger for shared real-time context
+            const ledger2 = new ExecutionLedger(session.sessionId, request, plan.summary);
+            const ledger2Ready = await ledger2.initialize();
+            if (ledger2Ready) {
+                ledger2.registerSubtasks(plan.subtasks.map(st => ({ id: st.id, title: st.title })));
+                await debugLog.logEvent('other', `Execution ledger initialized with ${plan.subtasks.length} subtasks`);
+            }
+
             // Initialize worktree manager for parallel isolation
             let worktreeManager: WorktreeManager | undefined;
             if (this.config.useWorktrees && plan.strategy !== 'serial') {
@@ -637,7 +675,7 @@ export class Orchestrator {
             try {
                 // Pass subagentContext (minimal workspace context without Johann's identity)
                 // to prevent subagents from confusing themselves with Johann
-                const results = await this.executePlan(plan, subagentContext, reporter, token, debugLog, worktreeManager, persist, undefined, toolToken);
+                const results = await this.executePlan(plan, subagentContext, reporter, token, debugLog, worktreeManager, persist, undefined, toolToken, ledger2Ready ? ledger2 : undefined);
 
                 // == PHASE 3: MERGE & RESPOND ==
                 session.status = 'reviewing';
@@ -748,7 +786,8 @@ export class Orchestrator {
         worktreeManager?: WorktreeManager,
         persist?: SessionPersistence,
         priorResults?: Map<string, SubtaskResult>,
-        toolToken?: vscode.ChatParticipantToolToken
+        toolToken?: vscode.ChatParticipantToolToken,
+        ledger?: ExecutionLedger
     ): Promise<Map<string, SubtaskResult>> {
         const results = new Map<string, SubtaskResult>(priorResults || []);
         const completed = new Set<string>(priorResults ? priorResults.keys() : []);
@@ -801,6 +840,11 @@ export class Orchestrator {
                 const promises = ready.map(async (subtask) => {
                     if (token.isCancellationRequested) return;
 
+                    // Register worktree in ledger for parallel awareness
+                    if (ledger && subtask.worktreePath) {
+                        await ledger.registerWorktree(subtask.id, subtask.worktreePath);
+                    }
+
                     if (persist) {
                         await persist.appendExecutionLog('SUBTASK START', `${subtask.id}: ${subtask.title} (${subtask.complexity})`);
                         await persist.writeStatusMarkdown(plan, subtask.id);
@@ -814,12 +858,22 @@ export class Orchestrator {
                         token,
                         debugLog,
                         persist,
-                        toolToken
+                        toolToken,
+                        ledger
                     );
 
                     results.set(subtask.id, result);
                     subtask.result = result;
                     completed.add(subtask.id);
+
+                    // Update ledger with completion status
+                    if (ledger) {
+                        if (result.success) {
+                            await ledger.markCompleted(subtask.id, result.output);
+                        } else {
+                            await ledger.markFailed(subtask.id, result.reviewNotes || 'Unknown failure');
+                        }
+                    }
 
                     // PERSIST — subtask result to disk
                     if (persist) {
@@ -889,12 +943,22 @@ export class Orchestrator {
                         token,
                         debugLog,
                         persist,
-                        toolToken
+                        toolToken,
+                        ledger
                     );
 
                     results.set(subtask.id, result);
                     subtask.result = result;
                     completed.add(subtask.id);
+
+                    // Update ledger with completion status
+                    if (ledger) {
+                        if (result.success) {
+                            await ledger.markCompleted(subtask.id, result.output);
+                        } else {
+                            await ledger.markFailed(subtask.id, result.reviewNotes || 'Unknown failure');
+                        }
+                    }
 
                     // PERSIST — subtask result to disk
                     if (persist) {
@@ -928,7 +992,8 @@ export class Orchestrator {
         token: vscode.CancellationToken,
         debugLog: DebugConversationLog,
         persist?: SessionPersistence,
-        toolToken?: vscode.ChatParticipantToolToken
+        toolToken?: vscode.ChatParticipantToolToken,
+        ledger?: ExecutionLedger
     ): Promise<SubtaskResult> {
         const escalation: EscalationRecord = {
             subtaskId: subtask.id,
@@ -1008,6 +1073,16 @@ export class Orchestrator {
             //   3. If result.shouldEscalate, log reason and continue to next attempt
             //   4. Otherwise, return result.finalOutput as SubtaskResult
             // For now, fall through to standard single-pass execution
+
+            // Mark subtask as running in the ledger (captures model + working directory)
+            if (ledger) {
+                await ledger.markRunning(
+                    subtask.id,
+                    modelInfo.id,
+                    subtask.worktreePath || undefined
+                );
+            }
+
             const result = await this.subagentManager.executeSubtask(
                 subtask,
                 modelInfo,
@@ -1016,7 +1091,8 @@ export class Orchestrator {
                 token,
                 reporter.stream,
                 debugLog,
-                toolToken
+                toolToken,
+                ledger
             );
 
             if (!result.success) {
