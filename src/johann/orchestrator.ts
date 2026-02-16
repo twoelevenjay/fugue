@@ -36,6 +36,7 @@ import { getMultiPassStrategy } from './multiPassStrategies';
 import { ToolVerifier } from './toolVerifier';
 import { getExecutionWaves, getDownstreamTasks, validateGraph } from './graphManager';
 import { HookRunner, createDefaultHookRunner } from './hooks';
+import { FlowCorrectionManager } from './flowCorrection';
 
 // ============================================================================
 // ORCHESTRATOR — The top-level controller
@@ -82,6 +83,7 @@ export class Orchestrator {
     private toolVerifier: ToolVerifier;
     private hookRunner: HookRunner;
     private rateLimitGuard: RateLimitGuard;
+    private flowCorrection: FlowCorrectionManager;
 
     constructor(config: OrchestratorConfig = DEFAULT_CONFIG) {
         this.config = config;
@@ -93,6 +95,7 @@ export class Orchestrator {
         this.toolVerifier = new ToolVerifier(getLogger());
         this.hookRunner = createDefaultHookRunner();
         this.rateLimitGuard = new RateLimitGuard();
+        this.flowCorrection = new FlowCorrectionManager();
     }
 
     /**
@@ -817,6 +820,10 @@ export class Orchestrator {
         const completed = new Set<string>(priorResults ? priorResults.keys() : []);
         const blocked = new Set<string>(); // Tasks cancelled due to upstream failure
 
+        // Maximum number of correction cycles to prevent infinite re-runs
+        const MAX_CORRECTION_CYCLES = 3;
+        let correctionCycle = 0;
+
         // ── Validate the dependency graph ──────────────────────────────────
         const validation = validateGraph(plan);
         if (!validation.valid) {
@@ -834,8 +841,19 @@ export class Orchestrator {
         }
 
         // ── Compute execution waves ────────────────────────────────────────
+        // Wrapped in a correction-aware outer loop: if a downstream task
+        // discovers an upstream mistake, we invalidate + re-run affected tasks.
+        let wavesNeedRecompute = true;
+
+        while (wavesNeedRecompute && correctionCycle <= MAX_CORRECTION_CYCLES) {
+        wavesNeedRecompute = false; // Will be set to true if corrections trigger
+
         const waves = getExecutionWaves(plan);
-        await debugLog.logEvent('other', `DAG: ${waves.length} waves, max parallelism: ${Math.max(...waves.map(w => w.taskIds.length))}`);
+        if (correctionCycle === 0) {
+            await debugLog.logEvent('other', `DAG: ${waves.length} waves, max parallelism: ${Math.max(...waves.map(w => w.taskIds.length))}`);
+        } else {
+            await debugLog.logEvent('other', `DAG (correction cycle ${correctionCycle}): re-computing ${waves.length} waves`);
+        }
 
         for (const wave of waves) {
             if (token.isCancellationRequested) {
@@ -953,6 +971,37 @@ export class Orchestrator {
                             style: 'warning',
                         });
                     }
+
+                    // ── Flow correction: check review for upstream correction signals ──
+                    if (result.success && result.reviewNotes) {
+                        const corrections = FlowCorrectionManager.parseCorrectionSignals(
+                            result.reviewNotes, subtask.id
+                        );
+                        for (const correction of corrections) {
+                            const corrResult = this.flowCorrection.requestCorrection(
+                                correction, plan, results, completed
+                            );
+                            if (corrResult.accepted) {
+                                // Remove invalidated tasks from blocked set too
+                                for (const invId of corrResult.invalidatedTasks) {
+                                    blocked.delete(invId);
+                                }
+                                wavesNeedRecompute = true;
+                                reporter.emit({
+                                    type: 'note',
+                                    message: `🔄 Flow correction: "${subtask.title}" found issue in upstream "${correction.targetTaskId}". ` +
+                                        `Re-running ${corrResult.invalidatedTasks.length} task(s).`,
+                                    style: 'warning',
+                                });
+                            } else {
+                                reporter.emit({
+                                    type: 'note',
+                                    message: `⚠️ Correction rejected: ${corrResult.reason}`,
+                                    style: 'warning',
+                                });
+                            }
+                        }
+                    }
                 });
 
                 await Promise.all(promises);
@@ -1064,9 +1113,46 @@ export class Orchestrator {
                             });
                         }
                     }
+
+                    // ── Flow correction: check review for upstream correction signals ──
+                    if (result.success && result.reviewNotes) {
+                        const corrections = FlowCorrectionManager.parseCorrectionSignals(
+                            result.reviewNotes, subtask.id
+                        );
+                        for (const correction of corrections) {
+                            const corrResult = this.flowCorrection.requestCorrection(
+                                correction, plan, results, completed
+                            );
+                            if (corrResult.accepted) {
+                                for (const invId of corrResult.invalidatedTasks) {
+                                    blocked.delete(invId);
+                                }
+                                wavesNeedRecompute = true;
+                                reporter.emit({
+                                    type: 'note',
+                                    message: `🔄 Flow correction: "${subtask.title}" found issue in upstream "${correction.targetTaskId}". ` +
+                                        `Re-running ${corrResult.invalidatedTasks.length} task(s).`,
+                                    style: 'warning',
+                                });
+                            } else {
+                                reporter.emit({
+                                    type: 'note',
+                                    message: `⚠️ Correction rejected: ${corrResult.reason}`,
+                                    style: 'warning',
+                                });
+                            }
+                        }
+                    }
                 }
             }
         }
+
+        if (wavesNeedRecompute) {
+            correctionCycle++;
+            continue; // Re-compute waves with corrected tasks back in pending
+        }
+
+        } // end correction-aware outer loop
 
         if (token.isCancellationRequested) {
             throw new vscode.CancellationError();
@@ -1178,6 +1264,17 @@ export class Orchestrator {
             });
 
             // Execute subtask
+            // Inject correction context if this task has been corrected
+            let effectiveWorkspaceContext = workspaceContext;
+            if (this.flowCorrection.hasPendingCorrections(subtask.id)) {
+                const correctionCtx = this.flowCorrection.buildCorrectionContext(subtask.id);
+                effectiveWorkspaceContext = correctionCtx + workspaceContext;
+                reporter.emit({
+                    type: 'note',
+                    message: `🔄 Re-running "${subtask.title}" with correction guidance`,
+                });
+            }
+
             // Multi-pass execution: if the subtask opts in and has a TaskType,
             // route through MultiPassExecutor for structured verification.
             if (subtask.useMultiPass && subtask.taskType) {
@@ -1246,7 +1343,7 @@ export class Orchestrator {
                 subtask,
                 modelInfo,
                 dependencyResults,
-                workspaceContext,
+                effectiveWorkspaceContext,
                 token,
                 reporter.stream,
                 debugLog,

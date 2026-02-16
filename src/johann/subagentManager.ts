@@ -9,6 +9,7 @@ import { Skill, loadSkillContent } from './skills';
 import { MessageBus, parseHiveSignals, HIVE_SIGNAL_INSTRUCTION } from './messageBus';
 import { HookRunner } from './hooks';
 import { RateLimitGuard } from './rateLimitGuard';
+import { FlowCorrectionManager } from './flowCorrection';
 
 // ============================================================================
 // SUBAGENT MANAGER — Spawns and manages individual subagent executions
@@ -150,6 +151,8 @@ Return a JSON object:
 }
 
 A review that passes everything without citing specific evidence is WRONG. Analyze the output thoroughly.
+
+${FlowCorrectionManager.CORRECTION_SIGNAL_INSTRUCTION}
 
 Return ONLY valid JSON.`;
 
@@ -1055,9 +1058,20 @@ ${result.output.substring(0, 10000)}
                 }
             }
 
+            // Preserve flow-correction signals from the raw output.
+            // These are HTML comments like <!--CORRECTION:taskId:problem:hint-->
+            // that live OUTSIDE the JSON block. We append them to `reason` so
+            // they survive into result.reviewNotes and the orchestrator can
+            // parse them with FlowCorrectionManager.parseCorrectionSignals().
+            let reason = String(parsed.reason || '');
+            const correctionSignals = rawOutput.match(/<!--CORRECTION:[^>]+-->/g);
+            if (correctionSignals && correctionSignals.length > 0) {
+                reason += '\n' + correctionSignals.join('\n');
+            }
+
             return {
                 success,
-                reason: String(parsed.reason || ''),
+                reason,
                 suggestions: Array.isArray(parsed.suggestions)
                     ? parsed.suggestions.map(String)
                     : [],
@@ -1065,7 +1079,14 @@ ${result.output.substring(0, 10000)}
         } catch {
             // If we can't parse, default to FAILURE (not success)
             // A review that can't be parsed should not rubber-stamp the output
-            return { success: false, reason: 'Could not parse review output — defaulting to failure for safety', suggestions: [] };
+            // Still check for correction signals even in unparseable output
+            const correctionSignals = rawOutput.match(/<!--CORRECTION:[^>]+-->/g);
+            const correctionSuffix = correctionSignals ? '\n' + correctionSignals.join('\n') : '';
+            return {
+                success: false,
+                reason: 'Could not parse review output — defaulting to failure for safety' + correctionSuffix,
+                suggestions: [],
+            };
         }
     }
 }
