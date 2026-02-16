@@ -21,6 +21,14 @@ import { ExecutionLedger } from './executionLedger';
 /** Maximum number of tool-calling loop iterations to prevent runaway agents. */
 const MAX_TOOL_ROUNDS = 30;
 
+/**
+ * How often (in tool-loop rounds) to re-read the ledger and inject an update
+ * into the running agent's conversation. Lower = more awareness, higher = less
+ * prompt bloat. Every HIVE_MIND_REFRESH_INTERVAL rounds the agent gets a
+ * compact "what changed" message from the hive mind.
+ */
+const HIVE_MIND_REFRESH_INTERVAL = 5;
+
 /** Known problematic tools that can expose invalid schemas in some environments. */
 const TOOL_NAME_BLOCKLIST = new Set<string>([
     'mcp_gitkraken_gitkraken_workspace_list',
@@ -61,6 +69,20 @@ SITUATIONAL AWARENESS (CRITICAL — READ CAREFULLY):
   Avoid modifying files they are likely editing. Each parallel agent has its own worktree.
 - BEFORE creating any file or directory, CHECK the workspace snapshot. If it already exists,
   use or modify it instead of creating a duplicate.
+
+HIVE MIND (LIVE AWARENESS):
+- You are part of a **hive mind** — a network of agents sharing state in real time.
+- Every few rounds, you will receive a 🐝 HIVE MIND UPDATE message injected into your conversation.
+  This tells you what other agents have accomplished, what files they created, and what's still running.
+  **READ THESE UPDATES CAREFULLY.** They may change what you need to do.
+- You also BROADCAST your actions — every tool call you make is logged to a shared journal that
+  other agents can read. This means they know what you're doing, just as you know what they're doing.
+- If a hive mind update shows that another agent has ALREADY created files or directories you were
+  about to create, STOP and integrate their work instead of duplicating it.
+- If a hive mind update shows that another agent FAILED, consider whether your task needs to
+  compensate or adjust.
+- Think of yourself as a neuron in a larger brain — you have your own task, but you are aware of
+  and responsive to the collective state.
 
 IF YOU OUTPUT INSTRUCTIONS OR PROSE INSTEAD OF MAKING ACTUAL CHANGES WITH YOUR TOOLS, YOU HAVE FAILED THE TASK.
 
@@ -496,6 +518,55 @@ export class SubagentManager {
                 }
                 if (missingCallIdWarnings.length > 0) {
                     messages.push(vscode.LanguageModelChatMessage.User(missingCallIdWarnings.join('\n')));
+                }
+
+                // ============================================================
+                // HIVE MIND — Outbound signal: journal what we just did
+                // ============================================================
+                if (ledger?.isReady()) {
+                    const journalEntries = ledger.buildToolRoundJournalEntry(
+                        toolCalls.map(tc => ({ name: tc.name, input: tc.input })),
+                        roundText
+                    );
+                    for (const entry of journalEntries) {
+                        await ledger.appendJournal(subtask.id, entry);
+                    }
+                }
+
+                // ============================================================
+                // HIVE MIND — Inbound signal: periodic ledger refresh
+                // Every HIVE_MIND_REFRESH_INTERVAL rounds, re-read the ledger
+                // from disk (the orchestrator may have updated it as other
+                // agents complete) and inject a compact update message.
+                // ============================================================
+                if (
+                    ledger?.isReady() &&
+                    round % HIVE_MIND_REFRESH_INTERVAL === 0 &&
+                    round < MAX_TOOL_ROUNDS
+                ) {
+                    try {
+                        // Re-read ledger.json from disk to pick up changes from
+                        // the orchestrator (other agents completing, etc.)
+                        await ledger.reloadFromDisk();
+
+                        // Build a compact update — much smaller than the full
+                        // context to avoid bloating the conversation
+                        const hiveMindUpdate = ledger.buildMidRoundRefresh(
+                            subtask.id,
+                            round
+                        );
+
+                        // Inject as a user message so the model sees it
+                        messages.push(
+                            vscode.LanguageModelChatMessage.User(hiveMindUpdate)
+                        );
+
+                        if (stream) {
+                            stream.markdown(`\n> 🐝 Hive mind refresh (round ${round})\n`);
+                        }
+                    } catch {
+                        // Non-critical — agent continues without the update
+                    }
                 }
             }
 

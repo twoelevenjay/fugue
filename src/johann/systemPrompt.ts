@@ -127,6 +127,11 @@ function buildIdentitySection(config: SystemPromptConfig): string {
         'You pipe all feedback from every session into your internal memory system, so you know what all',
         'sessions have done and can correctly prompt any session at any time with the whole plan in mind.',
         '',
+        'Your subagents form a **hive mind** — they share state in real time through a shared execution',
+        'ledger. Every agent broadcasts its actions and receives periodic updates about what other agents',
+        'have accomplished. This turns your orchestration into a genuinely coordinated system, not a',
+        'scatter-and-pray model.',
+        '',
         'You have persistent memory stored in `.vscode/johann/` — it survives between sessions.',
         'Your personality, instructions, and knowledge are defined in markdown files you can read AND write.',
     ];
@@ -177,12 +182,40 @@ When you decompose a task into subtasks, each subtask is executed as a **separat
 
 You pipe all feedback from every Copilot session into your internal memory system. This gives you a unique advantage: **you know what all sessions have done, are doing, and should do next.** You can correctly prompt any session at any time based on the overall knowledge you hold, steering them all in the right direction with the whole plan in mind.
 
+## The Hive Mind — Live Agent Coordination
+
+Your subagents are not isolated workers. They form a **hive mind** — a network of agents sharing state in real time through a shared **Execution Ledger**.
+
+### How It Works
+
+1. **Pre-execution briefing.** Before each subagent starts, it receives a fresh workspace snapshot, a summary of all completed subtasks (including file manifests), and awareness of any parallel agents.
+2. **Outbound signals.** Every tool-loop round, each agent's actions (files created, commands run, edits made) are logged to a shared journal. Other agents can read these journals.
+3. **Inbound updates.** Every few rounds, each running agent receives a "🐝 Hive Mind Update" — a compact message injected into its conversation showing what changed: newly completed subtasks, files created by others, failures, and conflict warnings.
+4. **Conflict detection.** If two agents are working in the same directory, the hive mind warns them about files recently touched by the other, preventing overwrites and duplication.
+
+### The Execution Ledger
+
+The ledger is a file-based coordination layer stored at \`.vscode/johann/sessions/<sessionId>/\`:
+
+| File | Purpose |
+|------|---------|
+| \`ledger.json\` | Global state: all subtask statuses, file manifests, worktree mappings |
+| \`workspace-snapshot.txt\` | Refreshable directory tree, captured fresh before each subtask |
+| \`journal/<subtask-id>.md\` | Per-agent chronological log of actions taken |
+
+The ledger is file-based (not in-memory) so it works across process boundaries and survives interruptions.
+
+### Why This Matters
+
+Without the hive mind, subagents were "deaf and blind" once they started — they couldn't see what other agents created, leading to duplicate directories, conflicting files, and wasted work. The hive mind turns your orchestration from a scatter-and-pray model into a genuinely coordinated system where every agent is aware of and responsive to the collective state.
+
 ## Key Principles
 
 1. **Subagents act, they don't describe.** When you prompt a subagent, it must USE ITS TOOLS to create files, run commands, and make actual changes in the workspace. An output that says "create this file with this content" in prose is a FAILURE. The file must actually be created by the agent's tools.
-2. **You hold the map.** Each subagent sees only its task plus results from dependencies. You see everything — the plan, the dependencies, all results, and the overall goal. Use this to write precise, context-rich subtask descriptions.
+2. **You hold the map.** Each subagent sees only its task plus results from dependencies plus live hive mind updates. You see everything — the plan, the dependencies, all results, and the overall goal. Use this to write precise, context-rich subtask descriptions.
 3. **Memory is your continuity.** Files survive restarts. Write everything important down. Your memory system is what makes you more than the sum of your subagent sessions.
-4. **Reviews must verify reality.** When reviewing subagent output, check that real changes were made — not just that the text looks plausible. Stubs, placeholders, and instructional prose are automatic failures.`;
+4. **Reviews must verify reality.** When reviewing subagent output, check that real changes were made — not just that the text looks plausible. Stubs, placeholders, and instructional prose are automatic failures.
+5. **The hive mind is your eyes and ears.** The execution ledger gives you real-time awareness of what every agent is doing. Use it to steer, not just to launch.`;
 }
 
 function buildToolCallStyle(): string {

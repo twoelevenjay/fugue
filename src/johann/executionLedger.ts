@@ -650,6 +650,159 @@ export class ExecutionLedger {
     }
 
     // ========================================================================
+    // HIVE MIND — Mid-round refresh for live inter-agent awareness
+    // ========================================================================
+
+    /**
+     * Reload the ledger state from disk.
+     *
+     * During a subagent's tool loop the orchestrator may update the ledger
+     * (e.g. marking other subtasks as completed). This method re-reads
+     * ledger.json so the in-memory state reflects those changes. Non-critical
+     * — returns silently if the file is missing or unparseable.
+     */
+    async reloadFromDisk(): Promise<boolean> {
+        if (!this.sessionDir) return false;
+
+        const ledgerUri = vscode.Uri.joinPath(this.sessionDir, 'ledger.json');
+        try {
+            const bytes = await vscode.workspace.fs.readFile(ledgerUri);
+            const parsed = JSON.parse(new TextDecoder().decode(bytes)) as LedgerState;
+            this.state = parsed;
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    /**
+     * Build a compact mid-round refresh for injection into a running agent's
+     * conversation. This is the **inbound** half of the hive mind — it tells
+     * the agent what changed since it last checked.
+     *
+     * Much smaller than the full `buildContextForSubagent()` output so it
+     * doesn't bloat the conversation context.
+     *
+     * @param forSubtaskId  The subtask receiving this update
+     * @param currentRound  The tool-loop round that triggered this refresh
+     */
+    buildMidRoundRefresh(forSubtaskId: string, currentRound: number): string {
+        const parts: string[] = [];
+        parts.push(`\n\n=== 🐝 HIVE MIND UPDATE (round ${currentRound}) ===`);
+
+        // ── Completed subtasks (may have finished while we were working) ──
+        const completed = this.state.subtasks.filter(
+            st => st.status === 'completed' && st.id !== forSubtaskId
+        );
+        const running = this.state.subtasks.filter(
+            st => st.status === 'running' && st.id !== forSubtaskId
+        );
+        const failed = this.state.subtasks.filter(
+            st => st.status === 'failed' && st.id !== forSubtaskId
+        );
+
+        if (completed.length > 0) {
+            parts.push('\n**Completed by other agents:**');
+            for (const st of completed) {
+                const files = st.fileManifest.length > 0
+                    ? ` → ${st.fileManifest.slice(0, 8).map(f => f.relativePath).join(', ')}${st.fileManifest.length > 8 ? '…' : ''}`
+                    : '';
+                parts.push(`  ✅ ${st.title}${files}`);
+            }
+        }
+
+        if (running.length > 0) {
+            parts.push('\n**Currently running (parallel agents):**');
+            for (const st of running) {
+                parts.push(`  🔄 ${st.title} — in ${st.workingDirectory || 'main workspace'}`);
+            }
+        }
+
+        if (failed.length > 0) {
+            parts.push('\n**Failed:**');
+            for (const st of failed) {
+                parts.push(`  ❌ ${st.title}: ${st.error || 'unknown'}`);
+            }
+        }
+
+        // ── Global notes (environment changes) ──
+        if (this.state.globalNotes.length > 0) {
+            parts.push('\n**Environment notes:**');
+            for (const note of this.state.globalNotes.slice(-5)) {
+                parts.push(`  • ${note}`);
+            }
+        }
+
+        // ── Conflict warnings ──
+        // Check if any completed subtask touched paths we might also be touching
+        // (basic heuristic — flag recently completed work in the same directories)
+        const myEntry = this.state.subtasks.find(st => st.id === forSubtaskId);
+        const myDir = myEntry?.workingDirectory || this.state.workspaceRoot;
+        const recentlyTouched = completed
+            .filter(st => st.workingDirectory === myDir || !st.workingDirectory)
+            .flatMap(st => st.fileManifest.map(f => f.relativePath));
+        if (recentlyTouched.length > 0) {
+            parts.push('\n⚠️ **Files recently created/modified in YOUR working directory by other agents:**');
+            for (const p of recentlyTouched.slice(0, 15)) {
+                parts.push(`  • ${p}`);
+            }
+            parts.push('  → Do NOT overwrite these. Read them first if you need to integrate.');
+        }
+
+        parts.push('\n=== END HIVE MIND UPDATE ===\n');
+        return parts.join('\n');
+    }
+
+    /**
+     * Build a journal entry summarizing what tools a subagent called in a
+     * given round. This is the **outbound** half of the hive mind — it lets
+     * other agents know what this one has been doing.
+     */
+    buildToolRoundJournalEntry(
+        toolCalls: Array<{ name: string; input?: unknown }>,
+        roundText: string
+    ): JournalEntry[] {
+        const entries: JournalEntry[] = [];
+
+        for (const tc of toolCalls) {
+            let description = `Called tool: ${tc.name}`;
+            let entryPath: string | undefined;
+            let type: JournalEntry['type'] = 'note';
+
+            const input = tc.input as Record<string, unknown> | undefined;
+
+            if (tc.name === 'create_file' && input?.filePath) {
+                type = 'file-create';
+                entryPath = String(input.filePath);
+                description = `Created file: ${entryPath}`;
+            } else if (tc.name === 'replace_string_in_file' && input?.filePath) {
+                type = 'file-edit';
+                entryPath = String(input.filePath);
+                description = `Edited file: ${entryPath}`;
+            } else if (tc.name === 'multi_replace_string_in_file') {
+                type = 'file-edit';
+                description = `Edited multiple files`;
+            } else if (tc.name === 'run_in_terminal' && input?.command) {
+                type = 'command';
+                description = `Ran command: ${String(input.command).substring(0, 120)}`;
+            } else if (tc.name === 'create_directory' && input?.path) {
+                type = 'directory-create';
+                entryPath = String(input.path);
+                description = `Created directory: ${entryPath}`;
+            }
+
+            entries.push({
+                timestamp: new Date().toISOString(),
+                type,
+                description,
+                path: entryPath,
+            });
+        }
+
+        return entries;
+    }
+
+    // ========================================================================
     // ACCESSORS
     // ========================================================================
 

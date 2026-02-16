@@ -16,7 +16,8 @@
 8. [Subagent System](#subagent-system)
 9. [Bootstrap & Self-Evolution](#bootstrap--self-evolution)
 10. [Skills System](#skills-system)
-11. [Session Transcripts](#session-transcripts)
+11. [Execution Ledger & Hive Mind](#execution-ledger--hive-mind)
+12. [Session Transcripts](#session-transcripts)
 12. [Heartbeat System](#heartbeat-system)
 13. [Directives (Slash Commands)](#directives-slash-commands)
 14. [Configuration Reference](#configuration-reference)
@@ -218,7 +219,7 @@ User sends request to @johann
 
 Johann documents its actions in text files to enable **internal communication and programming awareness among agents**. This is a critical design principle:
 
-1. **Files as Shared State:** The `.vscode/johann/` directory acts as a shared filesystem between the main agent and all subagents. Any agent can read these files to understand what has happened.
+1. **Files as Shared State:** The `.vscode/johann/` directory acts as a shared filesystem between the main agent and all subagents. Any agent can read these files to understand what has happened. The **Execution Ledger** extends this principle to real-time coordination: subagents write journals when they act, and read ledger updates when they pause, creating a continuous two-way information flow.
 
 2. **Daily Notes (`memory/YYYY-MM-DD.md`):** Raw working memory. Events, observations, learnings, decisions, and errors are appended throughout the day. This is the "scratchpad" — the agent's stream of consciousness.
 
@@ -252,6 +253,8 @@ Johann documents its actions in text files to enable **internal communication an
 | Heartbeat Tasks | `HEARTBEAT.md` | Periodic check list | Yes |
 | Sessions | `sessions/*.jsonl` | Conversation transcripts | Read-only (auto-generated) |
 | Registry | `registry/*.json` | Subagent tracking | Read-only (auto-generated) |
+| Execution Ledger | `sessions/<id>/ledger.json` | Real-time orchestration state | Read-only (auto-generated) |
+| Agent Journals | `sessions/<id>/journal/*.md` | Per-agent action logs (hive mind) | Read-only (auto-generated) |
 | Skills | `skills/*/SKILL.md` | Discoverable skill definitions | Yes |
 
 ---
@@ -312,9 +315,11 @@ Spawned → Running → [Review] → Completed/Failed → [Escalated]
 Each subagent:
 - Gets its own prompt (self-contained with all needed context)
 - Gets reduced bootstrap files (only `AGENTS.md` + `TOOLS.md`)
-- Has NO awareness of other subagents running simultaneously
+- Participates in the **hive mind** — receives pre-execution context from the ledger and periodic mid-round updates showing what other agents have done, are doing, and have created
 - Cannot initiate heartbeats, memory maintenance, or proactive actions
 - Is ephemeral — may be terminated after completion
+
+See [Execution Ledger & Hive Mind](#execution-ledger--hive-mind) for full details on inter-agent coordination.
 
 ### Dependency Resolution
 
@@ -381,6 +386,107 @@ When this skill is triggered:
 1. Do step one
 2. Do step two
 ```
+
+---
+
+## Execution Ledger & Hive Mind
+
+### The Problem
+
+Without coordination, subagents are "deaf and blind" once they start their tool loop. Agent A might create `frontend/` while Agent B, running in parallel, creates its own `frontend/` — resulting in triple-nested directories, conflicting files, and wasted work. Even sequential agents suffered: they received a workspace snapshot from the *start* of the session, not the current state after prior agents had modified the filesystem.
+
+### The Solution: Shared Execution Ledger
+
+The Execution Ledger is a **file-based coordination layer** that gives every subagent real-time awareness of the orchestration state. It stores its data at `.vscode/johann/sessions/<sessionId>/`:
+
+| File | Purpose |
+|------|---------|
+| `ledger.json` | Global state: all subtask statuses, file manifests, worktree mappings, global notes |
+| `workspace-snapshot.txt` | Refreshable directory tree, captured fresh before each subtask |
+| `journal/<subtask-id>.md` | Per-agent chronological log of every tool call and action taken |
+
+### Design Principles
+
+- **File-based, not in-memory** → works across process boundaries, survives interruptions
+- **Append-only journals** → safe for concurrent writes
+- **Snapshots are always fresh** → generated right before each subtask starts
+- **Ledger updates are atomic** → written after each subtask completes
+- **Size-limited summaries** → prevent prompt overflow
+
+### The Hive Mind: Three Layers of Awareness
+
+The hive mind operates through three coordinated layers:
+
+#### Layer 1: Pre-Execution Briefing
+
+Before each subagent starts, it receives:
+- A **fresh workspace snapshot** — the actual current directory tree, not a stale copy
+- **Completed subtask summaries** — what previous agents did, including file manifests
+- **Parallel agent awareness** — which other agents are running, in which worktrees
+- **Upcoming subtasks** — what's coming next, to avoid scope conflicts
+
+#### Layer 2: Outbound Signals (Every Round)
+
+Every tool-loop round, each agent's actions are logged to its shared journal:
+- Files created, edited, or deleted
+- Terminal commands run
+- Directories created
+
+Other agents (and the orchestrator) can read these journals to understand what each agent has been doing in real time.
+
+#### Layer 3: Inbound Updates (Every N Rounds)
+
+Every `HIVE_MIND_REFRESH_INTERVAL` rounds (default: 5), the agent receives a **🐝 Hive Mind Update** injected into its conversation:
+1. The ledger is re-read from disk (the orchestrator may have updated it as other agents complete)
+2. A compact update is built showing: newly completed subtasks, files created by others, failures, running agents
+3. **Conflict warnings** flag files recently touched by other agents in the same directory
+4. The update is injected as a user message so the model processes it naturally
+
+### Conflict Detection
+
+The hive mind includes basic conflict detection:
+- If two agents share a working directory, each agent's mid-round refresh lists files recently created/modified by the other
+- Agents are instructed to read (not overwrite) files flagged in conflict warnings
+- Worktree isolation (git worktrees) provides a hard boundary for truly parallel execution
+
+### Data Flow Diagram
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                       EXECUTION LEDGER                                │
+│                  (ledger.json on disk)                                 │
+│                                                                       │
+│  ┌──────────┐   ┌──────────┐   ┌──────────┐   ┌──────────┐         │
+│  │ subtask-1│   │ subtask-2│   │ subtask-3│   │ subtask-4│         │
+│  │ ✅ done  │   │ 🔄 running│  │ 🔄 running│  │ ⏳ pending│        │
+│  └──────────┘   └──────────┘   └──────────┘   └──────────┘         │
+└───────────────────────┬──────────────┬───────────────────────────────┘
+                        │              │
+            ┌───────────▼──┐    ┌──────▼──────────┐
+            │  Agent B      │    │  Agent C         │
+            │               │    │                  │
+            │  Round 5:     │    │  Round 5:        │
+            │  📥 Re-read   │    │  📥 Re-read      │
+            │     ledger    │    │     ledger       │
+            │  📊 See A ✅   │    │  📊 See A ✅      │
+            │  ⚠️ Conflict?  │    │  ℹ️ No conflict  │
+            │               │    │                  │
+            │  Every round: │    │  Every round:    │
+            │  📤 Write to  │    │  📤 Write to     │
+            │     journal   │    │     journal      │
+            └───────────────┘    └──────────────────┘
+```
+
+### Implementation Details
+
+| Component | File | Key Methods |
+|-----------|------|-------------|
+| Ledger class | `executionLedger.ts` | `initialize()`, `markRunning()`, `markCompleted()`, `markFailed()` |
+| Pre-execution context | `executionLedger.ts` | `buildContextForSubagent()`, `captureWorkspaceSnapshot()` |
+| Mid-round refresh | `executionLedger.ts` | `reloadFromDisk()`, `buildMidRoundRefresh()` |
+| Outbound journaling | `executionLedger.ts` | `buildToolRoundJournalEntry()`, `appendJournal()` |
+| Tool loop integration | `subagentManager.ts` | Injected after tool results in the `while` loop |
+| Orchestrator hookup | `orchestrator.ts` | Created in `orchestrate()`, passed through `executePlan()` |
 
 ---
 
