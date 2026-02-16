@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as os from 'os';
-import * as fs from 'fs/promises';
-import { execFile } from 'child_process';
+import * as fs from 'fs/promises'; // eslint-disable-line no-restricted-imports -- Required: worktrees live in os.tmpdir(), outside workspace (vscode.workspace.fs cannot reach)
+import { execFile } from 'child_process'; // eslint-disable-line no-restricted-imports -- Required: no VS Code API for git worktree operations
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
@@ -71,6 +71,21 @@ export class WorktreeManager {
         this.sessionId = sessionId;
         // Keep worktrees in OS temp to avoid polluting the workspace
         this.baseDir = path.join(os.tmpdir(), 'johann-worktrees', sessionId);
+    }
+
+    /**
+     * SECURITY: Validate that a path is under the expected worktree base
+     * before performing destructive operations (fs.rm).
+     * Prevents accidental deletion of paths outside the temp directory.
+     */
+    private assertSafePath(targetPath: string): void {
+        const expectedPrefix = path.join(os.tmpdir(), 'johann-worktrees');
+        const resolved = path.resolve(targetPath);
+        if (!resolved.startsWith(expectedPrefix)) {
+            throw new Error(
+                `SECURITY: Refusing to delete path outside worktree base: ${resolved}`
+            );
+        }
     }
 
     // ========================================================================
@@ -293,7 +308,7 @@ export class WorktreeManager {
             ]);
         } catch {
             // Force-remove the directory if git worktree remove fails
-            try { await fs.rm(info.worktreePath, { recursive: true, force: true }); } catch { /* */ }
+            try { this.assertSafePath(info.worktreePath); await fs.rm(info.worktreePath, { recursive: true, force: true }); } catch { /* */ }
         }
 
         // Delete the tracking branch
@@ -316,6 +331,7 @@ export class WorktreeManager {
 
         // Remove the session temp directory
         try {
+            this.assertSafePath(this.baseDir);
             await fs.rm(this.baseDir, { recursive: true, force: true });
         } catch { /* may already be gone */ }
 
@@ -425,7 +441,7 @@ export class WorktreeManager {
                                 ]);
                             } catch {
                                 // Force-remove the directory
-                                try { await fs.rm(worktreePath, { recursive: true, force: true }); } catch { /* */ }
+                                try { this.assertSafePath(worktreePath); await fs.rm(worktreePath, { recursive: true, force: true }); } catch { /* */ }
                             }
                         }
                     }
@@ -458,6 +474,7 @@ export class WorktreeManager {
                         // racing with a concurrent session that just started
                         const ageMs = Date.now() - stat.mtimeMs;
                         if (ageMs > 60 * 60 * 1000) {
+                            this.assertSafePath(entryPath);
                             await fs.rm(entryPath, { recursive: true, force: true });
                         }
                     }

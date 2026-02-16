@@ -67,6 +67,14 @@ export interface JohannConfig {
     autoBackgroundLongRunningCommands: boolean;
     /** Target Copilot maxRequests value when enabling YOLO mode. */
     yoloMaxRequests: number;
+    /** Whether autonomous skill creation is enabled. */
+    skillAutonomousCreation: boolean;
+    /** Whether end-of-run skill promotion UI is enabled. */
+    skillPromotionEnabled: boolean;
+    /** Maximum local skills per project. */
+    skillMaxLocal: number;
+    /** Maximum new skills created per run. */
+    skillMaxNewPerRun: number;
 }
 
 /**
@@ -99,6 +107,10 @@ const DEFAULTS: JohannConfig = {
     toolInvocationTimeoutMs: 120000,
     autoBackgroundLongRunningCommands: true,
     yoloMaxRequests: 200,
+    skillAutonomousCreation: true,
+    skillPromotionEnabled: true,
+    skillMaxLocal: 50,
+    skillMaxNewPerRun: 5,
 };
 
 /**
@@ -140,6 +152,10 @@ export function getConfig(): JohannConfig {
         toolInvocationTimeoutMs: cfg.get<number>('toolInvocationTimeoutMs', DEFAULTS.toolInvocationTimeoutMs),
         autoBackgroundLongRunningCommands: cfg.get<boolean>('autoBackgroundLongRunningCommands', DEFAULTS.autoBackgroundLongRunningCommands),
         yoloMaxRequests: cfg.get<number>('yoloMaxRequests', DEFAULTS.yoloMaxRequests),
+        skillAutonomousCreation: cfg.get<boolean>('skillAutonomousCreation', DEFAULTS.skillAutonomousCreation),
+        skillPromotionEnabled: cfg.get<boolean>('skillPromotionEnabled', DEFAULTS.skillPromotionEnabled),
+        skillMaxLocal: cfg.get<number>('skillMaxLocal', DEFAULTS.skillMaxLocal),
+        skillMaxNewPerRun: cfg.get<number>('skillMaxNewPerRun', DEFAULTS.skillMaxNewPerRun),
     };
 }
 

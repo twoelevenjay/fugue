@@ -228,6 +228,21 @@ export function registerJohannParticipant(
                 return { metadata: { command: 'directive' } };
             }
 
+            // === WORKSPACE TRUST CHECK ===
+            // Johann executes LLM-generated operations and git commands.
+            // In untrusted workspaces, a malicious .vscode/johann/ could
+            // influence LLM behavior or exploit tool invocations.
+            if (!vscode.workspace.isTrusted) {
+                response.markdown(
+                    '**Workspace not trusted.** Johann requires a trusted workspace to orchestrate tasks.\n\n' +
+                    'This workspace has not been marked as trusted. Johann performs file writes, ' +
+                    'git operations, and LLM-driven tool invocations that could be influenced by ' +
+                    'malicious workspace content.\n\n' +
+                    'To trust this workspace, run **Workspaces: Manage Workspace Trust** from the Command Palette.\n'
+                );
+                return { metadata: { command: 'orchestrate', success: false } };
+            }
+
             // === MODEL SETUP ===
             const model = await getModel(request);
             if (!model) {
@@ -573,7 +588,7 @@ export function registerJohannParticipant(
         vscode.commands.registerCommand('johann.showModelDiagnostics', async () => {
             const modelPicker = orchestrator.getModelPicker();
             const diagnostics = await modelPicker.getModelDiagnostics();
-            
+
             const panel = vscode.window.createWebviewPanel(
                 'johannModelDiagnostics',
                 'Johann Model Diagnostics',
@@ -585,14 +600,14 @@ export function registerJohannParticipant(
 <html>
 <head>
     <style>
-        body { 
-            font-family: var(--vscode-font-family); 
+        body {
+            font-family: var(--vscode-font-family);
             padding: 20px;
             color: var(--vscode-foreground);
             background-color: var(--vscode-editor-background);
         }
-        pre { 
-            white-space: pre-wrap; 
+        pre {
+            white-space: pre-wrap;
             background: var(--vscode-textCodeBlock-background);
             padding: 10px;
             border-radius: 4px;
@@ -611,7 +626,7 @@ export function registerJohannParticipant(
     disposables.push(
         vscode.commands.registerCommand('johann.disableModelPicker', async () => {
             const models = await orchestrator.getModelPicker().getAllModels();
-            
+
             if (models.length === 0) {
                 vscode.window.showErrorMessage('No models available. Cannot configure fixed model.');
                 return;
@@ -633,7 +648,7 @@ export function registerJohannParticipant(
                 const config = vscode.workspace.getConfiguration('johann');
                 await config.update('modelPickerEnabled', false, vscode.ConfigurationTarget.Workspace);
                 await config.update('fixedModel', selected.modelInfo.family, vscode.ConfigurationTarget.Workspace);
-                
+
                 vscode.window.showInformationMessage(
                     `Model picker disabled. Johann will now use: ${selected.label}`
                 );
@@ -646,7 +661,7 @@ export function registerJohannParticipant(
         vscode.commands.registerCommand('johann.enableModelPicker', async () => {
             const config = vscode.workspace.getConfiguration('johann');
             await config.update('modelPickerEnabled', true, vscode.ConfigurationTarget.Workspace);
-            
+
             vscode.window.showInformationMessage('Model picker enabled. Johann will intelligently select models based on task complexity.');
         })
     );
@@ -664,7 +679,7 @@ export function registerJohannParticipant(
             }
 
             const items = allTasks.map(task => {
-                const statusIcon = 
+                const statusIcon =
                     task.status === 'running' ? '$(sync~spin)' :
                     task.status === 'completed' ? '$(check)' :
                     task.status === 'failed' ? '$(error)' :

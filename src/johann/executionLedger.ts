@@ -98,6 +98,15 @@ export interface LedgerState {
     activeWorktrees: Record<string, string>;
     /** Global notes (e.g., environment setup, shared dependencies installed) */
     globalNotes: string[];
+    /** Delegation policy stats snapshot (written at session end / periodically) */
+    delegationStats?: {
+        mode: string;
+        totalSpawned: number;
+        delegationsBlocked: number;
+        maxDepthReached: number;
+        frozen: boolean;
+        runawaySignals: number;
+    };
 }
 
 /**
@@ -107,7 +116,7 @@ export interface JournalEntry {
     /** ISO timestamp */
     timestamp: string;
     /** Type of action */
-    type: 'command' | 'file-create' | 'file-edit' | 'file-delete' | 'note' | 'error' | 'directory-create';
+    type: 'command' | 'file-create' | 'file-edit' | 'file-delete' | 'note' | 'error' | 'directory-create' | 'delegation-blocked';
     /** Brief description */
     description: string;
     /** The path affected (if applicable) */

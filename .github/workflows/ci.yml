@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Lint, Type-check, Test & Package
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [20, 22]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Run tests
+        run: xvfb-run -a npm test
+        if: runner.os == 'Linux'
+
+      - name: Run tests (non-Linux)
+        run: npm test
+        if: runner.os != 'Linux'
+
+      - name: Package VSIX
+        run: npm run package
+
+      - name: Verify VSIX size
+        run: |
+          VSIX_FILE=$(ls *.vsix)
+          SIZE=$(stat --printf="%s" "$VSIX_FILE")
+          MAX_SIZE=$((5 * 1024 * 1024))  # 5 MB ceiling
+          echo "VSIX size: $SIZE bytes"
+          if [ "$SIZE" -gt "$MAX_SIZE" ]; then
+            echo "::error::VSIX is $SIZE bytes — exceeds 5 MB ceiling. Check .vscodeignore."
+            exit 1
+          fi
+
+      - name: Upload VSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fugue-vsix-node${{ matrix.node-version }}
+          path: "*.vsix"
+          retention-days: 14
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: npm audit (production only)
+        run: npm audit --omit=dev

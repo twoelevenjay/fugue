@@ -1,0 +1,7 @@
+# Prettier ignore — files that should not be auto-formatted
+out/
+node_modules/
+*.vsix
+.vscode-test/
+package-lock.json
+CHANGELOG.md

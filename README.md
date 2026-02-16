@@ -132,13 +132,29 @@ Fugue uses GitHub Copilot's language model to intelligently analyze your request
 
 ## Documentation
 
-- [Johann Architecture Guide](docs/JOHANN.md) — Full system documentation
+- [Architecture Guide](docs/ARCHITECTURE.md) — Full system architecture
+- [Johann Guide](docs/JOHANN.md) — Johann orchestration documentation
 - [YOLO Mode Guide](docs/YOLO-MODE.md) — Copilot confirmation/limit settings for uninterrupted orchestration
 - [Feature Matrix](docs/OPENCLAW-FEATURES.md) — OpenClaw feature integration status
+- [Security Policy](SECURITY.md) — Threat model, vulnerability reporting, security guarantees
+
+## Security & Trust
+
+Fugue is designed with a minimal attack surface:
+
+- **Zero runtime dependencies** — ships no `node_modules`
+- **No network access** — cannot make HTTP requests or phone home
+- **No shell execution** — uses `execFile` only (no `exec`, no `spawn(shell:true)`)
+- **Workspace trust** — refuses to operate in VS Code Restricted Mode
+- **Subagent isolation** — subagents never see Johann's system prompt or memory
+- **Path validation** — all file deletions are guarded against directory traversal
+- **Automated scanning** — CodeQL, npm audit, and dependency review run in CI
+
+See [SECURITY.md](SECURITY.md) for the full security model.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code standards, and PR guidelines.
 
 ## License
 

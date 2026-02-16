@@ -37,6 +37,7 @@ import { ToolVerifier } from './toolVerifier';
 import { getExecutionWaves, getDownstreamTasks, validateGraph } from './graphManager';
 import { HookRunner, createDefaultHookRunner } from './hooks';
 import { FlowCorrectionManager } from './flowCorrection';
+import { DelegationGuard, getDelegationPolicy, buildDelegationConstraintBlock, DelegationPolicy } from './delegationPolicy';
 
 // ============================================================================
 // ORCHESTRATOR — The top-level controller
@@ -44,7 +45,7 @@ import { FlowCorrectionManager } from './flowCorrection';
 // Flow:
 // 1. User sends request to @johann
 // 2. Orchestrator uses user's model to create an execution plan
-// 3. For each subtask: 
+// 3. For each subtask:
 //    - Detect if multi-pass should be used (based on task type + complexity)
 //    - If multi-pass: use MultiPassExecutor for structured verification
 //    - If single-pass: pick model → execute → review → escalate if needed
@@ -53,7 +54,7 @@ import { FlowCorrectionManager } from './flowCorrection';
 //
 // Multi-pass integration:
 // - Draft→Critique→Revise for docs/specs/plans
-// - Self-consistency voting for debugging/analysis  
+// - Self-consistency voting for debugging/analysis
 // - Tool-verified loops for codegen
 // - Two-pass rubric for code review
 // ============================================================================
@@ -84,6 +85,7 @@ export class Orchestrator {
     private hookRunner: HookRunner;
     private rateLimitGuard: RateLimitGuard;
     private flowCorrection: FlowCorrectionManager;
+    private delegationGuard: DelegationGuard;
 
     constructor(config: OrchestratorConfig = DEFAULT_CONFIG) {
         this.config = config;
@@ -96,6 +98,7 @@ export class Orchestrator {
         this.hookRunner = createDefaultHookRunner();
         this.rateLimitGuard = new RateLimitGuard();
         this.flowCorrection = new FlowCorrectionManager();
+        this.delegationGuard = new DelegationGuard();
     }
 
     /**
@@ -270,7 +273,7 @@ export class Orchestrator {
     /**
      * Start a background orchestration task.
      * Returns immediately with a task ID, while the orchestration runs asynchronously.
-     * 
+     *
      * @param request - The user's original request
      * @param fullContext - Complete context for planning/merge (system prompt + workspace + memory + conversation)
      * @param subagentContext - Minimal workspace context for subagents (project structure only, no Johann identity)
@@ -287,11 +290,11 @@ export class Orchestrator {
         toolToken?: vscode.ChatParticipantToolToken
     ): Promise<string> {
         const taskManager = BackgroundTaskManager.getInstance();
-        
+
         // Generate session ID
         const sessionId = this.generateSessionId();
         const summary = request.substring(0, 100) + (request.length > 100 ? '...' : '');
-        
+
         // Create background task
         const task = await taskManager.createTask(
             sessionId,
@@ -765,6 +768,17 @@ export class Orchestrator {
 
             // Finalize debug log on success
             await this.hookRunner.run('on_session_end', { request, session, plan });
+
+            // Log delegation stats
+            const delegationStats = this.delegationGuard.getStats();
+            await debugLog.logEvent('other',
+                `Delegation stats: spawned=${delegationStats.totalSpawned}, ` +
+                `blocked=${delegationStats.delegationsBlocked}, ` +
+                `maxDepth=${delegationStats.maxDepthReached}, ` +
+                `frozen=${delegationStats.frozen}, ` +
+                `runawaySignals=${delegationStats.runawaySignals}`
+            );
+
             await debugLog.finalize('completed');
 
         } catch (err) {
@@ -819,6 +833,23 @@ export class Orchestrator {
         const results = new Map<string, SubtaskResult>(priorResults || []);
         const completed = new Set<string>(priorResults ? priorResults.keys() : []);
         const blocked = new Set<string>(); // Tasks cancelled due to upstream failure
+
+        // ── Delegation policy enforcement ──────────────────────────────────
+        const delegationPolicy = this.delegationGuard.getPolicy();
+        if (this.delegationGuard.isNoDelegation) {
+            // no-delegation mode: force serial, one subtask at a time
+            plan.strategy = 'serial';
+            reporter.emit({
+                type: 'note',
+                message: '🔒 Delegation mode: no-delegation — all subtasks run serially by Johann',
+            });
+            await debugLog.logEvent('other', 'Delegation policy: no-delegation — forcing serial execution');
+        } else {
+            await debugLog.logEvent('other',
+                `Delegation policy: mode=${delegationPolicy.mode}, maxParallel=${delegationPolicy.maxParallel}, ` +
+                `maxDepth=${delegationPolicy.maxDepth}, runawayThreshold=${delegationPolicy.runawayThreshold}`
+            );
+        }
 
         // Maximum number of correction cycles to prevent infinite re-runs
         const MAX_CORRECTION_CYCLES = 3;
@@ -875,16 +906,29 @@ export class Orchestrator {
 
             // ── Parallel execution when multiple tasks in a wave ───────────
             if (this.config.allowParallelExecution && pendingSubtasks.length > 1 &&
-                (plan.strategy === 'parallel' || plan.strategy === 'mixed')) {
+                (plan.strategy === 'parallel' || plan.strategy === 'mixed') &&
+                !this.delegationGuard.isNoDelegation) {
+
+                // ── Delegation policy: cap parallel batch size ──────────
+                const maxBatch = this.delegationGuard.maxParallel;
+                let batchSubtasks = pendingSubtasks;
+                if (maxBatch > 0 && pendingSubtasks.length > maxBatch) {
+                    reporter.emit({
+                        type: 'note',
+                        message: `🔒 Delegation cap: limiting parallel batch from ${pendingSubtasks.length} to ${maxBatch} (policy: ${delegationPolicy.mode})`,
+                    });
+                    batchSubtasks = pendingSubtasks.slice(0, maxBatch);
+                    // Remaining tasks will be picked up in subsequent wave iterations
+                }
 
                 const useWorktrees = worktreeManager?.isReady() ?? false;
                 if (useWorktrees) {
                     reporter.emit({
                         type: 'note',
-                        message: `⚡ Wave ${wave.level}: running ${pendingSubtasks.length} subtasks in parallel (git worktree isolation)`,
+                        message: `⚡ Wave ${wave.level}: running ${batchSubtasks.length} subtasks in parallel (git worktree isolation)`,
                     });
 
-                    for (const subtask of pendingSubtasks) {
+                    for (const subtask of batchSubtasks) {
                         try {
                             const wt = await worktreeManager!.createWorktree(subtask.id);
                             subtask.worktreePath = wt.worktreePath;
@@ -900,11 +944,11 @@ export class Orchestrator {
                 } else {
                     reporter.emit({
                         type: 'note',
-                        message: `⚡ Wave ${wave.level}: running ${pendingSubtasks.length} subtasks in parallel`,
+                        message: `⚡ Wave ${wave.level}: running ${batchSubtasks.length} subtasks in parallel`,
                     });
                 }
 
-                const promises = pendingSubtasks.map(async (subtask) => {
+                const promises = batchSubtasks.map(async (subtask) => {
                     if (token.isCancellationRequested) return;
 
                     if (ledger && subtask.worktreePath) {
@@ -1008,7 +1052,7 @@ export class Orchestrator {
 
                 // Merge worktree branches back sequentially
                 if (useWorktrees) {
-                    const worktreeSubtasks = pendingSubtasks.filter(st => st.worktreePath);
+                    const worktreeSubtasks = batchSubtasks.filter(st => st.worktreePath);
                     if (worktreeSubtasks.length > 0) {
                         reporter.emit({ type: 'task-started', id: `merge-wave-${wave.level}`, label: `Merging wave ${wave.level} results` });
 
@@ -1189,6 +1233,28 @@ export class Orchestrator {
             await hookRunner.run('before_subtask', { subtask });
         }
 
+        // ── Delegation guard: request permission to delegate ───────────
+        const delegationDecision = this.delegationGuard.requestDelegation(0); // depth 0 = Johann direct
+        if (!delegationDecision.allowed) {
+            reporter.emit({
+                type: 'note',
+                message: `🔒 Delegation blocked for "${subtask.title}": ${delegationDecision.reason}`,
+                style: 'warning',
+            });
+            await debugLog.logEvent('other',
+                `Delegation blocked for subtask ${subtask.id}: ${delegationDecision.reason}`
+            );
+            subtask.status = 'failed';
+            return {
+                success: false,
+                modelUsed: 'none',
+                output: '',
+                reviewNotes: `Delegation blocked: ${delegationDecision.reason}`,
+                durationMs: 0,
+                timestamp: new Date().toISOString(),
+            };
+        }
+
         while (subtask.attempts < subtask.maxAttempts) {
             if (token.isCancellationRequested) {
                 return {
@@ -1352,7 +1418,8 @@ export class Orchestrator {
                 undefined, // skills
                 undefined, // messageBus
                 undefined, // hookRunner
-                this.rateLimitGuard
+                this.rateLimitGuard,
+                this.delegationGuard
             );
 
             if (!result.success) {
@@ -1401,6 +1468,7 @@ export class Orchestrator {
                 if (hookRunner) {
                     await hookRunner.run('after_subtask', { subtask, subtaskResult: result });
                 }
+                this.delegationGuard.releaseDelegation();
                 return result;
             }
 
@@ -1416,6 +1484,7 @@ export class Orchestrator {
         // All attempts exhausted
         subtask.status = 'failed';
         reporter.emit({ type: 'task-failed', id: subtask.id, error: `Failed after ${subtask.attempts} attempts`, label: subtask.title });
+        this.delegationGuard.releaseDelegation();
         const failResult: SubtaskResult = {
             success: false,
             modelUsed: triedModelIds[triedModelIds.length - 1] || 'none',

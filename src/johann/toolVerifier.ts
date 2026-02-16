@@ -10,6 +10,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { execFile } from 'child_process'; // eslint-disable-line no-restricted-imports -- Required: runs verification tools (npm, tsc, etc.)
 import { JohannLogger, getLogger } from './logger';
 
 /**
@@ -18,19 +19,19 @@ import { JohannLogger, getLogger } from './logger';
 export interface VerificationResult {
     /** Check that was run */
     check: 'compile' | 'typecheck' | 'lint' | 'test' | 'format';
-    
+
     /** Whether the check passed */
     passed: boolean;
-    
+
     /** Error output if failed */
     errors?: string[];
-    
+
     /** Exit code from the tool */
     exitCode?: number;
-    
+
     /** Full output (stdout + stderr) */
     output: string;
-    
+
     /** Time taken in ms */
     timeMs: number;
 }
@@ -41,13 +42,13 @@ export interface VerificationResult {
 export interface VerificationConfig {
     /** Which checks to run */
     checks: Array<'compile' | 'typecheck' | 'lint' | 'test' | 'format'>;
-    
+
     /** Stop on first failure */
     failFast: boolean;
-    
+
     /** Timeout per check in ms */
     timeoutPerCheck: number;
-    
+
     /** Working directory */
     cwd: string;
 }
@@ -75,7 +76,7 @@ export class ToolVerifier {
 
         for (const check of config.checks) {
             this.logger.debug(`Running check: ${check}`);
-            
+
             const result = await this.runCheck(check, config, modifiedFiles);
             results.push(result);
 
@@ -190,7 +191,7 @@ export class ToolVerifier {
         }
 
         // Python (mypy)
-        if (await this.fileExists(path.join(config.cwd, 'mypy.ini')) || 
+        if (await this.fileExists(path.join(config.cwd, 'mypy.ini')) ||
             await this.fileExists(path.join(config.cwd, 'setup.cfg'))) {
             return await this.runCommand('mypy', ['.'], config, startTime, 'typecheck');
         }
@@ -215,7 +216,7 @@ export class ToolVerifier {
         if (await this.fileExists(path.join(config.cwd, '.eslintrc.json')) ||
             await this.fileExists(path.join(config.cwd, '.eslintrc.js')) ||
             await this.fileExists(path.join(config.cwd, 'eslint.config.mjs'))) {
-            
+
             const args = ['eslint'];
             if (modifiedFiles && modifiedFiles.length > 0) {
                 args.push(...modifiedFiles);
@@ -311,7 +312,11 @@ export class ToolVerifier {
     }
 
     /**
-     * Run a shell command and return standardized result.
+     * Run a verification command and return standardized result.
+     *
+     * SECURITY: Uses execFile (not exec/spawn+shell) to avoid shell injection.
+     * Commands are always one of a fixed set: npm, npx, tsc, etc.
+     * Arguments are passed as an array, never interpolated into a shell string.
      */
     private async runCommand(
         command: string,
@@ -321,30 +326,15 @@ export class ToolVerifier {
         check: 'compile' | 'typecheck' | 'lint' | 'test' | 'format'
     ): Promise<VerificationResult> {
         return new Promise((resolve) => {
-            const { spawn } = require('child_process');
-            
-            const proc = spawn(command, args, {
+            const proc = execFile(command, args, {
                 cwd: config.cwd,
-                shell: true,
                 timeout: config.timeoutPerCheck,
-            });
-
-            let stdout = '';
-            let stderr = '';
-
-            proc.stdout?.on('data', (data: Buffer) => {
-                stdout += data.toString();
-            });
-
-            proc.stderr?.on('data', (data: Buffer) => {
-                stderr += data.toString();
-            });
-
-            proc.on('close', (exitCode: number) => {
+                maxBuffer: 1024 * 1024, // 1MB output cap
+            }, (error, stdout, stderr) => {
                 const output = `${stdout}\n${stderr}`.trim();
+                const exitCode = error ? (error as any).code ?? 1 : 0;
                 const passed = exitCode === 0;
-                
-                // Extract error lines
+
                 const errors = passed ? undefined : this.extractErrors(output, check);
 
                 resolve({
@@ -357,12 +347,12 @@ export class ToolVerifier {
                 });
             });
 
-            proc.on('error', (error: Error) => {
+            proc.on('error', (err: Error) => {
                 resolve({
                     check,
                     passed: false,
-                    errors: [error.message],
-                    output: error.message,
+                    errors: [err.message],
+                    output: err.message,
                     timeMs: Date.now() - startTime,
                 });
             });
@@ -419,10 +409,10 @@ export class ToolVerifier {
             lines.push('✅ All checks passed!\n');
         } else {
             lines.push(`❌ ${failed.length} check(s) failed:\n`);
-            
+
             for (const result of failed) {
                 lines.push(`\n### ${result.check} (exit code ${result.exitCode})\n`);
-                
+
                 if (result.errors && result.errors.length > 0) {
                     lines.push('**Errors:**');
                     result.errors.forEach(err => lines.push(`- ${err}`));

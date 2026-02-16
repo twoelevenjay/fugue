@@ -18,14 +18,15 @@
     "productivity"
   ],
   "license": "MIT",
+  "publisher": "leonshelhamer",
   "repository": {
     "type": "git",
-    "url": "https://github.com/YOUR_USERNAME/fugue"
+    "url": "https://github.com/leonshelhamer/fugue"
   },
   "bugs": {
-    "url": "https://github.com/YOUR_USERNAME/fugue/issues"
+    "url": "https://github.com/leonshelhamer/fugue/issues"
   },
-  "homepage": "https://github.com/YOUR_USERNAME/fugue#readme",
+  "homepage": "https://github.com/leonshelhamer/fugue#readme",
   "activationEvents": [
     "onChatParticipant:ramble",
     "onChatParticipant:johann"
@@ -54,7 +55,7 @@
         "title": "Fugue: Copy Last Compiled Prompt"
       },
       {
-          "command": "ramble.refreshContext",
+        "command": "ramble.refreshContext",
         "title": "Fugue: Refresh Workspace Context"
       },
       {
@@ -219,7 +220,12 @@
         },
         "johann.logLevel": {
           "type": "string",
-          "enum": ["debug", "info", "warn", "error"],
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
           "default": "info",
           "order": 160,
           "description": "Log level for the Johann output channel."
@@ -238,7 +244,11 @@
         },
         "johann.promptMode": {
           "type": "string",
-          "enum": ["full", "minimal", "none"],
+          "enum": [
+            "full",
+            "minimal",
+            "none"
+          ],
           "default": "full",
           "order": 190,
           "description": "System prompt assembly mode. Full = all sections, minimal = reduced for subagents, none = bare."
@@ -370,6 +380,50 @@
           "order": 270,
           "description": "Allow Opus and O1-Pro models (3× or higher cost). When disabled (default), these models are completely hidden — they won't appear in model lists, won't be selected for any task, and won't be escalated to.",
           "markdownDescription": "**Allow expensive Opus models (3× or higher cost).**\n\nWhen **disabled** (default):\n- Claude Opus 4.1/4.5/4.6 and O1-Pro are completely hidden\n- They won't appear in model lists or diagnostics\n- They won't be selected for any task complexity\n- They won't be escalated to when cheaper models fail\n\nWhen **enabled**:\n- Opus models become available for selection and escalation\n- Johann may use them for `expert` complexity tasks or when all cheaper models fail\n\n⚠️ Only enable if you explicitly want to use premium-tier models."
+        },
+        "johann.delegationMode": {
+          "type": "string",
+          "enum": [
+            "johann-only",
+            "allow-model",
+            "no-delegation"
+          ],
+          "default": "johann-only",
+          "order": 280,
+          "description": "Delegation policy mode. Controls how subagent spawning is managed.",
+          "markdownDescription": "**Delegation policy mode** — controls how Johann manages subagent spawning.\n\n- **johann-only** (default): Only Johann delegates. Subagents are pure leaf executors that MUST NOT spawn further agents. Safest mode.\n- **allow-model**: The underlying LLM may use its own subagent features. Johann still enforces depth and parallelism limits.\n- **no-delegation**: No subagents at all. All tasks run serially in a single pass. Budget-safe mode.",
+          "markdownEnumDescriptions": [
+            "Only Johann delegates. Subagents are leaf executors. (Default, safest)",
+            "LLM may use native delegation, but Johann enforces limits.",
+            "No subagents at all. Serial execution only. Budget-safe."
+          ]
+        },
+        "johann.delegationMaxDepth": {
+          "type": "number",
+          "default": 1,
+          "minimum": 0,
+          "maximum": 5,
+          "order": 290,
+          "description": "Maximum delegation recursion depth. 1 = subagents only (default), 2 = sub-subagents allowed.",
+          "markdownDescription": "Maximum delegation recursion depth.\n\n- **1** (default): Johann spawns subagents, but subagents cannot spawn further agents.\n- **2**: Sub-subagents are allowed (power-user mode).\n- **0**: No delegation (same as `no-delegation` mode).\n\nClamped to 1 in `johann-only` mode."
+        },
+        "johann.delegationMaxParallel": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 20,
+          "order": 300,
+          "description": "Maximum concurrent subagents. Caps how many subagents can run in parallel.",
+          "markdownDescription": "Maximum number of concurrent subagents.\n\n- **3** (default): Up to 3 subagents run in parallel per wave.\n- **0**: No parallel execution (serial only).\n- Higher values increase throughput but also LLM request volume.\n\nWorks in conjunction with `johann.allowParallel`."
+        },
+        "johann.delegationRunawayThreshold": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 50,
+          "order": 310,
+          "description": "Runaway detection threshold. Number of delegation-signal phrases in subagent output before freezing delegation.",
+          "markdownDescription": "**Runaway detection threshold.**\n\nIn `johann-only` mode, Johann monitors subagent output for phrases that indicate the model is trying to self-delegate (e.g., \"spawn subagent\", \"delegate task\"). If this threshold is exceeded, delegation is **frozen** for the remainder of the session.\n\n- **5** (default): Freeze after 5 delegation signals.\n- Lower values are stricter. Higher values are more tolerant."
         }
       }
     }
@@ -378,18 +432,26 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "pretest": "npm run compile && npm run lint",
+    "typecheck": "tsc --noEmit -p ./",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "lint:fix": "eslint src --fix",
+    "format": "prettier --write 'src/**/*.ts' '*.json' '*.md'",
+    "format:check": "prettier --check 'src/**/*.ts' '*.json' '*.md'",
+    "pretest": "npm run compile && npm run lint",
+    "test": "vscode-test",
+    "audit:security": "npm audit --omit=dev",
+    "package": "npx @vscode/vsce package --no-dependencies",
+    "package:check": "npx @vscode/vsce ls --no-dependencies"
   },
   "devDependencies": {
-    "@types/vscode": "^1.108.1",
     "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
-    "typescript-eslint": "^8.52.0",
-    "eslint": "^9.39.2",
-    "typescript": "^5.9.3",
+    "@types/vscode": "^1.108.1",
     "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2"
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.39.2",
+    "prettier": "^3.8.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.52.0"
   }
 }

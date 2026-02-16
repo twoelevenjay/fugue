@@ -1,16 +1,39 @@
-.vscode/**
-.vscode-test/**
+# Source & config (compiled JS in out/ is the shipped code)
 src/**
-.github/**
-.gitignore
-.yarnrc
-vsc-extension-quickstart.md
+**/*.ts
+!out/**/*.d.ts
+**/*.map
 **/tsconfig.json
 **/eslint.config.mjs
-**/*.map
-**/*.ts
-!**/*.d.ts
-**/.vscode-test.*
+.prettierrc.json
+.prettierignore
+.editorconfig
+
+# Development & testing
+.vscode/**
+.vscode-test/**
+.vscode-test.mjs
 node_modules/**
+
+# CI & repo management
+.github/**
+.gitignore
+.git/**
+
+# Build artifacts & binaries
+*.vsix
+out/test/**
+
+# Documentation not needed in extension
+docs/**
+vsc-extension-quickstart.md
 CONTRIBUTING.md
 CODE_OF_CONDUCT.md
+SECURITY.md
+ARCHITECTURE.md
+
+# Logs & secrets
+*.log
+.env
+.env.*
+

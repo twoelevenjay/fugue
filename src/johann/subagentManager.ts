@@ -10,6 +10,7 @@ import { MessageBus, parseHiveSignals, HIVE_SIGNAL_INSTRUCTION } from './message
 import { HookRunner } from './hooks';
 import { RateLimitGuard } from './rateLimitGuard';
 import { FlowCorrectionManager } from './flowCorrection';
+import { DelegationGuard, buildDelegationConstraintBlock, getDelegationPolicy } from './delegationPolicy';
 
 // ============================================================================
 // SUBAGENT MANAGER — Spawns and manages individual subagent executions
@@ -408,7 +409,8 @@ export class SubagentManager {
         skills?: Skill[],
         messageBus?: MessageBus,
         hookRunner?: HookRunner,
-        rateLimitGuard?: RateLimitGuard
+        rateLimitGuard?: RateLimitGuard,
+        delegationGuard?: DelegationGuard
     ): Promise<SubtaskResult> {
         const startTime = Date.now();
 
@@ -560,6 +562,37 @@ export class SubagentManager {
                             durationMs: Date.now() - startTime,
                             timestamp: new Date().toISOString(),
                         };
+                    }
+
+                    // === DELEGATION RUNAWAY DETECTION ===
+                    // In johann-only mode, check if the model is attempting to
+                    // self-delegate. If signals exceed the threshold, the guard
+                    // freezes and we abort the subtask.
+                    if (delegationGuard) {
+                        delegationGuard.checkForRunaway(roundText);
+                        if (delegationGuard.isFrozen) {
+                            if (stream) {
+                                stream.markdown('\n> 🛑 **Delegation runaway detected.** Model is attempting to self-delegate. Aborting subtask.\n');
+                            }
+                            fullOutput += '\n[ABORTED: delegation runaway detected — model is attempting to self-delegate]';
+
+                            if (debugLog) {
+                                await debugLog.logEvent('other', `Delegation runaway in subtask ${subtask.id}: guard frozen`);
+                            }
+
+                            if (stream) {
+                                stream.markdown('\n\n</details>\n\n');
+                            }
+
+                            return {
+                                success: false,
+                                modelUsed: modelInfo.id,
+                                output: fullOutput,
+                                reviewNotes: 'Aborted: delegation runaway detected — model attempted to self-delegate',
+                                durationMs: Date.now() - startTime,
+                                timestamp: new Date().toISOString(),
+                            };
+                        }
                     }
                 }
 
@@ -936,6 +969,10 @@ ${result.output.substring(0, 10000)}
         const parts: string[] = [];
 
         parts.push(SUBAGENT_SYSTEM_PREFIX);
+
+        // Inject delegation constraint — tells the model its delegation boundaries
+        const delegationPolicy = getDelegationPolicy();
+        parts.push(buildDelegationConstraintBlock(delegationPolicy));
 
         // Inject skill-specific instructions if a skill applies to this task
         if (subtask.skillHint && skills) {
