@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { OrchestrationPlan, Subtask, TaskComplexity, ModelInfo } from './types';
+import { OrchestrationPlan, Subtask, TaskComplexity, TaskType, ModelInfo } from './types';
 import { withRetry, PLANNING_RETRY_POLICY, classifyError, extractErrorMessage } from './retry';
 import { DebugConversationLog } from './debugConversationLog';
 import { SessionPersistence } from './sessionPersistence';
@@ -58,6 +58,25 @@ CRITICAL: Subtask descriptions are the PROMPTS sent to Copilot sessions. They mu
 - complex: architectural changes, multi-file refactors, performance optimization
 - expert: security-critical code, complex algorithm design, system architecture
 
+## Task Type (drives model routing — set this so the model picker can choose the cheapest capable model)
+- generate: code generation, scaffolding, boilerplate
+- refactor: code transformations, renames, moves
+- test: test generation and writing
+- debug: debugging, fixing failures, error analysis
+- review: code review, security, edge cases
+- spec: planning, documentation, communication
+- edit: small edits, formatting, single functions
+- design: architecture decisions, multi-file design
+- complex-refactor: large-scale refactors requiring deep reasoning
+
+## Multi-Pass Execution
+Set "useMultiPass": true when a subtask benefits from a structured implement→verify→fix loop.
+Good candidates for multi-pass:
+- Tasks that generate code AND need compilation/test verification
+- Complex refactors across multiple files
+- Any task where "write it, then check it compiles, then fix issues" is the natural workflow
+Do NOT enable multi-pass for: documentation, spec writing, small edits, or trivial tasks.
+
 Return a JSON object with this EXACT structure:
 {
   "summary": "Brief summary of the overall plan",
@@ -69,7 +88,9 @@ Return a JSON object with this EXACT structure:
       "id": "task-1",
       "title": "Short title",
       "description": "Complete, self-contained prompt for the Copilot session. Include ALL context, file paths, and explicit instructions to use tools.",
+      "taskType": "generate" | "refactor" | "test" | "debug" | "review" | "spec" | "edit" | "design" | "complex-refactor",
       "complexity": "trivial" | "simple" | "moderate" | "complex" | "expert",
+      "useMultiPass": false,
       "dependsOn": [],
       "successCriteria": ["Criterion 1", "..."]
     }
@@ -222,12 +243,14 @@ export class TaskDecomposer {
                 id: String(raw.id || `task-${subtasks.length + 1}`),
                 title: String(raw.title || 'Untitled subtask'),
                 description: String(raw.description || ''),
+                taskType: this.validateTaskType(raw.taskType),
                 complexity: this.validateComplexity(raw.complexity),
                 dependsOn: Array.isArray(raw.dependsOn) ? raw.dependsOn.map(String) : [],
                 successCriteria: Array.isArray(raw.successCriteria) ? raw.successCriteria.map(String) : [],
                 status: 'pending',
                 attempts: 0,
                 maxAttempts: 3,
+                useMultiPass: raw.useMultiPass === true,
             });
         }
 
@@ -286,5 +309,16 @@ export class TaskDecomposer {
             return value as 'serial' | 'parallel' | 'mixed';
         }
         return 'serial';
+    }
+
+    private validateTaskType(value: unknown): TaskType | undefined {
+        const valid: TaskType[] = [
+            'generate', 'refactor', 'test', 'debug', 'review',
+            'spec', 'edit', 'design', 'complex-refactor',
+        ];
+        if (typeof value === 'string' && valid.includes(value as TaskType)) {
+            return value as TaskType;
+        }
+        return undefined; // Let the model picker detect it from description
     }
 }

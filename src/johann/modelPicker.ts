@@ -581,6 +581,169 @@ export class ModelPicker {
         return lines.join('\n');
     }
 
+    // ========================================================================
+    // HEURISTIC REFINEMENTS — Auto-adjust taskType & complexity from description
+    // ========================================================================
+
+    /**
+     * Apply all heuristics to refine taskType and complexity based on the
+     * subtask description.  Call this BEFORE selectForTask / selectForComplexity
+     * so the model picker gets the most accurate inputs.
+     *
+     * Returns adjusted { taskType, complexity }.
+     */
+    refineSelection(
+        description: string,
+        taskType: TaskType,
+        complexity: TaskComplexity
+    ): { taskType: TaskType; complexity: TaskComplexity } {
+        let refined = { taskType, complexity };
+
+        // Heuristic 1 — Cross-file surgery boost
+        refined.complexity = this.applyCrossFileSurgeryBoost(description, refined.complexity);
+
+        // Heuristic 2 — Algorithm / data-structure generation boost
+        refined.complexity = this.applyAlgorithmBoost(description, refined.taskType, refined.complexity);
+
+        // Heuristic 3 — Spec → analysis reroute
+        refined.taskType = this.applySpecAnalysisReroute(description, refined.taskType);
+
+        return refined;
+    }
+
+    /**
+     * Heuristic 1 — Cross-file surgery complexity boost.
+     *
+     * When a subtask description references many distinct file paths or
+     * explicitly mentions "across N files", the task almost certainly needs
+     * more reasoning than a simple generate/refactor.
+     *
+     * Rules:
+     *   • ≥ 4 distinct file-path references → boost one level
+     *   • ≥ 7 distinct file-path references → boost two levels
+     *   • Explicit "across N files" / "in N files" with N ≥ 4 → boost one level
+     */
+    private applyCrossFileSurgeryBoost(
+        description: string,
+        base: TaskComplexity
+    ): TaskComplexity {
+        const COMPLEXITY_LADDER: TaskComplexity[] = [
+            'trivial', 'simple', 'moderate', 'complex', 'expert',
+        ];
+        let idx = COMPLEXITY_LADDER.indexOf(base);
+
+        // Count distinct file-path-like references (e.g. src/foo/bar.ts)
+        const fileRefs = new Set(
+            (description.match(/[\w./\-]+\.[a-z]{1,4}/gi) || [])
+                .map(p => p.toLowerCase())
+        );
+
+        if (fileRefs.size >= 7) {
+            idx = Math.min(idx + 2, COMPLEXITY_LADDER.length - 1);
+        } else if (fileRefs.size >= 4) {
+            idx = Math.min(idx + 1, COMPLEXITY_LADDER.length - 1);
+        }
+
+        // Explicit "across N files" / "in N files" / "N files" with N ≥ 4
+        const multiFileMatch = description.match(
+            /(?:across|in|touch(?:es|ing)?|modif(?:y|ies|ying)|updat(?:e|es|ing))\s+(\d+)\s+files?/i
+        );
+        if (multiFileMatch && parseInt(multiFileMatch[1], 10) >= 4) {
+            idx = Math.min(idx + 1, COMPLEXITY_LADDER.length - 1);
+        }
+
+        return COMPLEXITY_LADDER[idx];
+    }
+
+    /**
+     * Heuristic 2 — Algorithm / data-structure generation boost.
+     *
+     * When a generate or refactor task involves graph algorithms, tree
+     * traversals, topological sort, cycle detection, or other non-trivial
+     * algorithms, free-tier models often produce subtly broken code.
+     * Boost complexity by at least one level so the picker escalates.
+     */
+    private applyAlgorithmBoost(
+        description: string,
+        taskType: TaskType,
+        base: TaskComplexity
+    ): TaskComplexity {
+        // Only applies to generate / refactor / complex-refactor
+        if (taskType !== 'generate' && taskType !== 'refactor' && taskType !== 'complex-refactor') {
+            return base;
+        }
+
+        const ALGO_INDICATORS = [
+            /topological\s*sort/i,
+            /kahn/i,
+            /cycle\s*detect/i,
+            /graph\s*(travers|algorithm|theor)/i,
+            /dijkstra/i,
+            /bfs|breadth.first/i,
+            /dfs|depth.first/i,
+            /dynamic\s*program/i,
+            /memoiz/i,
+            /red.black\s*tree/i,
+            /b\+?\s*tree/i,
+            /trie/i,
+            /a\*\s*search/i,
+            /backtrack/i,
+            /min(?:imum)?\s*spanning/i,
+            /shortest\s*path/i,
+            /concurren.*lock.*free/i,
+            /mutex|semaphore/i,
+            /parser\s*combinator/i,
+            /state\s*machine/i,
+        ];
+
+        const hasAlgo = ALGO_INDICATORS.some(p => p.test(description));
+        if (!hasAlgo) return base;
+
+        const COMPLEXITY_LADDER: TaskComplexity[] = [
+            'trivial', 'simple', 'moderate', 'complex', 'expert',
+        ];
+        const idx = COMPLEXITY_LADDER.indexOf(base);
+        // Boost at least to 'moderate' (idx 2), or +1 if already there
+        const boosted = Math.max(idx + 1, 2);
+        return COMPLEXITY_LADDER[Math.min(boosted, COMPLEXITY_LADDER.length - 1)];
+    }
+
+    /**
+     * Heuristic 3 — Spec → analysis reroute.
+     *
+     * The 'spec' task type covers both:
+     *   (a) Prose generation (READMEs, PR descriptions, plans) → GPT-4o is ideal
+     *   (b) Code comprehension / analysis  → GPT-4.1 is better
+     *
+     * When the description signals deep code reading ("study", "analyze",
+     * "architecture", "understand the codebase", "how does X work"), reroute
+     * from 'spec' → 'review' (which maps to GPT-4.1, the analysis-tier model).
+     */
+    private applySpecAnalysisReroute(
+        description: string,
+        taskType: TaskType
+    ): TaskType {
+        if (taskType !== 'spec') return taskType;
+
+        const ANALYSIS_INDICATORS = [
+            /\bstudy\b/i,
+            /\banalyz/i,
+            /\bunderstand\b/i,
+            /\bexamin/i,
+            /\binvestigat/i,
+            /\bcomprehend/i,
+            /\barchitecture\b/i,
+            /how\s+(does|do|is|are)\s+\w+\s+work/i,
+            /\bread\s+(through|the|all)/i,
+            /\bcode\s*(base|review|reading)/i,
+            /\breverse.engineer/i,
+            /what\s+does\s+\w+\s+do/i,
+        ];
+
+        const isAnalysis = ANALYSIS_INDICATORS.some(p => p.test(description));
+        return isAnalysis ? 'review' : taskType;
+    }
+
     /**
      * Check if a task should use multi-pass execution.
      * This is exported for use by the orchestrator.

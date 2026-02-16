@@ -8,6 +8,7 @@ import { extractSummary, distillContext, SUMMARY_BLOCK_INSTRUCTION } from './con
 import { Skill, loadSkillContent } from './skills';
 import { MessageBus, parseHiveSignals, HIVE_SIGNAL_INSTRUCTION } from './messageBus';
 import { HookRunner } from './hooks';
+import { RateLimitGuard } from './rateLimitGuard';
 
 // ============================================================================
 // SUBAGENT MANAGER — Spawns and manages individual subagent executions
@@ -403,7 +404,8 @@ export class SubagentManager {
         ledger?: ExecutionLedger,
         skills?: Skill[],
         messageBus?: MessageBus,
-        hookRunner?: HookRunner
+        hookRunner?: HookRunner,
+        rateLimitGuard?: RateLimitGuard
     ): Promise<SubtaskResult> {
         const startTime = Date.now();
 
@@ -468,7 +470,21 @@ export class SubagentManager {
                 round++;
 
                 const callStart = Date.now();
-                const response = await modelInfo.model.sendRequest(messages, options, token);
+                // Use rate limit guard if available, otherwise call sendRequest directly
+                let response: vscode.LanguageModelChatResponse;
+                if (rateLimitGuard) {
+                    const guarded = await rateLimitGuard.guardedSendRequest(
+                        modelInfo.model,
+                        modelInfo.family,
+                        messages,
+                        options,
+                        token,
+                        stream
+                    );
+                    response = guarded.response;
+                } else {
+                    response = await modelInfo.model.sendRequest(messages, options, token);
+                }
 
                 // Collect text parts and tool call parts from the response stream
                 const toolCalls: vscode.LanguageModelToolCallPart[] = [];

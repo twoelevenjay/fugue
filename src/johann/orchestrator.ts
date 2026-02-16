@@ -29,6 +29,7 @@ import { ChatProgressReporter } from './chatProgressReporter';
 import { BackgroundProgressReporter } from './backgroundProgressReporter';
 import { BackgroundTaskManager } from './backgroundTaskManager';
 import { ProgressReporter } from './progressEvents';
+import { RateLimitGuard } from './rateLimitGuard';
 import { SessionPersistence, ResumableSession } from './sessionPersistence';
 import { MultiPassExecutor } from './multiPassExecutor';
 import { getMultiPassStrategy } from './multiPassStrategies';
@@ -80,6 +81,7 @@ export class Orchestrator {
     private multiPassExecutor: MultiPassExecutor;
     private toolVerifier: ToolVerifier;
     private hookRunner: HookRunner;
+    private rateLimitGuard: RateLimitGuard;
 
     constructor(config: OrchestratorConfig = DEFAULT_CONFIG) {
         this.config = config;
@@ -90,6 +92,7 @@ export class Orchestrator {
         this.multiPassExecutor = new MultiPassExecutor(getLogger(), this.modelPicker);
         this.toolVerifier = new ToolVerifier(getLogger());
         this.hookRunner = createDefaultHookRunner();
+        this.rateLimitGuard = new RateLimitGuard();
     }
 
     /**
@@ -1120,11 +1123,22 @@ export class Orchestrator {
                 await persist.writeSubtaskUpdate(subtask);
             }
 
-            // Pick model
+            // Pick model — apply heuristics to refine taskType & complexity
+            const detectedType = subtask.taskType
+                ?? this.modelPicker.detectTaskType(subtask.description);
+            const { taskType: refinedType, complexity: refinedComplexity } =
+                this.modelPicker.refineSelection(
+                    subtask.description, detectedType, subtask.complexity
+                );
+            // Persist refined values back onto the subtask for downstream use
+            subtask.taskType = refinedType;
+            subtask.complexity = refinedComplexity;
+
             let modelInfo: ModelInfo | undefined;
             if (subtask.attempts === 1) {
-                modelInfo = await this.modelPicker.selectForComplexity(
-                    subtask.complexity,
+                modelInfo = await this.modelPicker.selectForTask(
+                    refinedType,
+                    refinedComplexity,
                     triedModelIds
                 );
             } else {
@@ -1237,7 +1251,11 @@ export class Orchestrator {
                 reporter.stream,
                 debugLog,
                 toolToken,
-                ledger
+                ledger,
+                undefined, // skills
+                undefined, // messageBus
+                undefined, // hookRunner
+                this.rateLimitGuard
             );
 
             if (!result.success) {
