@@ -56,6 +56,16 @@ export type {
     TaskFailedEvent,
     FileSetDiscoveredEvent,
     NoteEvent,
+    DelegationPanelEvent,
 } from './progressEvents';
 export { SessionPersistence } from './sessionPersistence';
 export type { PersistedSubtask, PersistedSession, ResumableSession } from './sessionPersistence';
+export { RunStateManager } from './runState';
+export type {
+    RunStatus, TaskStatus, SubagentStatus, RunTask, RunSubagent,
+    QueuedUserMessage, RunCounters, RunPhase, RunStateData,
+} from './runState';
+export { generateSnapshot, generateDetailedSnapshot } from './statusSnapshot';
+export type { StatusSnapshot } from './statusSnapshot';
+export { BackgroundProgressReporter } from './backgroundProgressReporter';
+export { BackgroundTaskManager } from './backgroundTaskManager';

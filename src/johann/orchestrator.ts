@@ -42,6 +42,7 @@ import { SelfHealingDetector, DetectedFailure } from './selfHealing';
 import { LocalSkillStore, GlobalSkillStore } from './skillStore';
 import { SkillValidator } from './skillValidator';
 import { SkillDoc } from './skillTypes';
+import { RunStateManager, RunPhase } from './runState';
 
 // ============================================================================
 // ORCHESTRATOR — The top-level controller
@@ -632,6 +633,15 @@ export class Orchestrator {
         // Create progress reporter for structured chat output
         const reporter = new ChatProgressReporter(response);
 
+        // === RunState: start run ===
+        const runManager = RunStateManager.getInstance();
+        await runManager.startRun(session.sessionId, request);
+
+        // Wire cancellation → RunState
+        const cancelListener = token.onCancellationRequested(async () => {
+            await runManager.cancelRun();
+        });
+
         // Initialize session persistence — everything goes to disk
         const persist = new SessionPersistence(session.sessionId);
         const persistReady = await persist.initialize();
@@ -701,6 +711,16 @@ export class Orchestrator {
 
             // Show the plan
             reporter.showPlan(plan);
+
+            // === RunState: register tasks from plan ===
+            await runManager.setPlanSummary(plan.summary);
+            await runManager.registerTasks(
+                plan.subtasks.map(st => ({
+                    id: st.id,
+                    title: st.title,
+                    phase: this.inferRunPhase(st.title),
+                }))
+            );
 
             // Discover available models
             const modelSummary = await this.modelPicker.getModelSummary();
@@ -811,6 +831,10 @@ export class Orchestrator {
             // Finalize debug log on success
             await this.hookRunner.run('on_session_end', { request, session, plan });
 
+            // === RunState: mark completed ===
+            await runManager.completeRun();
+            cancelListener.dispose();
+
             // Log delegation stats
             const delegationStats = this.delegationGuard.getStats();
             await debugLog.logEvent('other',
@@ -828,6 +852,10 @@ export class Orchestrator {
             const classified = classifyError(err);
 
             await this.hookRunner.run('on_error', { request, session, error: new Error(classified.message) });
+
+            // === RunState: mark failed ===
+            await runManager.failRun(classified.message);
+            cancelListener.dispose();
 
             // PERSIST — Mark session failed on disk with error details
             await persist.markFailed(session, classified.message);
@@ -940,6 +968,21 @@ export class Orchestrator {
 
             if (pendingIds.length === 0) {
                 continue; // Entire wave already done or blocked
+            }
+
+            // === RunState: drain user queue at wave boundary (safe checkpoint) ===
+            const runMgr = RunStateManager.getInstance();
+            const pending = runMgr.getPendingUserMessages();
+            if (pending.length > 0) {
+                reporter.emit({
+                    type: 'note',
+                    message: `📨 ${pending.length} queued user message(s) detected at wave boundary. ` +
+                        `These will be integrated in a future orchestration cycle.`,
+                });
+                // Mark them as integrated (they'll be picked up on /resume or next run)
+                for (const msg of pending) {
+                    await runMgr.markUserMessageIntegrated(msg.id);
+                }
             }
 
             const pendingSubtasks = pendingIds
@@ -1235,6 +1278,10 @@ export class Orchestrator {
 
         if (wavesNeedRecompute) {
             correctionCycle++;
+
+            // === RunState: emit delegation panel after correction-triggering wave ===
+            this.emitDelegationPanel(reporter);
+
             continue; // Re-compute waves with corrected tasks back in pending
         }
 
@@ -1243,6 +1290,9 @@ export class Orchestrator {
         if (token.isCancellationRequested) {
             throw new vscode.CancellationError();
         }
+
+        // === RunState: final delegation panel ===
+        this.emitDelegationPanel(reporter);
 
         return results;
     }
@@ -1311,6 +1361,13 @@ export class Orchestrator {
 
             subtask.attempts++;
             subtask.status = 'in-progress';
+
+            // === RunState: mark task running ===
+            const runMgr2 = RunStateManager.getInstance();
+            await runMgr2.updateTask(subtask.id, {
+                status: 'running',
+                progressMessage: `Attempt ${subtask.attempts}/${subtask.maxAttempts}`,
+            });
 
             // PERSIST — subtask status change
             if (persist) {
@@ -1527,6 +1584,8 @@ export class Orchestrator {
 
             if (review.success) {
                 subtask.status = 'completed';
+                // === RunState: mark task done ===
+                await runMgr2.updateTask(subtask.id, { status: 'done', model: modelInfo.name });
                 // PERSIST — subtask completed
                 if (persist) {
                     await persist.writeSubtaskUpdate(subtask);
@@ -1579,6 +1638,8 @@ export class Orchestrator {
 
         // All attempts exhausted
         subtask.status = 'failed';
+        // === RunState: mark task failed ===
+        await runMgr2.updateTask(subtask.id, { status: 'failed' });
         reporter.emit({ type: 'task-failed', id: subtask.id, error: `Failed after ${subtask.attempts} attempts`, label: subtask.title });
         this.delegationGuard.releaseDelegation();
 
@@ -1936,5 +1997,52 @@ export class Orchestrator {
             );
             getLogger().info(`User requested promotion for skill "${skill.metadata.slug}"`);
         }
+    }
+
+    /**
+     * Emit a delegation-panel event summarizing current task states.
+     * Reads from RunStateManager to build a compact panel view.
+     */
+    private emitDelegationPanel(reporter: ProgressReporter): void {
+        const runMgr = RunStateManager.getInstance();
+        const state = runMgr.getState();
+        if (!state || state.tasks.length === 0) { return; }
+
+        reporter.emit({
+            type: 'delegation-panel',
+            queued: state.counters.queued,
+            running: state.counters.running,
+            done: state.counters.done,
+            failed: state.counters.failed,
+            entries: state.tasks.map(t => ({
+                id: t.id,
+                title: t.title,
+                status: t.status === 'cancelled' ? 'failed' : t.status as 'queued' | 'running' | 'done' | 'failed',
+                summary: t.progressMessage || t.status,
+            })),
+        });
+    }
+
+    /**
+     * Infer a RunPhase from a subtask title using keyword heuristics.
+     */
+    private inferRunPhase(title: string): RunPhase {
+        const lower = title.toLowerCase();
+        if (lower.includes('scan') || lower.includes('discover') || lower.includes('analyze') || lower.includes('explore')) {
+            return 'discovery';
+        }
+        if (lower.includes('plan') || lower.includes('design') || lower.includes('architect')) {
+            return 'planning';
+        }
+        if (lower.includes('delegate') || lower.includes('assign') || lower.includes('dispatch')) {
+            return 'delegation';
+        }
+        if (lower.includes('test') || lower.includes('verify') || lower.includes('validate') || lower.includes('check') || lower.includes('lint')) {
+            return 'verification';
+        }
+        if (lower.includes('package') || lower.includes('deploy') || lower.includes('publish') || lower.includes('report') || lower.includes('document')) {
+            return 'packaging';
+        }
+        return 'implementation';
     }
 }

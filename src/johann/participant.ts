@@ -16,7 +16,7 @@ import { discoverSkills, formatSkillsForPrompt } from './skills';
 import { HeartbeatManager } from './heartbeat';
 import { createLogger, JohannLogger } from './logger';
 import { SubagentRegistry } from './subagentRegistry';
-import { BackgroundTaskManager } from './backgroundTaskManager';
+import { BackgroundTaskManager } from './backgroundTaskManager';\nimport { RunStateManager } from './runState';\nimport { generateSnapshot } from './statusSnapshot';
 
 // ============================================================================
 // JOHANN CHAT PARTICIPANT
@@ -226,6 +226,55 @@ export function registerJohannParticipant(
                     }
                 }
                 return { metadata: { command: 'directive' } };
+            }
+
+            // === INTERACTIVE WHILE RUNNING ===
+            // If Johann is already running, intercept "status" requests and
+            // "add task" requests without interrupting the active run.
+            const runManager = RunStateManager.getInstance();
+            if (runManager.isRunning()) {
+                const lowerMsg = userMessage.toLowerCase().trim();
+
+                // Status check: show a snapshot
+                if (lowerMsg === 'status' || lowerMsg === 'status detailed') {
+                    const state = runManager.getState();
+                    if (state) {
+                        const snapshot = lowerMsg.includes('detailed')
+                            ? (await import('./statusSnapshot')).generateDetailedSnapshot(state)
+                            : generateSnapshot(state);
+                        await runManager.recordSnapshot();
+                        response.markdown(snapshot.markdown);
+                        return { metadata: { command: 'status' } };
+                    }
+                }
+
+                // Add task: enqueue user message for integration at next checkpoint
+                if (lowerMsg.startsWith('add task:') || lowerMsg.startsWith('add:') || lowerMsg.startsWith('also ')) {
+                    const taskDescription = userMessage
+                        .replace(/^(add task:|add:|also)\s*/i, '')
+                        .trim();
+
+                    if (taskDescription) {
+                        const position = await runManager.enqueueUserMessage(taskDescription);
+                        response.markdown(
+                            `📨 **Task queued** (position ${position})\n\n` +
+                            `> ${taskDescription}\n\n` +
+                            `Johann will integrate this at the next safe checkpoint between waves.\n`
+                        );
+                        return { metadata: { command: 'add-task' } };
+                    }
+                }
+
+                // Any other message while running — queue it
+                const position = await runManager.enqueueUserMessage(userMessage);
+                response.markdown(
+                    `📨 **Message queued** (position ${position})\n\n` +
+                    `Johann is currently running. Your message has been queued:\n\n` +
+                    `> ${userMessage.substring(0, 200)}${userMessage.length > 200 ? '…' : ''}\n\n` +
+                    `It will be integrated at the next safe checkpoint.\n\n` +
+                    `Say \`@johann status\` for a live progress snapshot.\n`
+                );
+                return { metadata: { command: 'queued' } };
             }
 
             // === WORKSPACE TRUST CHECK ===

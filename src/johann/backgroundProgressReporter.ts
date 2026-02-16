@@ -8,6 +8,7 @@ import {
     TaskFailedEvent,
     FileSetDiscoveredEvent,
     NoteEvent,
+    DelegationPanelEvent,
 } from './progressEvents';
 import { BackgroundTaskManager } from './backgroundTaskManager';
 
@@ -92,6 +93,9 @@ export class BackgroundProgressReporter {
                 break;
             case 'note':
                 this.onNote(event);
+                break;
+            case 'delegation-panel':
+                this.onDelegationPanel(event);
                 break;
         }
     }
@@ -240,6 +244,19 @@ export class BackgroundProgressReporter {
 
         // Add note about discovered files
         this.notes.push(`📁 ${event.label}: ${event.files.length} file(s)`);
+    }
+
+    /**
+     * DelegationPanel → collect delegation summary as a note.
+     */
+    private onDelegationPanel(event: DelegationPanelEvent): void {
+        const total = event.queued + event.running + event.done + event.failed;
+        const parts: string[] = [];
+        if (event.running > 0) { parts.push(`${event.running} running`); }
+        if (event.done > 0) { parts.push(`${event.done} done`); }
+        if (event.failed > 0) { parts.push(`${event.failed} failed`); }
+        if (event.queued > 0) { parts.push(`${event.queued} queued`); }
+        this.notes.push(`🤖 Delegation: ${parts.join(' · ')} (${total} total)`);
     }
 
     /**

@@ -10,6 +10,7 @@ import {
     TaskFailedEvent,
     FileSetDiscoveredEvent,
     NoteEvent,
+    DelegationPanelEvent,
 } from './progressEvents';
 
 // ============================================================================
@@ -100,6 +101,9 @@ export class ChatProgressReporter implements ProgressReporter {
                 break;
             case 'note':
                 this.onNote(event);
+                break;
+            case 'delegation-panel':
+                this.onDelegationPanel(event);
                 break;
         }
     }
@@ -312,6 +316,36 @@ export class ChatProgressReporter implements ProgressReporter {
 
         // Fallback: grouped markdown list
         this._stream.markdown(this.formatFileListMarkdown(event.label, event.files));
+    }
+
+    /**
+     * DelegationPanel → compact delegation summary.
+     * Renders as a collapsible details block with per-subagent status.
+     */
+    private onDelegationPanel(event: DelegationPanelEvent): void {
+        const total = event.queued + event.running + event.done + event.failed;
+        const lines: string[] = [];
+
+        // Compact summary header
+        const parts: string[] = [];
+        if (event.running > 0) { parts.push(`${event.running} running`); }
+        if (event.done > 0) { parts.push(`${event.done} done`); }
+        if (event.failed > 0) { parts.push(`${event.failed} failed`); }
+        if (event.queued > 0) { parts.push(`${event.queued} queued`); }
+
+        lines.push(`<details><summary>🤖 **Delegation** — ${parts.join(' · ')} (${total} total)</summary>\n`);
+
+        // Per-subagent entries
+        for (const entry of event.entries) {
+            const emoji = entry.status === 'running' ? '🔄'
+                : entry.status === 'done' ? '✅'
+                : entry.status === 'failed' ? '❌'
+                : '⏳';
+            lines.push(`- ${emoji} **${entry.title}** — ${entry.summary}`);
+        }
+
+        lines.push('\n</details>\n');
+        this._stream.markdown(lines.join('\n'));
     }
 
     /**

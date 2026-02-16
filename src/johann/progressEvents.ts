@@ -117,6 +117,29 @@ export interface NoteEvent {
     style?: 'info' | 'warning' | 'success';
 }
 
+/**
+ * Emitted to render a concise delegation summary panel.
+ * Shows subagent counts and per-subagent status in a compact format.
+ */
+export interface DelegationPanelEvent {
+    type: 'delegation-panel';
+    /** Count of queued subagents. */
+    queued: number;
+    /** Count of running subagents. */
+    running: number;
+    /** Count of completed subagents. */
+    done: number;
+    /** Count of failed subagents. */
+    failed: number;
+    /** Per-subagent summaries (id + title + status + 1–2 line summary). */
+    entries: Array<{
+        id: string;
+        title: string;
+        status: 'queued' | 'running' | 'done' | 'failed';
+        summary: string;
+    }>;
+}
+
 // ---------------------------------------------------------------------------
 // Union type
 // ---------------------------------------------------------------------------
@@ -131,7 +154,8 @@ export type ProgressEvent =
     | TaskCompletedEvent
     | TaskFailedEvent
     | FileSetDiscoveredEvent
-    | NoteEvent;
+    | NoteEvent
+    | DelegationPanelEvent;
 
 // ---------------------------------------------------------------------------
 // Reporter interface

@@ -5,6 +5,8 @@ import { listDailyNotes, readDailyNotes } from './dailyNotes';
 import { listSessions, getRecentSessionsSummary } from './sessionTranscript';
 import { SessionPersistence, ResumableSession } from './sessionPersistence';
 import { BackgroundTaskManager } from './backgroundTaskManager';
+import { RunStateManager } from './runState';
+import { generateSnapshot, generateDetailedSnapshot } from './statusSnapshot';
 
 // ============================================================================
 // DIRECTIVES — Slash command / directive parsing for Johann
@@ -61,7 +63,7 @@ export async function handleDirective(
         case '/help':
             return await handleHelp(response);
         case '/status':
-            return await handleStatus(response);
+            return await handleStatus(response, args);
         case '/compact':
             return await handleCompact(response);
         case '/memory':
@@ -96,7 +98,8 @@ async function handleHelp(response: vscode.ChatResponseStream): Promise<Directiv
 | Command | Description |
 |---------|-------------|
 | \`/help\` | Show this help |
-| \`/status\` | Show Johann's current state and info |
+| \`/status\` | Show live run status with workflow diagram |
+| \`/status detailed\` | Show detailed task-level diagram |
 | \`/compact\` | Compact status summary |
 | \`/memory\` | Show curated memory (MEMORY.md) |
 | \`/search <query>\` | Search memory for keywords |
@@ -107,19 +110,65 @@ async function handleHelp(response: vscode.ChatResponseStream): Promise<Directiv
 | \`/resume [id] [message]\` | Resume a session, optionally with a course-correction message |
 | \`/tasks [task-id]\` | View background tasks |
 
+**While a run is active:**
+- Say \`@johann status\` for a live snapshot
+- Say \`Add task: <description>\` to queue work during a run
+
 `;
 
     response.markdown(output);
     return { isDirective: true, handled: true, output };
 }
 
-async function handleStatus(response: vscode.ChatResponseStream): Promise<DirectiveResult> {
+async function handleStatus(response: vscode.ChatResponseStream, args?: string): Promise<DirectiveResult> {
+    // If a run is active, show a live RunState snapshot
+    const runManager = RunStateManager.getInstance();
+    const runState = runManager.getState();
+
+    if (runState && (runState.status === 'running' || runState.status === 'cancelling')) {
+        const isDetailed = args?.trim().toLowerCase() === 'detailed';
+        const snapshot = isDetailed
+            ? generateDetailedSnapshot(runState)
+            : generateSnapshot(runState);
+
+        // Record that a snapshot was taken (for throttle)
+        await runManager.recordSnapshot();
+
+        response.markdown(snapshot.markdown);
+
+        // Add action buttons
+        response.button({
+            command: 'workbench.view.scm',
+            title: '$(git-compare) Changed Files',
+        });
+        response.button({
+            command: 'johann.showLog',
+            title: '$(output) Output Log',
+        });
+
+        return { isDirective: true, handled: true, output: snapshot.markdown };
+    }
+
+    // No active run — show general Johann status
     const config = getConfig();
     const dailyNoteDates = await listDailyNotes();
     const sessions = await listSessions();
 
     const lines: string[] = [];
     lines.push('## Johann Status\n');
+
+    // Show last completed run if available
+    if (runState && (runState.status === 'completed' || runState.status === 'failed')) {
+        const statusEmoji = runState.status === 'completed' ? '✅' : '❌';
+        lines.push(`### Last Run: ${statusEmoji} ${runState.status}\n`);
+        lines.push(`- **Run ID:** \`${runState.runId}\``);
+        if (runState.planSummary) {
+            lines.push(`- **Plan:** ${runState.planSummary}`);
+        }
+        lines.push(`- **Tasks:** ${runState.counters.done} done, ${runState.counters.failed} failed`);
+        lines.push('');
+    }
+
     lines.push(`- **Memory directory:** \`${config.memoryDir}\``);
     lines.push(`- **Daily notes:** ${dailyNoteDates.length} files`);
     lines.push(`- **Sessions recorded:** ${sessions.length}`);
