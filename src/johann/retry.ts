@@ -16,6 +16,7 @@ import * as vscode from 'vscode';
 export type ErrorCategory =
     | 'network'       // Transient network errors — retry immediately
     | 'rate-limit'    // API quota / request limit — retry with longer backoff
+    | 'api-compat'    // API compatibility error (unsupported parameter) — skip model, try another
     | 'cancelled'     // User cancelled — do not retry
     | 'auth'          // Authentication / permission — do not retry
     | 'unknown';      // Unclassified — retry cautiously
@@ -72,6 +73,15 @@ const CANCEL_PATTERNS = [
     'cancel',
     'abort',
     'user abort',
+];
+
+// Patterns for API compatibility errors (unsupported parameters, etc.)
+// These are NOT retryable with the same model — need a different model
+const API_COMPAT_PATTERNS = [
+    'unsupported parameter',
+    'unsupported_value',
+    'invalid_request_error',
+    'context_management',
 ];
 
 // Patterns for auth errors
@@ -190,6 +200,18 @@ export function classifyError(err: unknown): ClassifiedError {
             retryable: false,
             userGuidance:
                 'Authentication or permission error. Make sure GitHub Copilot is active and signed in.',
+        };
+    }
+
+    // Check API compatibility errors (e.g., GPT models rejecting context_management parameter)
+    // These should NOT be retried with the same model — need escalation to a different model
+    if (API_COMPAT_PATTERNS.some(p => lower.includes(p))) {
+        return {
+            category: 'api-compat',
+            message,
+            retryable: false, // Not retryable with SAME model, but orchestrator should try DIFFERENT model
+            userGuidance:
+                'This model does not support a required API parameter. Johann will try a different model.',
         };
     }
 

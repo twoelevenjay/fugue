@@ -141,6 +141,10 @@ export interface EscalationRecord {
         tier: number;
         success: boolean;
         reason: string;
+        /** Preserved output from successful executions (even if review rejected) */
+        output?: string;
+        /** Duration of this attempt */
+        durationMs?: number;
     }>;
 }
 
@@ -215,7 +219,7 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
 /**
  * Status of a background task.
  */
-export type BackgroundTaskStatus = 
+export type BackgroundTaskStatus =
     | 'running'      // Currently executing
     | 'paused'       // Paused (e.g., waiting for user input)
     | 'completed'    // Successfully finished

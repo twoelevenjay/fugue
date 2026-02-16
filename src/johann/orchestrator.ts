@@ -81,20 +81,34 @@ RULES:
 CRITICAL — AGENTIC OUTPUT ONLY:
 Your response must report what WAS DONE, not what the user should do.
 
-FORBIDDEN PHRASES (these indicate you are passing through failed subtask output):
+FORBIDDEN OUTPUTS — NEVER INCLUDE THESE IN YOUR RESPONSE:
 ❌ "Please run..."
 ❌ "You should..."
 ❌ "You need to..."
 ❌ "Make sure to..."
 ❌ "Ask [someone] to..."
 ❌ "The user should..."
+❌ "Here's what you need to do"
+❌ "What You Need to Do"
+❌ "Manual Investigation"
+❌ "Next Steps Required"
+❌ Code blocks with commands for the user to copy-paste
+❌ "Would you like me to help...?"
+❌ "Please share any error messages..."
 
-If a subtask's output contains these phrases, it means the subtask FAILED to act agentically.
-DO NOT echo those instructions to the user. Instead, report:
-- "⚠️ Subtask X failed to execute autonomously — it returned instructions instead of taking action."
-- Suggest re-running with corrected instructions.
+If a subtask FAILED:
+- Report WHAT was attempted and WHY it failed
+- Report what DID succeed (partial progress is still progress)
+- State that Johann will retry with a different approach
+- DO NOT give the user a to-do list. DO NOT suggest manual commands.
+- DO NOT ask the user to troubleshoot. Johann owns the problem.
 
-The user expects a report of completed actions, not a to-do list.`;
+If a subtask SUCCEEDED but was marked failed by review:
+- Check if the subtask's output shows real tool usage (terminal commands run, files created)
+- If real work was done, report it as partially successful
+- The review system can be overly strict — use your judgment
+
+The user expects a report of completed actions and honest status, not a manual. Johann is an autonomous agent — failure means "I'll try harder next time", not "please do it yourself."`;
 
 export class Orchestrator {
     private modelPicker: ModelPicker;
@@ -1451,12 +1465,34 @@ export class Orchestrator {
             );
 
             if (!result.success) {
+                // Check if this is an API compatibility error (e.g., GPT model rejecting context_management).
+                // These should NOT count as a real attempt — the model never even started executing.
+                // Just skip to the next model immediately.
+                const isApiCompat = result.reviewNotes?.toLowerCase().includes('unsupported parameter')
+                    || result.reviewNotes?.toLowerCase().includes('context_management')
+                    || result.reviewNotes?.toLowerCase().includes('invalid_request_error');
+
+                if (isApiCompat) {
+                    reporter.emit({ type: 'task-progress', id: subtask.id, message: `Model ${modelInfo.name} incompatible, switching…` });
+                    // Don't increment attempts — this model never ran, just skip it
+                    subtask.attempts--;
+                    escalation.attempts.push({
+                        modelId: modelInfo.id,
+                        tier: modelInfo.tier,
+                        success: false,
+                        reason: `API incompatibility: ${result.reviewNotes}`,
+                    });
+                    continue;
+                }
+
                 reporter.emit({ type: 'task-progress', id: subtask.id, message: 'Execution failed, escalating…' });
                 escalation.attempts.push({
                     modelId: modelInfo.id,
                     tier: modelInfo.tier,
                     success: false,
                     reason: result.reviewNotes,
+                    output: result.output, // Preserve any partial output
+                    durationMs: result.durationMs,
                 });
                 continue;
             }
@@ -1485,6 +1521,8 @@ export class Orchestrator {
                 tier: modelInfo.tier,
                 success: review.success,
                 reason: review.reason,
+                output: result.output, // ALWAYS preserve the output — even on review failure
+                durationMs: result.durationMs,
             });
 
             if (review.success) {
@@ -1543,12 +1581,29 @@ export class Orchestrator {
         subtask.status = 'failed';
         reporter.emit({ type: 'task-failed', id: subtask.id, error: `Failed after ${subtask.attempts} attempts`, label: subtask.title });
         this.delegationGuard.releaseDelegation();
+
+        // Preserve the best output from any attempt that produced real work,
+        // even if review was too strict. An execution that ran 15+ tool rounds
+        // and created files is VALUABLE even if review quibbled.
+        let bestOutput = '';
+        let bestModelUsed = triedModelIds[triedModelIds.length - 1] || 'none';
+        let bestDurationMs = 0;
+        for (const attempt of escalation.attempts) {
+            // Find the most substantial output from successful executions
+            // that were rejected by review (not execution failures)
+            if (attempt.output && attempt.output.length > bestOutput.length) {
+                bestOutput = attempt.output;
+                bestModelUsed = attempt.modelId;
+                bestDurationMs = attempt.durationMs ?? 0;
+            }
+        }
+
         const failResult: SubtaskResult = {
             success: false,
-            modelUsed: triedModelIds[triedModelIds.length - 1] || 'none',
-            output: '',
+            modelUsed: bestModelUsed,
+            output: bestOutput,
             reviewNotes: `Failed after ${subtask.attempts} attempts`,
-            durationMs: 0,
+            durationMs: bestDurationMs,
             timestamp: new Date().toISOString(),
         };
         if (hookRunner) {
