@@ -22,6 +22,18 @@ import { ExecutionLedger } from './executionLedger';
 const MAX_TOOL_ROUNDS = 30;
 
 /**
+ * Maximum consecutive text-only rounds (no tool calls) before forcing exit.
+ * Prevents the model from rambling indefinitely without doing real work.
+ */
+const MAX_CONSECUTIVE_TEXT_ROUNDS = 3;
+
+/**
+ * Maximum total output size in characters before aborting.
+ * Prevents unbounded output accumulation from hallucinating models.
+ */
+const MAX_TOTAL_OUTPUT_CHARS = 200_000;
+
+/**
  * How often (in tool-loop rounds) to re-read the ledger and inject an update
  * into the running agent's conversation. Lower = more awareness, higher = less
  * prompt bloat. Every HIVE_MIND_REFRESH_INTERVAL rounds the agent gets a
@@ -208,6 +220,56 @@ export class SubagentManager {
         return LONG_RUNNING_COMMAND_PATTERNS.some(pattern => pattern.test(normalized));
     }
 
+    /**
+     * Detect signs of hallucination or garbled output in a text chunk.
+     *
+     * Returns a reason string if the output looks corrupted, or empty string
+     * if it looks normal. Checks for:
+     *   1. High ratio of non-ASCII characters (garbled text, wrong encoding)
+     *   2. Excessive repetition (model stuck in a loop)
+     *   3. Very long lines with no whitespace (binary/encoded data)
+     */
+    private detectOutputCorruption(text: string): string {
+        if (text.length < 100) return '';
+
+        // Check 1: High ratio of non-Latin/non-common characters
+        // Normal code/docs should be mostly ASCII with some Unicode
+        // Garbled hallucinations often produce Arabic, CJK, or control chars
+        const nonAsciiCount = (text.match(/[^\x00-\x7F]/g) || []).length;
+        const ratio = nonAsciiCount / text.length;
+        if (ratio > 0.3 && text.length > 200) {
+            return `Output appears garbled: ${(ratio * 100).toFixed(0)}% non-ASCII characters`;
+        }
+
+        // Check 2: Excessive repetition — same 20+ char sequence repeated 5+ times
+        // This catches the model getting stuck in a degenerate loop
+        if (text.length > 500) {
+            const sample = text.substring(text.length - 500);
+            for (let len = 20; len <= 100; len += 10) {
+                const tail = sample.substring(sample.length - len);
+                let count = 0;
+                let pos = 0;
+                while ((pos = sample.indexOf(tail, pos)) !== -1) {
+                    count++;
+                    pos += tail.length;
+                }
+                if (count >= 5) {
+                    return `Output contains excessive repetition (${len}-char pattern repeated ${count}x)`;
+                }
+            }
+        }
+
+        // Check 3: Very long lines with no whitespace (likely binary/encoded data)
+        const lines = text.split('\n');
+        for (const line of lines) {
+            if (line.length > 1000 && !line.includes(' ') && !line.includes('\t')) {
+                return 'Output contains suspiciously long lines without whitespace (possible binary data)';
+            }
+        }
+
+        return '';
+    }
+
     private prepareToolInput(toolName: string, rawInput: unknown): { input: object; warnings: string[] } {
         const warnings: string[] = [];
         const input = this.isRecord(rawInput) ? { ...rawInput } : {};
@@ -379,12 +441,23 @@ export class SubagentManager {
             let fullOutput = '';
             let round = 0;
             let totalToolCalls = 0;
+            let consecutiveTextRounds = 0;
 
             // === AGENTIC TOOL-CALLING LOOP ===
             while (round < MAX_TOOL_ROUNDS) {
                 if (token.isCancellationRequested) {
                     break;
                 }
+
+                // Guard: abort if total output is getting too large
+                if (fullOutput.length > MAX_TOTAL_OUTPUT_CHARS) {
+                    if (stream) {
+                        stream.markdown(`\n> ⚠️ Output limit reached (${(fullOutput.length / 1000).toFixed(0)}KB). Stopping execution.\n`);
+                    }
+                    fullOutput += '\n[OUTPUT LIMIT REACHED — execution stopped to prevent runaway output]';
+                    break;
+                }
+
                 round++;
 
                 const callStart = Date.now();
@@ -424,10 +497,54 @@ export class SubagentManager {
                     });
                 }
 
+                // === HALLUCINATION / CORRUPTION GUARD ===
+                // Check if the model's output looks garbled or corrupted.
+                // If so, abort immediately — continuing will only make it worse.
+                if (roundText.length > 0) {
+                    const corruptionReason = this.detectOutputCorruption(roundText);
+                    if (corruptionReason) {
+                        if (stream) {
+                            stream.markdown(`\n> 🛑 **Output corruption detected:** ${corruptionReason}. Aborting subtask.\n`);
+                        }
+                        fullOutput += `\n[ABORTED: ${corruptionReason}]`;
+
+                        if (debugLog) {
+                            await debugLog.logEvent('other', `Corruption detected in subtask ${subtask.id}: ${corruptionReason}`);
+                        }
+
+                        // Close section and return failure
+                        if (stream) {
+                            stream.markdown('\n\n</details>\n\n');
+                        }
+
+                        return {
+                            success: false,
+                            modelUsed: modelInfo.id,
+                            output: fullOutput,
+                            reviewNotes: `Aborted due to output corruption: ${corruptionReason}`,
+                            durationMs: Date.now() - startTime,
+                            timestamp: new Date().toISOString(),
+                        };
+                    }
+                }
+
                 // If no tool calls, the model is done — break out of the loop
                 if (toolCalls.length === 0) {
+                    // Track consecutive text-only rounds to detect rambling models
+                    consecutiveTextRounds++;
+                    if (consecutiveTextRounds >= MAX_CONSECUTIVE_TEXT_ROUNDS && round < MAX_TOOL_ROUNDS) {
+                        // The model has produced text without tool calls multiple times
+                        // in a row. It's probably rambling. Force exit.
+                        if (stream) {
+                            stream.markdown(`\n> ⚠️ ${consecutiveTextRounds} consecutive text-only rounds with no tool usage. Stopping.\n`);
+                        }
+                        fullOutput += '\n[STOPPED: model produced only text without tool calls for multiple rounds]';
+                    }
                     break;
                 }
+
+                // Reset consecutive text round counter since we got tool calls
+                consecutiveTextRounds = 0;
 
                 totalToolCalls += toolCalls.length;
 

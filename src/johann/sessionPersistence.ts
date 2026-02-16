@@ -7,6 +7,7 @@ import {
     EscalationRecord,
 } from './types';
 import { createLogger } from './logger';
+import { atomicWrite, safeAppend, withFileLock } from './safeIO';
 
 const logger = createLogger();
 
@@ -210,19 +211,14 @@ export class SessionPersistence {
      * Append a chunk of the plan stream to disk as it's being generated.
      * Called from TaskDecomposer on every LLM chunk so the plan is on disk
      * even if the process is interrupted mid-planning.
+     *
+     * Uses safeAppend for crash-safety and mutex protection.
      */
     async appendPlanStream(chunk: string): Promise<void> {
         if (!this.initialized) return;
         try {
             const uri = vscode.Uri.joinPath(this.sessionDir, 'plan-stream.txt');
-            let existing = '';
-            try {
-                const bytes = await vscode.workspace.fs.readFile(uri);
-                existing = new TextDecoder().decode(bytes);
-            } catch {
-                // File doesn't exist yet — first chunk
-            }
-            await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(existing + chunk));
+            await safeAppend(uri, chunk, undefined, false /* no dedup for streaming chunks */);
         } catch (err) {
             // Don't let streaming I/O slow down the LLM — log and continue
             const msg = err instanceof Error ? err.message : String(err);
@@ -234,6 +230,8 @@ export class SessionPersistence {
      * Append a line to the execution log.
      * This creates a running text log of everything Johann does,
      * written as it happens so you can tail it in real time.
+     *
+     * Uses safeAppend for crash-safety and mutex protection.
      */
     async appendExecutionLog(event: string, detail?: string): Promise<void> {
         if (!this.initialized) return;
@@ -243,14 +241,7 @@ export class SessionPersistence {
             : `[${ts}] ${event}\n`;
         try {
             const uri = vscode.Uri.joinPath(this.sessionDir, 'execution.log');
-            let existing = '';
-            try {
-                const bytes = await vscode.workspace.fs.readFile(uri);
-                existing = new TextDecoder().decode(bytes);
-            } catch {
-                // First entry
-            }
-            await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(existing + line));
+            await safeAppend(uri, line, undefined, false /* no dedup for timestamped log lines */);
         } catch {
             // Non-critical
         }
@@ -595,7 +586,7 @@ export class SessionPersistence {
             }
 
             const content = JSON.stringify(data, null, 2);
-            await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
+            await atomicWrite(uri, content);
             logger.debug(`SessionPersistence: wrote ${filename} (${content.length} bytes)`);
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
@@ -606,7 +597,7 @@ export class SessionPersistence {
     private async writeText(filename: string, content: string): Promise<void> {
         try {
             const uri = vscode.Uri.joinPath(this.sessionDir, filename);
-            await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
+            await atomicWrite(uri, content);
             logger.debug(`SessionPersistence: wrote ${filename} (${content.length} chars)`);
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);

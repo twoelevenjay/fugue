@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { safeWrite, safeAppend, withFileLock } from './safeIO';
 
 // ============================================================================
 // EXECUTION LEDGER — Shared real-time coordination for subagents
@@ -596,6 +597,8 @@ export class ExecutionLedger {
 
     /**
      * Append an entry to a subtask's journal file.
+     * Uses safeAppend() with per-file mutex to prevent corruption from
+     * concurrent journal writes (e.g., parallel subtasks + hive mind updates).
      */
     async appendJournal(subtaskId: string, entry: JournalEntry): Promise<void> {
         if (!this.sessionDir) return;
@@ -610,18 +613,11 @@ export class ExecutionLedger {
             '\n';
 
         try {
-            let existing = '';
-            try {
-                const bytes = await vscode.workspace.fs.readFile(journalUri);
-                existing = new TextDecoder().decode(bytes);
-            } catch {
-                // New journal file
-                existing = `# Journal — ${subtaskId}\n\n`;
-            }
-
-            await vscode.workspace.fs.writeFile(
+            await safeAppend(
                 journalUri,
-                new TextEncoder().encode(existing + line)
+                line,
+                `# Journal — ${subtaskId}\n\n`,
+                true  // dedup: skip if line is already at the end
             );
         } catch {
             // Non-critical
@@ -984,6 +980,8 @@ export class ExecutionLedger {
 
     /**
      * Persist the ledger state to disk.
+     * Uses atomic write + per-file mutex to prevent corruption from
+     * concurrent updates (e.g., parallel subtasks completing at the same time).
      */
     private async saveLedger(): Promise<void> {
         if (!this.sessionDir) return;
@@ -993,10 +991,7 @@ export class ExecutionLedger {
         const ledgerUri = vscode.Uri.joinPath(this.sessionDir, 'ledger.json');
         try {
             const content = JSON.stringify(this.state, null, 2);
-            await vscode.workspace.fs.writeFile(
-                ledgerUri,
-                new TextEncoder().encode(content)
-            );
+            await safeWrite(ledgerUri, content);
         } catch {
             // Non-critical
         }

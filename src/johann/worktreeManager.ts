@@ -81,6 +81,8 @@ export class WorktreeManager {
      * Initialize the manager. Verifies git is available, workspace is a git repo,
      * and records the current branch for later merges.
      *
+     * Also cleans up orphaned worktrees and branches from previous crashed sessions.
+     *
      * @returns true if initialization succeeded, false if worktrees can't be used
      */
     async initialize(): Promise<boolean> {
@@ -105,10 +107,8 @@ export class WorktreeManager {
                 this.baseBranch = hash.trim();
             }
 
-            // Prune any stale worktrees from previous crashed sessions
-            try {
-                await this.execGit(this.repoRoot, ['worktree', 'prune']);
-            } catch { /* non-fatal */ }
+            // Clean up orphaned worktrees and branches from previous crashed sessions
+            await this.cleanupOrphanedWorktrees();
 
             this.initialized = true;
             return true;
@@ -354,6 +354,120 @@ export class WorktreeManager {
             lines.push(`  - ${info.subtaskId}: ${info.branch} → ${info.worktreePath}`);
         }
         return lines.join('\n');
+    }
+
+    // ========================================================================
+    // ORPHAN CLEANUP — Recover from previous crashed sessions
+    // ========================================================================
+
+    /**
+     * Clean up orphaned worktrees, branches, and temp directories from
+     * previous crashed sessions that didn't get a chance to run cleanupAll().
+     *
+     * This scans for:
+     *   1. Stale git worktrees (via `git worktree prune`)
+     *   2. Orphaned `johann/*` branches (not associated with current session)
+     *   3. Leftover temp directories under /tmp/johann-worktrees/
+     *
+     * Called automatically during initialize() to prevent resource accumulation.
+     */
+    private async cleanupOrphanedWorktrees(): Promise<void> {
+        // Step 1: Prune stale worktree refs from git
+        try {
+            await this.execGit(this.repoRoot, ['worktree', 'prune']);
+        } catch { /* non-fatal */ }
+
+        // Step 2: Find and delete orphaned johann/* branches
+        // Keep branches belonging to the CURRENT session (this.sessionId)
+        try {
+            const branchOutput = await this.execGit(this.repoRoot, [
+                'branch', '--list', 'johann/*'
+            ]);
+            const branches = branchOutput
+                .split('\n')
+                .map(b => b.trim().replace(/^\*\s*/, ''))
+                .filter(b => b.length > 0);
+
+            const shortSession = this.sessionId.substring(0, 16);
+
+            for (const branch of branches) {
+                // Don't delete branches belonging to the current session
+                if (branch.includes(shortSession)) continue;
+
+                try {
+                    // Check if this branch has an active worktree
+                    // If so, remove the worktree first
+                    const worktreeList = await this.execGit(this.repoRoot, [
+                        'worktree', 'list', '--porcelain'
+                    ]);
+                    const hasWorktree = worktreeList.includes(`branch refs/heads/${branch}`);
+
+                    if (hasWorktree) {
+                        // Find the worktree path for this branch
+                        const lines = worktreeList.split('\n');
+                        let worktreePath = '';
+                        for (let i = 0; i < lines.length; i++) {
+                            if (lines[i] === `branch refs/heads/${branch}`) {
+                                // Walk backwards to find the "worktree" line
+                                for (let j = i - 1; j >= 0; j--) {
+                                    if (lines[j].startsWith('worktree ')) {
+                                        worktreePath = lines[j].substring('worktree '.length);
+                                        break;
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                        if (worktreePath) {
+                            try {
+                                await this.execGit(this.repoRoot, [
+                                    'worktree', 'remove', worktreePath, '--force'
+                                ]);
+                            } catch {
+                                // Force-remove the directory
+                                try { await fs.rm(worktreePath, { recursive: true, force: true }); } catch { /* */ }
+                            }
+                        }
+                    }
+
+                    // Delete the orphaned branch
+                    await this.execGit(this.repoRoot, ['branch', '-D', branch]);
+                } catch {
+                    // Non-fatal — branch may already be gone or locked
+                }
+            }
+        } catch {
+            // Non-fatal — branch listing may fail in edge cases
+        }
+
+        // Step 3: Clean up orphaned temp directories
+        // Scan /tmp/johann-worktrees/ for session dirs that aren't ours
+        try {
+            const worktreeBase = path.join(os.tmpdir(), 'johann-worktrees');
+            const entries = await fs.readdir(worktreeBase).catch(() => [] as string[]);
+
+            for (const entry of entries) {
+                // Don't delete the current session's temp dir
+                if (entry === this.sessionId) continue;
+
+                const entryPath = path.join(worktreeBase, entry);
+                try {
+                    const stat = await fs.stat(entryPath);
+                    if (stat.isDirectory()) {
+                        // Only clean up dirs older than 1 hour to avoid
+                        // racing with a concurrent session that just started
+                        const ageMs = Date.now() - stat.mtimeMs;
+                        if (ageMs > 60 * 60 * 1000) {
+                            await fs.rm(entryPath, { recursive: true, force: true });
+                        }
+                    }
+                } catch {
+                    // Non-fatal
+                }
+            }
+        } catch {
+            // Non-fatal — /tmp/johann-worktrees/ may not exist
+        }
     }
 
     // ========================================================================

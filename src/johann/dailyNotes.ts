@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getJohannWorkspaceUri } from './bootstrap';
+import { safeAppend } from './safeIO';
 
 // ============================================================================
 // DAILY NOTES — Append-only daily log files
@@ -80,13 +81,6 @@ async function readFileContent(uri: vscode.Uri): Promise<string> {
 }
 
 /**
- * Write content to a file.
- */
-async function writeFileContent(uri: vscode.Uri, content: string): Promise<void> {
-    await vscode.workspace.fs.writeFile(uri, new TextEncoder().encode(content));
-}
-
-/**
  * Format a daily note entry as markdown text.
  */
 function formatEntry(entry: DailyNoteEntry): string {
@@ -121,25 +115,21 @@ function createDailyHeader(date: string): string {
 /**
  * Append an entry to today's daily notes file.
  * Creates the file with a header if it doesn't exist.
+ *
+ * Uses safeAppend() which provides:
+ *   - Per-file mutex to prevent concurrent-write corruption
+ *   - Atomic write (temp file + rename) to prevent half-written files
+ *   - Deduplication guard to prevent double-appends from retries
  */
 export async function appendDailyNote(entry: DailyNoteEntry): Promise<void> {
     await ensureMemoryDir();
     const noteUri = getDailyNoteUri();
     if (!noteUri) return;
 
-    const existing = await readFileContent(noteUri);
     const date = todayDateString();
+    const formattedEntry = '\n' + formatEntry(entry);
 
-    let newContent: string;
-    if (existing.trim().length === 0) {
-        // New file
-        newContent = createDailyHeader(date) + formatEntry(entry);
-    } else {
-        // Append
-        newContent = existing + '\n' + formatEntry(entry);
-    }
-
-    await writeFileContent(noteUri, newContent);
+    await safeAppend(noteUri, formattedEntry, createDailyHeader(date), true);
 }
 
 /**
