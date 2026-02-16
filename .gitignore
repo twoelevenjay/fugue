@@ -8,6 +8,9 @@ node_modules/
 # VS Code test downloads
 .vscode-test/
 
+# Johann runtime state (session logs, ledger, memory, debug transcripts)
+.vscode/johann/
+
 # Packaged extensions (build artifacts, not source)
 *.vsix
 
