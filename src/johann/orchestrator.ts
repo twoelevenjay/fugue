@@ -755,7 +755,9 @@ export class Orchestrator {
 
         // Execute subtasks respecting dependencies
         while (completed.size < plan.subtasks.length) {
-            if (token.isCancellationRequested) break;
+            if (token.isCancellationRequested) {
+                throw new vscode.CancellationError();
+            }
 
             // Find ready subtasks (all dependencies completed)
             const ready = plan.subtasks.filter(
@@ -764,8 +766,12 @@ export class Orchestrator {
             );
 
             if (ready.length === 0) {
-                // Deadlock or all tasks done
-                break;
+                const pending = plan.subtasks
+                    .filter(st => !completed.has(st.id))
+                    .map(st => st.id);
+                throw new Error(
+                    `Execution stalled: no runnable subtasks. Pending: ${pending.join(', ')}.`
+                );
             }
 
             // Execute ready subtasks — parallel when enabled and multiple are ready
@@ -901,6 +907,10 @@ export class Orchestrator {
                     }
                 }
             }
+        }
+
+        if (token.isCancellationRequested) {
+            throw new vscode.CancellationError();
         }
 
         return results;

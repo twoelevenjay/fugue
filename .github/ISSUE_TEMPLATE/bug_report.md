@@ -22,7 +22,7 @@ What actually happened.
 
 ## Environment
 - VS Code version: 
-- Ramble version: 
+- Fugue version: 
 - OS: 
 
 ## Additional context

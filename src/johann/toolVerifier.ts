@@ -123,7 +123,7 @@ export class ToolVerifier {
                     };
             }
         } catch (error) {
-            this.logger.error(`Check ${check} failed with exception`, { error: String(error) });
+            this.logger.error(`Check ${check} failed with exception: ${error}`);
             return {
                 check,
                 passed: false,

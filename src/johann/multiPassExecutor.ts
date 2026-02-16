@@ -162,7 +162,7 @@ export class MultiPassExecutor {
                 },
             };
         } catch (error) {
-            this.logger.error('Multi-pass execution failed', { error: String(error) });
+            this.logger.error(`Multi-pass execution failed: ${error}`);
             return {
                 strategy,
                 passResults,
@@ -245,7 +245,7 @@ export class MultiPassExecutor {
                 success: true,
             };
         } catch (error) {
-            this.logger.error(`Pass ${step.role} failed`, { error: String(error) });
+            this.logger.error(`Pass ${step.role} failed: ${error}`);
             return {
                 step,
                 modelId: modelInfo.id,

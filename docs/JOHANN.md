@@ -534,7 +534,7 @@ When users paste large feature lists (e.g., 50+ features from another project), 
 
 ### Solutions Implemented
 
-1. **Input chunking:** Ramble's analysis phase automatically detects inputs exceeding a threshold and processes them in chunks:
+1. **Input chunking:** Fugue's analysis phase automatically detects inputs exceeding a threshold and processes them in chunks:
    - Each chunk is analyzed independently to extract features
    - Results are merged, deduplicated, and organized
    - No information is lost because each chunk is small enough for reliable extraction

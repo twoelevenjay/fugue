@@ -10,4 +10,5 @@
 - [ ] Review SOUL.md — does it still reflect who I am?
 
 ## One-Time Reminders
-- (none)
+- [ ] Add a `Johann: Configure Models` command that jumps directly to Johann model settings.
+- [ ] Improve orchestration cancellation/stall errors to include cancellation reason and stalled subtask IDs in user-facing output.

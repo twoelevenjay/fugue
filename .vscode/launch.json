@@ -10,7 +10,10 @@
 			"type": "extensionHost",
 			"request": "launch",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}"
+				"--extensionDevelopmentPath=${workspaceFolder}",
+				"--disable-extensions",
+				"--disable-extension",
+				"undefined_publisher.ramble"
 			],
 			"outFiles": [
 				"${workspaceFolder}/out/**/*.js"

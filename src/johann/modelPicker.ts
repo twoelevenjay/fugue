@@ -97,30 +97,13 @@ export class ModelPicker {
             }
         }
 
-        // Check allowed models (if specified)
-        if (config.allowedModels.length > 0) {
-            let matched = false;
-            for (const pattern of config.allowedModels) {
-                try {
-                    const regex = new RegExp(pattern, 'i');
-                    if (regex.test(searchStr)) {
-                        matched = true;
-                        break;
-                    }
-                } catch {
-                    // Invalid regex, skip
-                }
-            }
-            return matched; // Only allowed if it matches at least one pattern
-        }
-
-        // No restrictions = allowed
+        // No blocked match = allowed
         return true;
     }
 
     /**
      * Discover and classify all available models.
-     * Filters models based on configuration (allowedModels, blockedModels).
+        * Filters models based on configuration (blockedModels).
      */
     async refreshModels(): Promise<ModelInfo[]> {
         const now = Date.now();
@@ -525,12 +508,7 @@ export class ModelPicker {
             lines.push('');
         }
         
-        if (config.allowedModels.length > 0) {
-            lines.push(`✓ **Allowed models:** ${config.allowedModels.join(', ')}`);
-            lines.push('');
-        }
-        
-        if (config.allowedModels.length === 0 && config.blockedModels.length === 0) {
+        if (config.blockedModels.length === 0) {
             lines.push('ℹ️ No model restrictions configured (all available models allowed)');
             lines.push('');
         }
@@ -564,7 +542,6 @@ export class ModelPicker {
         lines.push('**Configuration:**');
         lines.push(`- Model Picker: ${config.modelPickerEnabled ? 'Enabled' : 'Disabled'}`);
         lines.push(`- Fixed Model: ${config.fixedModel || '(not set)'}`);
-        lines.push(`- Allowed Patterns: ${config.allowedModels.length > 0 ? config.allowedModels.join(', ') : '(all)'}`);
         lines.push(`- Blocked Patterns: ${config.blockedModels.length > 0 ? config.blockedModels.join(', ') : '(none)'}`);
         lines.push('');
         

@@ -1,13 +1,13 @@
-# Contributing to Ramble
+# Contributing to Fugue
 
-Thanks for your interest in contributing to Ramble for GitHub Copilot!
+Thanks for your interest in contributing to Fugue for GitHub Copilot!
 
 ## Development Setup
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/ramble.git
-   cd ramble
+   git clone https://github.com/YOUR_USERNAME/fugue.git
+   cd fugue
    ```
 
 2. **Install dependencies**
@@ -26,7 +26,7 @@ Thanks for your interest in contributing to Ramble for GitHub Copilot!
 ## Project Structure
 
 ```
-ramble/
+fugue/
 ├── src/
 │   ├── extension.ts          # Main extension: @ramble participant, input analysis, chunking
 │   ├── johann/               # Johann orchestration agent
@@ -93,4 +93,4 @@ ramble/
 
 ## Questions?
 
-Open a [Discussion](https://github.com/YOUR_USERNAME/ramble/discussions) for questions or ideas.
+Open a [Discussion](https://github.com/YOUR_USERNAME/fugue/discussions) for questions or ideas.

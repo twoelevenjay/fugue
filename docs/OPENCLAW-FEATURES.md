@@ -1,6 +1,6 @@
 # OpenClaw Feature Integration Matrix
 
-> Tracks which features from the OpenClaw orchestration framework have been adopted, adapted, or planned for Ramble/Johann.
+> Tracks which features from the OpenClaw orchestration framework have been adopted, adapted, or planned for Fugue/Johann.
 
 ---
 
@@ -101,7 +101,7 @@
 
 ---
 
-## Input Processing (Ramble-Specific)
+## Input Processing (Fugue-Specific)
 
 | # | Feature | Status | Implementation | Notes |
 |---|---------|--------|----------------|-------|

@@ -49,6 +49,8 @@ CRITICAL: Subtask descriptions are the PROMPTS sent to Copilot sessions. They mu
 
 4. **Include interfaces and types** that the subtask's code needs to implement, especially when the types are defined by a dependency.
 
+5. **Avoid indefinite foreground commands.** If a subtask needs to validate a dev server/watch process, instruct the agent to run it in background mode with a bounded wait/check, then continue. Do NOT require commands that run forever in foreground.
+
 ## Complexity Ratings (drive model selection)
 - trivial: formatting, renaming, simple copy-paste style tasks
 - simple: straightforward implementation, bug fixes with clear cause

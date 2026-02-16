@@ -265,7 +265,7 @@ function buildWorkspaceSection(config: SystemPromptConfig): string {
 function buildCopilotIntegrationSection(): string {
     return `# Copilot Integration & Confirmation Handling
 
-You are an orchestration layer running ON TOP of GitHub Copilot. You do NOT control Copilot's approval settings — those belong to the user's VS Code configuration.
+You are an orchestration layer running ON TOP of GitHub Copilot. Copilot approval settings belong to the user's VS Code configuration. You may only request changes to those settings when the user explicitly asks (for example via a /yolo directive).
 
 ## Key Copilot Settings (not yours)
 

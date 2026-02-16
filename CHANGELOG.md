@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Ramble for GitHub Copilot will be documented in this file.
+All notable changes to Fugue for GitHub Copilot will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **Large input chunking:** Ramble automatically detects and chunks large inputs (>8K chars) to prevent information loss when processing big feature lists
+- **Large input chunking:** Fugue automatically detects and chunks large inputs (>8K chars) to prevent information loss when processing big feature lists
 - **Copilot confirmation handling:** Johann now detects and surfaces Copilot's rate-limit/request-limit errors, guiding users to adjust `github.copilot.chat.agent.maxRequests` and `autoApprove` settings
 - **`/yolo` directive:** Reads and displays current Copilot agent settings, provides guided setup for enabling/disabling YOLO mode (`@johann /yolo on|off`)
 - **Pre-orchestration warnings:** Johann checks Copilot's `maxRequests` setting before starting complex orchestrations and warns if limits are too low
@@ -29,8 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-02-11
 
 ### Added
-- Initial release of Ramble for GitHub Copilot
-- `@ramble` chat participant for analyzing rambling requests
+- Initial release of Fugue for GitHub Copilot
+- `@ramble` chat participant for analyzing user requests
 - Intelligent extraction of goals, constraints, and context
 - Clarifying questions for genuinely missing information
 - Workspace context awareness (copilot-instructions.md, READMEs)

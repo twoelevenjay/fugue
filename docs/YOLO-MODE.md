@@ -1,6 +1,6 @@
 # YOLO Mode — Removing Confirmation Friction for Long Orchestrations
 
-> YOLO mode is a **GitHub Copilot setting**, not a Johann setting. Johann reads these settings for awareness but does not own or override them.
+> YOLO mode is driven by **GitHub Copilot settings**. Johann does not override them automatically, but can apply them when you explicitly run `@johann /yolo on`.
 
 ---
 
@@ -41,11 +41,13 @@ Add to `.vscode/settings.json`:
 }
 ```
 
-Or use the Johann directive for guided setup:
+Or use the Johann directive to apply these settings automatically:
 
 ```
 @johann /yolo on
 ```
+
+Use `@johann /yolo on global` to apply the same settings in user scope (all workspaces).
 
 ### What Each Setting Does
 
@@ -59,7 +61,7 @@ Or use the Johann directive for guided setup:
 
 Set this high enough that Johann won't be interrupted mid-orchestration.
 
-> **Infinite mode:** Copilot does not currently support an "unlimited" option. If you find Johann consistently hitting the limit, increase the number. The Ramble extension may add a workaround for this in a future release.
+> **Infinite mode:** Copilot does not currently support an "unlimited" option. If you find Johann consistently hitting the limit, increase the number. The Fugue extension may add a workaround for this in a future release.
 
 ### Also Consider Raising Johann's Limits
 

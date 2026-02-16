@@ -1,12 +1,12 @@
-# Ramble for GitHub Copilot
+# Fugue for GitHub Copilot
 
-> Stop crafting perfect prompts. Just ramble — Ramble turns your stream-of-consciousness into structured, effective prompts for GitHub Copilot Chat.
+> Stop crafting perfect prompts. Just describe what you need — Fugue turns your stream-of-consciousness into structured, effective prompts for GitHub Copilot Chat.
 
 ---
 
 ## Product Overview
 
-**Ramble** is a VS Code extension that extends GitHub Copilot with two chat participants: `@ramble` and `@johann`. Together they create a structured AI workflow layer over Copilot — separating prompt formation from task execution.
+**Fugue** is a VS Code extension that extends GitHub Copilot with two chat participants: `@ramble` and `@johann`. Together they create a structured AI workflow layer over Copilot — separating prompt formation from task execution.
 
 ### @ramble — Prompt Compiler
 
@@ -70,26 +70,26 @@ in parallel, also the caching is broken I think, users are complaining about sta
 data, oh and we need to add rate limiting before we launch next week
 ```
 
-**Ramble extracts:**
+**Fugue extracts:**
 - Goal: Optimize API performance and add rate limiting before launch
 - Current issues: Sequential DB queries, broken caching (stale data)
 - Constraints: Launch deadline next week
 - Success criteria: Parallel queries, working cache, rate limiting implemented
 
-**Ramble asks** (only if needed):
+**Fugue asks** (only if needed):
 - Which API endpoints are affected?
 - What caching solution are you using?
 
-**Ramble outputs:** A structured prompt ready for Copilot.
+**Fugue outputs:** A structured prompt ready for Copilot.
 
 ## @ramble Commands
 
 | Command | Description |
-|---------|-------------|
-| `@ramble <your request>` | Start a new ramble session |
+|---------|-----------|
+| `@ramble <your request>` | Start a new session |
 | `@ramble reset` | Clear session and start fresh |
 | `@ramble refresh` | Reload workspace context |
-| `Ramble: Copy Last Compiled Prompt` | Copy the last compiled prompt to clipboard |
+| `Fugue: Copy Last Compiled Prompt` | Copy the last compiled prompt to clipboard |
 
 ## @johann Commands
 
@@ -105,7 +105,7 @@ data, oh and we need to add rate limiting before we launch next week
 
 ## Workspace Context
 
-Ramble automatically reads your workspace to understand your project:
+Fugue automatically reads your workspace to understand your project:
 
 - `.github/copilot-instructions.md` — Your project's Copilot instructions
 - `CLAUDE.md` — Alternative instructions file
@@ -116,7 +116,7 @@ Use `@ramble refresh` to reload context after making changes to these files.
 
 ## How @ramble Works
 
-Ramble uses GitHub Copilot's language model to intelligently analyze your request. Unlike rigid templates, it understands context and only asks questions when information is genuinely missing.
+Fugue uses GitHub Copilot's language model to intelligently analyze your request. Unlike rigid templates, it understands context and only asks questions when information is genuinely missing.
 
 **What gets preserved:**
 - All distinct facts, examples, and technical details

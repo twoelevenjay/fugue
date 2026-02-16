@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { Subtask, SubtaskResult, ModelInfo } from './types';
 import { withRetry, REVIEW_RETRY_POLICY, classifyError } from './retry';
 import { DebugConversationLog } from './debugConversationLog';
+import { getConfig } from './config';
 
 // ============================================================================
 // SUBAGENT MANAGER — Spawns and manages individual subagent executions
@@ -17,7 +18,25 @@ import { DebugConversationLog } from './debugConversationLog';
 // ============================================================================
 
 /** Maximum number of tool-calling loop iterations to prevent runaway agents. */
-const MAX_TOOL_ROUNDS = 50;
+const MAX_TOOL_ROUNDS = 30;
+
+/** Known problematic tools that can expose invalid schemas in some environments. */
+const TOOL_NAME_BLOCKLIST = new Set<string>([
+    'mcp_gitkraken_gitkraken_workspace_list',
+]);
+
+const LONG_RUNNING_COMMAND_PATTERNS: RegExp[] = [
+    /\bnpm\s+run\s+(dev|start|watch)\b/i,
+    /\byarn\s+(dev|start|watch)\b/i,
+    /\bpnpm\s+(dev|start|watch)\b/i,
+    /\b(next|vite|webpack|nodemon|ts-node-dev|uvicorn|gunicorn)\b/i,
+    /\bpython\s+-m\s+http\.server\b/i,
+    /\bflask\s+run\b/i,
+    /\bdocker\s+compose\s+up(\s|$)(?!.*-d)/i,
+    /\bdocker-compose\s+up(\s|$)(?!.*-d)/i,
+    /\btail\s+-f\b/i,
+    /\bwatch\s+\S+/i,
+];
 
 const SUBAGENT_SYSTEM_PREFIX = `You are a GitHub Copilot coding agent executing a specific subtask assigned to you by an orchestrator.
 
@@ -27,6 +46,8 @@ CRITICAL RULES:
 3. **You are NOT Johann.** You are NOT an orchestrator. You are NOT doing onboarding. You are a worker agent executing a specific coding task. Do not introduce yourself. Do not ask questions. Do not give a greeting. Just execute the task.
 4. **No stubs or placeholders.** Every function must be fully implemented. No "// TODO" comments. No "// Implement logic here" placeholders. No empty function bodies. Complete, working code only.
 5. **Report what you DID.** Your final response should summarize what you actually did (files created, commands run, changes made), not what should be done.
+6. **Prefer file tools over shell file-writing.** Use create/edit/patch file tools for source changes. Avoid brittle shell redirection patterns (heredoc, long echo/printf chains) unless absolutely necessary.
+7. **Recover quickly from terminal issues.** If a shell command pattern fails twice (e.g., heredoc corruption), stop repeating it and switch to safer tools.
 
 IF YOU OUTPUT INSTRUCTIONS OR PROSE INSTEAD OF MAKING ACTUAL CHANGES WITH YOUR TOOLS, YOU HAVE FAILED THE TASK.
 
@@ -81,16 +102,183 @@ A review that passes everything without citing specific evidence is WRONG. Analy
 Return ONLY valid JSON.`;
 
 export class SubagentManager {
+    private readonly config = getConfig();
+
+    /** Best-effort check for plain object records. */
+    private isRecord(value: unknown): value is Record<string, unknown> {
+        return typeof value === 'object' && value !== null && !Array.isArray(value);
+    }
+
+    /**
+     * Normalize tool input schemas to avoid provider-side validation failures.
+     * Some providers reject object schemas that omit `properties`.
+     */
+    private normalizeSchemaNode(node: unknown): void {
+        if (!this.isRecord(node)) {
+            return;
+        }
+
+        if (node.type === 'object') {
+            const properties = node.properties;
+            if (!this.isRecord(properties)) {
+                node.properties = {};
+            }
+            if (node.additionalProperties === undefined) {
+                node.additionalProperties = true;
+            }
+        }
+
+        if (this.isRecord(node.properties)) {
+            for (const child of Object.values(node.properties)) {
+                this.normalizeSchemaNode(child);
+            }
+        }
+
+        if (node.items !== undefined) {
+            this.normalizeSchemaNode(node.items);
+        }
+
+        for (const key of ['oneOf', 'anyOf', 'allOf'] as const) {
+            const variants = node[key];
+            if (Array.isArray(variants)) {
+                for (const variant of variants) {
+                    this.normalizeSchemaNode(variant);
+                }
+            }
+        }
+    }
+
+    /**
+     * Prepare a safe input schema for model/tool registration.
+     */
+    private sanitizeInputSchema(inputSchema: unknown): object {
+        if (!this.isRecord(inputSchema)) {
+            return {
+                type: 'object',
+                properties: {},
+                additionalProperties: true,
+            };
+        }
+
+        const cloned = JSON.parse(JSON.stringify(inputSchema)) as Record<string, unknown>;
+        this.normalizeSchemaNode(cloned);
+        return cloned;
+    }
+
+    private looksLongRunningCommand(command: string): boolean {
+        const normalized = command.trim();
+        if (!normalized) {
+            return false;
+        }
+        return LONG_RUNNING_COMMAND_PATTERNS.some(pattern => pattern.test(normalized));
+    }
+
+    private prepareToolInput(toolName: string, rawInput: unknown): { input: object; warnings: string[] } {
+        const warnings: string[] = [];
+        const input = this.isRecord(rawInput) ? { ...rawInput } : {};
+
+        if (toolName === 'run_in_terminal') {
+            const command = typeof input.command === 'string' ? input.command : '';
+            const isBackground = input.isBackground === true;
+            const timeout = typeof input.timeout === 'number' ? input.timeout : 0;
+
+            if (
+                this.config.autoBackgroundLongRunningCommands &&
+                !isBackground &&
+                this.looksLongRunningCommand(command)
+            ) {
+                input.isBackground = true;
+                warnings.push(`Auto-switched \`run_in_terminal\` to background for likely long-running command: ${command.substring(0, 120)}`);
+            }
+
+            if (typeof input.timeout !== 'number' || timeout <= 0) {
+                input.timeout = this.config.toolInvocationTimeoutMs;
+            }
+        }
+
+        if (toolName === 'await_terminal') {
+            const timeout = typeof input.timeout === 'number' ? input.timeout : 0;
+            if (timeout <= 0) {
+                input.timeout = this.config.toolInvocationTimeoutMs;
+                warnings.push('Capped `await_terminal` timeout to prevent indefinite waiting.');
+            }
+        }
+
+        return { input, warnings };
+    }
+
+    private async invokeToolWithTimeout(
+        toolName: string,
+        input: object,
+        toolToken: vscode.ChatParticipantToolToken | undefined,
+        token: vscode.CancellationToken
+    ): Promise<vscode.LanguageModelToolResult> {
+        const timeoutMs = this.config.toolInvocationTimeoutMs;
+        let timer: NodeJS.Timeout | undefined;
+
+        const toolPromise = vscode.lm.invokeTool(toolName, {
+            input,
+            toolInvocationToken: toolToken,
+        }, token);
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+                reject(new Error(`Tool \"${toolName}\" exceeded ${timeoutMs}ms and was treated as timed out.`));
+            }, timeoutMs);
+        });
+
+        try {
+            return await Promise.race([toolPromise, timeoutPromise]);
+        } finally {
+            if (timer) {
+                clearTimeout(timer);
+            }
+        }
+    }
+
+    /**
+     * Convert tool result content to supported LM message parts.
+     */
+    private toSupportedToolContent(
+        content: readonly unknown[]
+    ): (vscode.LanguageModelTextPart | vscode.LanguageModelDataPart)[] {
+        const supported: (vscode.LanguageModelTextPart | vscode.LanguageModelDataPart)[] = [];
+
+        for (const item of content) {
+            if (item instanceof vscode.LanguageModelTextPart || item instanceof vscode.LanguageModelDataPart) {
+                supported.push(item);
+            } else if (typeof item === 'string') {
+                supported.push(new vscode.LanguageModelTextPart(item));
+            }
+        }
+
+        if (supported.length === 0) {
+            supported.push(new vscode.LanguageModelTextPart('Tool executed with no textual output.'));
+        }
+
+        return supported;
+    }
+
     /**
      * Discover available VS Code LM tools and convert to LanguageModelChatTool format.
      * Filters out tools that aren't useful for coding tasks.
      */
     private getAvailableTools(): vscode.LanguageModelChatTool[] {
-        return vscode.lm.tools.map(tool => ({
-            name: tool.name,
-            description: tool.description,
-            inputSchema: tool.inputSchema,
-        }));
+        const tools: vscode.LanguageModelChatTool[] = [];
+
+        for (const tool of vscode.lm.tools) {
+            if (TOOL_NAME_BLOCKLIST.has(tool.name)) {
+                continue;
+            }
+
+            tools.push({
+                name: tool.name,
+                description: tool.description,
+                inputSchema: this.sanitizeInputSchema(tool.inputSchema),
+            });
+        }
+
+        return tools;
     }
 
     /**
@@ -142,7 +330,9 @@ export class SubagentManager {
 
             // === AGENTIC TOOL-CALLING LOOP ===
             while (round < MAX_TOOL_ROUNDS) {
-                if (token.isCancellationRequested) break;
+                if (token.isCancellationRequested) {
+                    break;
+                }
                 round++;
 
                 const callStart = Date.now();
@@ -199,19 +389,31 @@ export class SubagentManager {
                 }
                 messages.push(vscode.LanguageModelChatMessage.Assistant(assistantParts));
 
-                // Execute each tool call and feed results back
+                // Execute each tool call and feed all results back in one user turn
+                const toolResultParts: vscode.LanguageModelToolResultPart[] = [];
+                const missingCallIdWarnings: string[] = [];
+
                 for (const tc of toolCalls) {
-                    if (token.isCancellationRequested) break;
+                    if (token.isCancellationRequested) {
+                        break;
+                    }
 
                     try {
+                        const prepared = this.prepareToolInput(tc.name, tc.input);
+
                         if (stream) {
                             stream.markdown(`\n> 🔧 Calling tool: \`${tc.name}\`\n`);
+                            for (const warning of prepared.warnings) {
+                                stream.markdown(`> ⚠️ ${warning}\n`);
+                            }
                         }
 
-                        const toolResult = await vscode.lm.invokeTool(tc.name, {
-                            input: tc.input as object,
-                            toolInvocationToken: toolToken,
-                        }, token);
+                        const toolResult = await this.invokeToolWithTimeout(
+                            tc.name,
+                            prepared.input,
+                            toolToken,
+                            token
+                        );
 
                         // Extract text content from the tool result for logging
                         const resultText = this.extractToolResultText(toolResult);
@@ -226,11 +428,16 @@ export class SubagentManager {
 
                         fullOutput += `\n[Tool: ${tc.name}] ${resultText}\n`;
 
-                        // Feed the tool result back to the conversation
-                        messages.push(
-                            vscode.LanguageModelChatMessage.User([
-                                new vscode.LanguageModelToolResultPart(tc.callId, toolResult.content as (vscode.LanguageModelTextPart | vscode.LanguageModelDataPart)[])
-                            ])
+                        if (!tc.callId) {
+                            missingCallIdWarnings.push(`Tool "${tc.name}" returned without a callId.`);
+                            continue;
+                        }
+
+                        toolResultParts.push(
+                            new vscode.LanguageModelToolResultPart(
+                                tc.callId,
+                                this.toSupportedToolContent(toolResult.content)
+                            )
                         );
                     } catch (toolErr) {
                         const errMsg = toolErr instanceof Error ? toolErr.message : String(toolErr);
@@ -241,15 +448,24 @@ export class SubagentManager {
 
                         fullOutput += `\n[Tool: ${tc.name}] ERROR: ${errMsg}\n`;
 
-                        // Feed error back to the model so it can recover
-                        messages.push(
-                            vscode.LanguageModelChatMessage.User([
-                                new vscode.LanguageModelToolResultPart(tc.callId, [
-                                    new vscode.LanguageModelTextPart(`Error executing tool "${tc.name}": ${errMsg}`)
-                                ])
+                        if (!tc.callId) {
+                            missingCallIdWarnings.push(`Tool "${tc.name}" failed and had no callId: ${errMsg}`);
+                            continue;
+                        }
+
+                        toolResultParts.push(
+                            new vscode.LanguageModelToolResultPart(tc.callId, [
+                                new vscode.LanguageModelTextPart(`Error executing tool "${tc.name}": ${errMsg}`)
                             ])
                         );
                     }
+                }
+
+                if (toolResultParts.length > 0) {
+                    messages.push(vscode.LanguageModelChatMessage.User(toolResultParts));
+                }
+                if (missingCallIdWarnings.length > 0) {
+                    messages.push(vscode.LanguageModelChatMessage.User(missingCallIdWarnings.join('\n')));
                 }
             }
 

@@ -55,14 +55,18 @@ export interface JohannConfig {
     modelPickerEnabled: boolean;
     /** Fixed model to use when picker is disabled (empty = first available) */
     fixedModel: string;
-    /** List of allowed model patterns (regex). Empty = all allowed. */
-    allowedModels: string[];
-    /** List of blocked model patterns (regex). Takes precedence over allowedModels. */
+    /** List of blocked model patterns (regex). Empty = all allowed. */
     blockedModels: string[];
     /** Enable background execution mode (non-blocking orchestration). */
     backgroundModeEnabled: boolean;
     /** Allow escalation to Opus models (3× or higher cost). Default: false. */
     allowOpusEscalation: boolean;
+    /** Timeout for a single tool invocation during subtask execution (ms). */
+    toolInvocationTimeoutMs: number;
+    /** Auto-convert long-running terminal commands to background mode. */
+    autoBackgroundLongRunningCommands: boolean;
+    /** Target Copilot maxRequests value when enabling YOLO mode. */
+    yoloMaxRequests: number;
 }
 
 /**
@@ -89,10 +93,12 @@ const DEFAULTS: JohannConfig = {
     debugConversationLog: true,
     modelPickerEnabled: true,
     fixedModel: '',
-    allowedModels: [],
     blockedModels: [],
     backgroundModeEnabled: false,
     allowOpusEscalation: false,
+    toolInvocationTimeoutMs: 120000,
+    autoBackgroundLongRunningCommands: true,
+    yoloMaxRequests: 200,
 };
 
 /**
@@ -128,10 +134,12 @@ export function getConfig(): JohannConfig {
         debugConversationLog: cfg.get<boolean>('debugConversationLog', DEFAULTS.debugConversationLog),
         modelPickerEnabled: cfg.get<boolean>('modelPickerEnabled', DEFAULTS.modelPickerEnabled),
         fixedModel: cfg.get<string>('fixedModel', DEFAULTS.fixedModel),
-        allowedModels: cfg.get<string[]>('allowedModels', DEFAULTS.allowedModels),
         blockedModels: cfg.get<string[]>('blockedModels', DEFAULTS.blockedModels),
         backgroundModeEnabled: cfg.get<boolean>('backgroundModeEnabled', DEFAULTS.backgroundModeEnabled),
         allowOpusEscalation: cfg.get<boolean>('allowOpusEscalation', DEFAULTS.allowOpusEscalation),
+        toolInvocationTimeoutMs: cfg.get<number>('toolInvocationTimeoutMs', DEFAULTS.toolInvocationTimeoutMs),
+        autoBackgroundLongRunningCommands: cfg.get<boolean>('autoBackgroundLongRunningCommands', DEFAULTS.autoBackgroundLongRunningCommands),
+        yoloMaxRequests: cfg.get<number>('yoloMaxRequests', DEFAULTS.yoloMaxRequests),
     };
 }
 
@@ -182,10 +190,10 @@ export function formatConfig(config?: JohannConfig): string {
 }
 
 // ============================================================================
-// COPILOT AGENT SETTINGS — Read-only access to GitHub Copilot's settings
+// COPILOT AGENT SETTINGS — Access to GitHub Copilot's settings
 //
 // These settings belong to Copilot, NOT Johann. Johann reads them for
-// awareness and surfaces them to the user when relevant (e.g., /yolo status).
+// awareness and may update them only on explicit user request (e.g., /yolo on).
 //
 // Key settings:
 // - github.copilot.chat.agent.autoApprove — Whether Copilot auto-approves tool calls
@@ -202,7 +210,7 @@ export interface CopilotAgentSettings {
 }
 
 /**
- * Read GitHub Copilot's agent settings (read-only).
+ * Read GitHub Copilot's agent settings.
  * Johann does NOT own these. This is for awareness and user guidance.
  */
 export function getCopilotAgentSettings(): CopilotAgentSettings {
@@ -220,6 +228,20 @@ export function getCopilotAgentSettings(): CopilotAgentSettings {
             readable: false,
         };
     }
+}
+
+/**
+ * Update GitHub Copilot agent settings used by YOLO mode.
+ * This only runs when explicitly requested by the user (e.g. /yolo on).
+ */
+export async function setCopilotAgentSettings(
+    autoApprove: boolean,
+    maxRequests: number,
+    target: vscode.ConfigurationTarget = vscode.ConfigurationTarget.Workspace
+): Promise<void> {
+    const copilotCfg = vscode.workspace.getConfiguration('github.copilot.chat.agent');
+    await copilotCfg.update('autoApprove', autoApprove, target);
+    await copilotCfg.update('maxRequests', maxRequests, target);
 }
 
 /**
@@ -329,7 +351,7 @@ export async function migrateModelSettingsFromCopilot(): Promise<boolean> {
     const johannCfg = getConfig();
     
     // Only migrate if Johann settings are empty (user hasn't configured yet)
-    if (johannCfg.allowedModels.length > 0 || johannCfg.blockedModels.length > 0) {
+    if (johannCfg.blockedModels.length > 0) {
         return false; // User has already configured Johann
     }
 
@@ -342,12 +364,6 @@ export async function migrateModelSettingsFromCopilot(): Promise<boolean> {
     // Migrate hidden models to blocked
     if (copilotSettings.hiddenModels.length > 0) {
         await setConfig('blockedModels', copilotSettings.hiddenModels);
-        return true;
-    }
-
-    // If only visible models are specified, migrate to allowed
-    if (copilotSettings.visibleModels.length > 0) {
-        await setConfig('allowedModels', copilotSettings.visibleModels);
         return true;
     }
 

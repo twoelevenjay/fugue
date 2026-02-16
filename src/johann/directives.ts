@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { searchMemory, formatSearchResults } from './memorySearch';
-import { getConfig, formatConfig, getCopilotAgentSettings, formatCopilotSettings } from './config';
+import { getConfig, formatConfig, getCopilotAgentSettings, formatCopilotSettings, setCopilotAgentSettings } from './config';
 import { listDailyNotes, readDailyNotes } from './dailyNotes';
 import { listSessions, getRecentSessionsSummary } from './sessionTranscript';
 import { SessionPersistence, ResumableSession } from './sessionPersistence';
@@ -334,88 +334,59 @@ async function handleResume(args: string, response: vscode.ChatResponseStream): 
 
 async function handleYolo(args: string, response: vscode.ChatResponseStream): Promise<DirectiveResult> {
     const copilot = getCopilotAgentSettings();
+    const config = getConfig();
     const arg = args.trim().toLowerCase();
+    const tokens = arg.split(/\s+/).filter(Boolean);
+    const mode = tokens[0] || '';
+    const target = tokens.includes('global')
+        ? vscode.ConfigurationTarget.Global
+        : vscode.ConfigurationTarget.Workspace;
+    const targetLabel = target === vscode.ConfigurationTarget.Global ? 'User (global)' : 'Workspace';
 
-    if (arg === 'on' || arg === 'enable') {
-        // Guide the user to enable YOLO mode in Copilot settings
-        const output = `## Enabling YOLO Mode
+    const statusBlock = () => {
+        const yoloActive = copilot.autoApprove && copilot.maxRequests >= 100;
+        const yoloStatus = yoloActive ? '🟢 **ACTIVE**' : '⚪ **INACTIVE**';
+        return `## YOLO Mode: ${yoloStatus}\n\n${formatCopilotSettings()}`;
+    };
 
-YOLO mode is controlled by **GitHub Copilot's settings**, not Johann. To enable maximum autonomy:
+    if (mode === 'on' || mode === 'enable') {
+        try {
+            await setCopilotAgentSettings(true, config.yoloMaxRequests, target);
+        } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            const output = `## Failed to Enable YOLO Mode\n\nCould not update Copilot settings automatically: ${errMsg}\n\n### Set these manually:\n\n\`\`\`json\n{\n  "github.copilot.chat.agent.autoApprove": true,\n  "github.copilot.chat.agent.maxRequests": ${config.yoloMaxRequests}\n}\n\`\`\``;
+            response.markdown(output);
+            return { isDirective: true, handled: true, output };
+        }
 
-### Add to your \`.vscode/settings.json\`:
-
-\`\`\`json
-{
-  "github.copilot.chat.agent.autoApprove": true,
-  "github.copilot.chat.agent.maxRequests": 200
-}
-\`\`\`
-
-Or open **Settings** → search for \`copilot agent\` and configure there.
-
-### What these do:
-- **autoApprove** — Skips the "Allow" confirmation before each terminal command or file edit
-- **maxRequests** — How many LLM requests Copilot allows before pausing with a "Continue?" prompt. Set high (100–200) for complex orchestrations.
-
-### Current Copilot settings:
-${formatCopilotSettings()}
-
-${copilot.autoApprove && copilot.maxRequests >= 100
-    ? '✅ Your Copilot settings already look good for YOLO mode.'
-    : '⚠️ Your Copilot settings may cause Johann to stall on confirmation prompts during complex orchestrations.'}
-
-### Also consider raising Johann's orchestration limits:
-\`\`\`json
-{
-  "johann.maxSubtasks": 20,
-  "johann.maxAttempts": 5
-}
-\`\`\`
-`;
+        const updated = getCopilotAgentSettings();
+        const yoloActive = updated.autoApprove && updated.maxRequests >= 100;
+        const output = `## YOLO Mode Enabled\n\nApplied settings to **${targetLabel}** scope:\n- \`github.copilot.chat.agent.autoApprove\` = \`true\`\n- \`github.copilot.chat.agent.maxRequests\` = \`${config.yoloMaxRequests}\`\n\n${formatCopilotSettings()}\n\n### How YOLO Works\n- **Copilot settings are the autonomy gate** (approval prompts + request-limit pauses).\n- **Johann settings are runtime safeguards** (timeouts, long-command backgrounding, orchestration limits).\n\n${yoloActive
+    ? '✅ Johann should now run with minimal confirmation friction, including fewer manual "Continue" interruptions.'
+    : '⚠️ Settings were written, but YOLO does not appear fully active yet. Check for overrides in other scopes.'}\n\nTip: use \`/yolo on global\` to apply this to all workspaces.`;
         response.markdown(output);
         return { isDirective: true, handled: true, output };
     }
 
-    if (arg === 'off' || arg === 'disable') {
-        const output = `## Disabling YOLO Mode
+    if (mode === 'off' || mode === 'disable') {
+        try {
+            await setCopilotAgentSettings(false, 30, target);
+        } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            const output = `## Failed to Disable YOLO Mode\n\nCould not update Copilot settings automatically: ${errMsg}`;
+            response.markdown(output);
+            return { isDirective: true, handled: true, output };
+        }
 
-To restore confirmation prompts, update your \`.vscode/settings.json\`:
-
-\`\`\`json
-{
-  "github.copilot.chat.agent.autoApprove": false,
-  "github.copilot.chat.agent.maxRequests": 30
-}
-\`\`\`
-
-Or open **Settings** → search for \`copilot agent\` and change there.
-
-### Current Copilot settings:
-${formatCopilotSettings()}
-`;
+        const output = `## YOLO Mode Disabled\n\nApplied settings to **${targetLabel}** scope:\n- \`github.copilot.chat.agent.autoApprove\` = \`false\`\n- \`github.copilot.chat.agent.maxRequests\` = \`30\`\n\n${formatCopilotSettings()}\n\n### How YOLO Works\n- **Copilot settings are the autonomy gate** (approval prompts + request-limit pauses).\n- **Johann settings are runtime safeguards** (timeouts, long-command backgrounding, orchestration limits).\n\nConfirmation prompts are now restored.`;
         response.markdown(output);
         return { isDirective: true, handled: true, output };
     }
 
-    // No argument — show current status
     const yoloActive = copilot.autoApprove && copilot.maxRequests >= 100;
-    const yoloStatus = yoloActive ? '🟢 **ACTIVE**' : '⚪ **INACTIVE**';
-
-    const output = `## YOLO Mode: ${yoloStatus}
-
-YOLO mode is determined by your **GitHub Copilot settings** — Johann reads them but doesn't own them.
-
-${formatCopilotSettings()}
-
-${yoloActive
-    ? 'Copilot is configured for maximum autonomy. Johann can run long orchestrations without confirmation prompts.'
-    : `Copilot may pause Johann for confirmation during complex tasks. To enable YOLO mode, type \`/yolo on\` for setup instructions.`}
-
-### Usage:
-- \`/yolo\` — Show current YOLO status
-- \`/yolo on\` — Show how to enable maximum autonomy
-- \`/yolo off\` — Show how to restore confirmation prompts
-`;
+    const output = `${statusBlock()}\n\n### How YOLO Works\n- **Copilot settings are the autonomy gate** (approval prompts + request-limit pauses).\n- **Johann settings are runtime safeguards** (timeouts, long-command backgrounding, orchestration limits).\n\n${yoloActive
+    ? 'Copilot is configured for high-autonomy orchestration.'
+    : 'Copilot may still interrupt long runs with approval or continue prompts.'}\n\n### Usage:\n- \`/yolo\` — Show current YOLO status\n- \`/yolo on\` — Enable YOLO in workspace settings\n- \`/yolo on global\` — Enable YOLO in user settings\n- \`/yolo off\` — Disable YOLO in workspace settings\n- \`/yolo off global\` — Disable YOLO in user settings`;
     response.markdown(output);
     return { isDirective: true, handled: true, output };
 }
