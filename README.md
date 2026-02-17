@@ -1,7 +1,5 @@
 # Fugue for GitHub Copilot
 
-> Stop crafting perfect prompts. Just describe what you need — Fugue turns your stream-of-consciousness into structured, effective prompts for GitHub Copilot Chat.
-
 ---
 
 ## Product Overview

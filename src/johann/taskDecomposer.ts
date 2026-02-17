@@ -138,8 +138,8 @@ Return ONLY valid JSON. No markdown, no explanations.`;
 export class TaskDecomposer {
     /**
      * Decompose a user request into an orchestration plan.
-     * Streams the planning output live to the response stream
-     * AND to disk via SessionPersistence (if provided).
+     * Plan output is persisted to disk via SessionPersistence (if provided)
+     * but NOT streamed to the chat to avoid triggering Copilot's plan-mode UI.
      */
     async decompose(
         request: string,
@@ -156,10 +156,6 @@ export class TaskDecomposer {
         const fullPrompt = DECOMPOSITION_SYSTEM_PROMPT + '\n\n---\n\n' + userPrompt;
         const messages = [vscode.LanguageModelChatMessage.User(fullPrompt)];
 
-        if (stream) {
-            stream.markdown('<details><summary>🧠 Planning thought process</summary>\n\n');
-        }
-
         const plan = await withRetry(
             async () => {
                 const callStart = Date.now();
@@ -167,10 +163,7 @@ export class TaskDecomposer {
                 let result = '';
                 for await (const chunk of response.text) {
                     result += chunk;
-                    if (stream) {
-                        stream.markdown(chunk);
-                    }
-                    // Stream plan chunks to disk as they arrive
+                    // Stream plan chunks to disk as they arrive (not to chat)
                     if (persist) {
                         await persist.appendPlanStream(chunk);
                     }
@@ -202,10 +195,6 @@ export class TaskDecomposer {
                 }
             },
         );
-
-        if (stream) {
-            stream.markdown('\n\n</details>\n\n');
-        }
 
         return plan;
     }

@@ -509,24 +509,6 @@ export function registerJohannParticipant(_context: vscode.ExtensionContext): vs
         ): vscode.ChatFollowup[] {
             const followups: vscode.ChatFollowup[] = [];
 
-            if (result.metadata?.command === 'orchestrate') {
-                if (result.metadata.success) {
-                    followups.push({
-                        prompt: 'please continue',
-                        label: 'Continue where you left off',
-                    });
-                    followups.push({
-                        prompt: '/resume',
-                        label: 'Resume last session',
-                    });
-                } else {
-                    followups.push({
-                        prompt: '/resume',
-                        label: 'Retry from last checkpoint',
-                    });
-                }
-            }
-
             if (result.metadata?.command === 'help') {
                 followups.push({
                     prompt: '/status',

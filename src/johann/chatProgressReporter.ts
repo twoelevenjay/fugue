@@ -128,34 +128,11 @@ export class ChatProgressReporter implements ProgressReporter {
         this._completedSubtasks = 0;
         this._failedSubtasks = 0;
 
-        const lines: string[] = [];
-
-        lines.push(`**${plan.summary}**\n`);
-        lines.push(
-            `${plan.strategy} · ` +
-                `${plan.overallComplexity} complexity · ` +
-                `${plan.subtasks.length} subtask${plan.subtasks.length !== 1 ? 's' : ''}\n`,
+        const count = plan.subtasks.length;
+        const noun = count !== 1 ? 'subtasks' : 'subtask';
+        this._stream.markdown(
+            `**${plan.summary}** — ${count} ${noun}, ${plan.strategy}, ${plan.overallComplexity} complexity\n\n`,
         );
-
-        if (plan.subtasks.length > 1) {
-            lines.push('| # | Task | Complexity | Deps |');
-            lines.push('|---|------|-----------|------|');
-            for (const st of plan.subtasks) {
-                const deps = st.dependsOn.length > 0 ? st.dependsOn.join(', ') : '—';
-                lines.push(`| ${st.id} | ${st.title} | ${st.complexity} | ${deps} |`);
-            }
-            lines.push('');
-        }
-
-        if (plan.successCriteria.length > 0) {
-            lines.push('<details><summary>Success criteria</summary>\n');
-            for (const sc of plan.successCriteria) {
-                lines.push(`- ${sc}`);
-            }
-            lines.push('\n</details>\n');
-        }
-
-        this._stream.markdown(lines.join('\n') + '\n');
     }
 
     /**
