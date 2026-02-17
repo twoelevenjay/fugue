@@ -280,7 +280,13 @@ export interface BackgroundTask {
 /**
  * Status of a project phase during autonomous execution.
  */
-export type ProjectPhaseStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'skipped';
+export type ProjectPhaseStatus =
+    | 'pending'
+    | 'running'
+    | 'completed'
+    | 'failed'
+    | 'paused'
+    | 'skipped';
 
 /**
  * A single phase within a multi-phase ProjectPlan.

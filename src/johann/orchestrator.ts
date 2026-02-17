@@ -15,7 +15,13 @@ import { SubagentManager } from './subagentManager';
 import { MemorySystem } from './memory';
 import { getCopilotAgentSettings, getConfig } from './config';
 import { getLogger } from './logger';
-import { classifyError, withRetry, REVIEW_RETRY_POLICY, ClassifiedError, extractErrorMessage } from './retry';
+import {
+    classifyError,
+    withRetry,
+    REVIEW_RETRY_POLICY,
+    ClassifiedError,
+    extractErrorMessage,
+} from './retry';
 import { DebugConversationLog } from './debugConversationLog';
 import { WorktreeManager } from './worktreeManager';
 import { ExecutionLedger } from './executionLedger';
@@ -810,7 +816,8 @@ export class Orchestrator {
 
         // Inject self-awareness context for self-referential tasks
         if (selfAwareness?.isSelfReferential && selfAwareness.architectureContext) {
-            enrichedSubagentContext = selfAwareness.architectureContext + '\n\n' + enrichedSubagentContext;
+            enrichedSubagentContext =
+                selfAwareness.architectureContext + '\n\n' + enrichedSubagentContext;
             enrichedFullContext = selfAwareness.architectureContext + '\n\n' + enrichedFullContext;
         }
 
@@ -2056,7 +2063,9 @@ export class Orchestrator {
             return sanitized;
         } catch (mergeErr) {
             // Fallback: concatenate results
-            getLogger().warn(`Merge LLM call failed, using fallback: ${extractErrorMessage(mergeErr)}`);
+            getLogger().warn(
+                `Merge LLM call failed, using fallback: ${extractErrorMessage(mergeErr)}`,
+            );
             const fallback = this.fallbackMerge(plan, results);
             if (stream) {
                 stream.markdown(fallback);

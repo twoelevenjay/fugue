@@ -153,7 +153,12 @@ export class TaskDecomposer {
         persist?: SessionPersistence,
         availableSkillsSummary?: string,
     ): Promise<OrchestrationPlan> {
-        const userPrompt = this.buildDecompositionPrompt(request, workspaceContext, memoryContext, availableSkillsSummary);
+        const userPrompt = this.buildDecompositionPrompt(
+            request,
+            workspaceContext,
+            memoryContext,
+            availableSkillsSummary,
+        );
 
         const fullPrompt = DECOMPOSITION_SYSTEM_PROMPT + '\n\n---\n\n' + userPrompt;
         const messages = [vscode.LanguageModelChatMessage.User(fullPrompt)];
@@ -226,8 +231,12 @@ export class TaskDecomposer {
 
         if (availableSkillsSummary) {
             parts.push('=== AVAILABLE SKILLS ===');
-            parts.push('When a subtask matches one of these skills, set "skillHint" to the skill slug.');
-            parts.push('The skill\'s instructions will be automatically injected into the subagent.');
+            parts.push(
+                'When a subtask matches one of these skills, set "skillHint" to the skill slug.',
+            );
+            parts.push(
+                "The skill's instructions will be automatically injected into the subagent.",
+            );
             parts.push('');
             parts.push(availableSkillsSummary);
             parts.push('');

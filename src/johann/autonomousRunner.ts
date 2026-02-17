@@ -5,7 +5,7 @@ import {
     AutonomousRunState,
     RunLoopConfig,
     PhaseResult,
-    ProjectPhaseStatus
+    ProjectPhaseStatus,
 } from './types';
 import { Orchestrator } from './orchestrator';
 import { getLogger } from './logger';
@@ -33,12 +33,14 @@ export class AutonomousRunner extends EventEmitter {
             history: [],
             startTime: Date.now(),
             lastUpdateTime: Date.now(),
-            retryCounts: {}
+            retryCounts: {},
         };
     }
 
     async run(userModel: vscode.LanguageModelChat, token: vscode.CancellationToken): Promise<void> {
-        logger.info(`AutonomousRunner: Starting project "${this.state.plan.title}" (Session: ${this.sessionId})`);
+        logger.info(
+            `AutonomousRunner: Starting project "${this.state.plan.title}" (Session: ${this.sessionId})`,
+        );
         this.emit('started', this.state.plan);
 
         try {
@@ -47,13 +49,13 @@ export class AutonomousRunner extends EventEmitter {
                     logger.info('AutonomousRunner: Loop is paused. Waiting for resume.');
                     this.emit('paused');
                     await this.waitForResume();
-                    if (token.isCancellationRequested) break;
+                    if (token.isCancellationRequested) {break;}
                 }
 
                 const nextPhase = this.getNextExecutablePhase();
                 if (!nextPhase) {
                     if (this.hasRunningPhases()) {
-                        await new Promise(resolve => setTimeout(resolve, 5000));
+                        await new Promise((resolve) => setTimeout(resolve, 5000));
                         continue;
                     } else if (this.hasFailedPhases() && this.state.config.pauseOnFailure) {
                         logger.warn('AutonomousRunner: Project stalled due to phase failures.');
@@ -104,7 +106,7 @@ export class AutonomousRunner extends EventEmitter {
     private async executePhase(
         phase: ProjectPhase,
         userModel: vscode.LanguageModelChat,
-        token: vscode.CancellationToken
+        token: vscode.CancellationToken,
     ): Promise<void> {
         this.state.activePhaseId = phase.id;
         phase.status = 'running';
@@ -136,7 +138,7 @@ export class AutonomousRunner extends EventEmitter {
                 context,
                 userModel,
                 mockResponse,
-                token
+                token,
             );
 
             phase.status = 'completed';
@@ -144,12 +146,11 @@ export class AutonomousRunner extends EventEmitter {
             phase.result = {
                 success: true,
                 output: `Phase ${phase.id} completed successfully.`,
-                artifacts: []
+                artifacts: [],
             };
 
             this.emit('phaseCompleted', phase);
             this.logHistory('phase_completed', { phaseId: phase.id });
-
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             logger.error(`AutonomousRunner: Phase ${phase.id} failed: ${msg}`);
@@ -158,14 +159,17 @@ export class AutonomousRunner extends EventEmitter {
 
             if (this.state.retryCounts[phase.id] < this.state.config.maxRetriesPerPhase) {
                 phase.status = 'pending';
-                this.logHistory('phase_retrying', { phaseId: phase.id, attempt: this.state.retryCounts[phase.id] });
+                this.logHistory('phase_retrying', {
+                    phaseId: phase.id,
+                    attempt: this.state.retryCounts[phase.id],
+                });
             } else {
                 phase.status = 'failed';
                 phase.result = {
                     success: false,
                     output: `Phase failed after ${this.state.retryCounts[phase.id]} attempts.`,
                     artifacts: [],
-                    errors: [msg]
+                    errors: [msg],
                 };
                 this.emit('phaseFailed', phase, err);
                 this.logHistory('phase_failed', { phaseId: phase.id, error: msg });
@@ -177,11 +181,11 @@ export class AutonomousRunner extends EventEmitter {
     }
 
     private getNextExecutablePhase(): ProjectPhase | undefined {
-        return this.state.plan.phases.find(p => {
-            if (p.status !== 'pending') return false;
+        return this.state.plan.phases.find((p) => {
+            if (p.status !== 'pending') {return false;}
 
-            const dependenciesMet = p.dependsOn.every(depId => {
-                const dep = this.state.plan.phases.find(phase => phase.id === depId);
+            const dependenciesMet = p.dependsOn.every((depId) => {
+                const dep = this.state.plan.phases.find((phase) => phase.id === depId);
                 return dep && dep.status === 'completed';
             });
 
@@ -190,29 +194,31 @@ export class AutonomousRunner extends EventEmitter {
     }
 
     private isProjectComplete(): boolean {
-        return this.state.plan.phases.every(p => p.status === 'completed' || p.status === 'skipped');
+        return this.state.plan.phases.every(
+            (p) => p.status === 'completed' || p.status === 'skipped',
+        );
     }
 
     private hasFailedPhases(): boolean {
-        return this.state.plan.phases.some(p => p.status === 'failed');
+        return this.state.plan.phases.some((p) => p.status === 'failed');
     }
 
     private hasRunningPhases(): boolean {
-        return this.state.plan.phases.some(p => p.status === 'running');
+        return this.state.plan.phases.some((p) => p.status === 'running');
     }
 
     private logHistory(event: string, details?: any): void {
         this.state.history.push({
             timestamp: Date.now(),
             event,
-            details
+            details,
         });
     }
 
     private async persistState(): Promise<void> {
         this.state.lastUpdateTime = Date.now();
         const baseDir = SessionPersistence.prototype['getBaseDir']?.call({});
-        if (!baseDir) return;
+        if (!baseDir) {return;}
 
         const statePath = vscode.Uri.joinPath(baseDir, this.sessionId, 'run-loop-state.json');
 
@@ -224,7 +230,7 @@ export class AutonomousRunner extends EventEmitter {
     }
 
     private async waitForResume(): Promise<void> {
-        return new Promise(resolve => {
+        return new Promise((resolve) => {
             const onResumed = () => {
                 this.off('resumed', onResumed);
                 resolve();
@@ -235,7 +241,7 @@ export class AutonomousRunner extends EventEmitter {
 
     static async load(sessionId: string): Promise<AutonomousRunner | null> {
         const baseDir = SessionPersistence.prototype['getBaseDir']?.call({});
-        if (!baseDir) return null;
+        if (!baseDir) {return null;}
 
         const statePath = vscode.Uri.joinPath(baseDir, sessionId, 'run-loop-state.json');
 

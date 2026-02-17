@@ -441,7 +441,8 @@
         "test": "vscode-test",
         "audit:security": "npm audit --omit=dev",
         "package": "npx @vscode/vsce package --no-dependencies",
-        "package:check": "npx @vscode/vsce ls --no-dependencies"
+        "package:check": "npx @vscode/vsce ls --no-dependencies",
+        "prepare": "husky"
     },
     "devDependencies": {
         "@types/mocha": "^10.0.10",
@@ -450,8 +451,19 @@
         "@vscode/test-cli": "^0.0.12",
         "@vscode/test-electron": "^2.5.2",
         "eslint": "^9.39.2",
+        "husky": "^9.1.7",
+        "lint-staged": "^16.2.7",
         "prettier": "^3.8.1",
         "typescript": "^5.9.3",
         "typescript-eslint": "^8.52.0"
+    },
+    "lint-staged": {
+        "*.ts": [
+            "prettier --write",
+            "eslint --fix"
+        ],
+        "*.{json,md}": [
+            "prettier --write"
+        ]
     }
 }

@@ -253,9 +253,7 @@ export class HeartbeatManager {
         }
 
         // Dedup: skip entries whose title already appears in MEMORY.md
-        const newEntries = extracted.filter(
-            (e) => !currentMemory.includes(e.title),
-        );
+        const newEntries = extracted.filter((e) => !currentMemory.includes(e.title));
         if (newEntries.length === 0) {
             this.logger.debug('All high-value entries already distilled.');
             return;
@@ -351,10 +349,7 @@ export class HeartbeatManager {
             const placeholderIdx = result.indexOf(placeholder, headerEnd);
             // Only remove if it's within this section (before next ## or end)
             const nextSection = result.indexOf('\n## ', headerEnd + 1);
-            if (
-                placeholderIdx !== -1 &&
-                (nextSection === -1 || placeholderIdx < nextSection)
-            ) {
+            if (placeholderIdx !== -1 && (nextSection === -1 || placeholderIdx < nextSection)) {
                 result =
                     result.substring(0, placeholderIdx) +
                     bullets +

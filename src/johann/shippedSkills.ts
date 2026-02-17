@@ -844,11 +844,22 @@ Do NOT:
 const langTypescript = shipped({
     slug: 'lang.typescript',
     title: 'TypeScript Conventions',
-    description: 'TypeScript-specific patterns: strict mode, type narrowing, generics, declaration files, module resolution.',
+    description:
+        'TypeScript-specific patterns: strict mode, type narrowing, generics, declaration files, module resolution.',
     tags: ['language', 'typescript', 'types'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['typescript', 'tsx'],
-    keywords: ['typescript', 'ts', 'tsx', 'type', 'interface', 'generic', 'enum', 'declaration', 'tsconfig'],
+    keywords: [
+        'typescript',
+        'ts',
+        'tsx',
+        'type',
+        'interface',
+        'generic',
+        'enum',
+        'declaration',
+        'tsconfig',
+    ],
     body: `TypeScript conventions for all generated and refactored code:
 
 1. Always use strict mode (strict: true in tsconfig.json).
@@ -867,7 +878,8 @@ const langTypescript = shipped({
 const langJavascript = shipped({
     slug: 'lang.javascript',
     title: 'JavaScript Conventions',
-    description: 'JavaScript-specific patterns: ES modules, async/await, error handling, modern syntax.',
+    description:
+        'JavaScript-specific patterns: ES modules, async/await, error handling, modern syntax.',
     tags: ['language', 'javascript'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['javascript', 'jsx'],
@@ -894,7 +906,18 @@ const langPython = shipped({
     tags: ['language', 'python'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['python'],
-    keywords: ['python', 'py', 'pip', 'venv', 'django', 'flask', 'fastapi', 'pytest', 'pep8', 'type hint'],
+    keywords: [
+        'python',
+        'py',
+        'pip',
+        'venv',
+        'django',
+        'flask',
+        'fastapi',
+        'pytest',
+        'pep8',
+        'type hint',
+    ],
     body: `Python conventions:
 
 1. Follow PEP 8 style guide. Use 4-space indentation.
@@ -908,13 +931,20 @@ const langPython = shipped({
 9. Handle exceptions with specific types, never bare except.
 10. Use __all__ to define public API in __init__.py.
 11. Use pytest for testing. Fixtures over setUp/tearDown.`,
-    allowed_file_patterns: ['**/*.py', '**/requirements*.txt', '**/pyproject.toml', '**/setup.py', '**/setup.cfg'],
+    allowed_file_patterns: [
+        '**/*.py',
+        '**/requirements*.txt',
+        '**/pyproject.toml',
+        '**/setup.py',
+        '**/setup.cfg',
+    ],
 });
 
 const langPhp = shipped({
     slug: 'lang.php',
     title: 'PHP Conventions',
-    description: 'PHP-specific patterns: PSR standards, Composer, type declarations, modern PHP syntax.',
+    description:
+        'PHP-specific patterns: PSR standards, Composer, type declarations, modern PHP syntax.',
     tags: ['language', 'php'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['php'],
@@ -938,11 +968,22 @@ const langPhp = shipped({
 const langHtml = shipped({
     slug: 'lang.html',
     title: 'HTML Conventions',
-    description: 'HTML-specific patterns: semantic markup, accessibility, meta tags, structured data.',
+    description:
+        'HTML-specific patterns: semantic markup, accessibility, meta tags, structured data.',
     tags: ['language', 'html', 'accessibility'],
     task_types: ['generate', 'refactor', 'review'],
     languages: ['html'],
-    keywords: ['html', 'markup', 'semantic', 'accessibility', 'a11y', 'aria', 'meta', 'head', 'template'],
+    keywords: [
+        'html',
+        'markup',
+        'semantic',
+        'accessibility',
+        'a11y',
+        'aria',
+        'meta',
+        'head',
+        'template',
+    ],
     body: `HTML conventions:
 
 1. Use semantic elements (header, nav, main, section, article, footer) over generic divs.
@@ -955,17 +996,36 @@ const langHtml = shipped({
 8. Prefer native interactive elements (button, a, input) over div with click handlers.
 9. Include proper meta tags (charset, description, open graph).
 10. Use loading="lazy" for below-the-fold images.`,
-    allowed_file_patterns: ['**/*.html', '**/*.htm', '**/*.twig', '**/*.blade.php', '**/*.ejs', '**/*.hbs'],
+    allowed_file_patterns: [
+        '**/*.html',
+        '**/*.htm',
+        '**/*.twig',
+        '**/*.blade.php',
+        '**/*.ejs',
+        '**/*.hbs',
+    ],
 });
 
 const langCss = shipped({
     slug: 'lang.css',
     title: 'CSS Conventions',
-    description: 'CSS-specific patterns: custom properties, modern layout, responsive design, naming.',
+    description:
+        'CSS-specific patterns: custom properties, modern layout, responsive design, naming.',
     tags: ['language', 'css', 'styling'],
     task_types: ['generate', 'refactor', 'review'],
     languages: ['css', 'scss', 'less'],
-    keywords: ['css', 'scss', 'sass', 'less', 'tailwind', 'style', 'responsive', 'flexbox', 'grid', 'animation'],
+    keywords: [
+        'css',
+        'scss',
+        'sass',
+        'less',
+        'tailwind',
+        'style',
+        'responsive',
+        'flexbox',
+        'grid',
+        'animation',
+    ],
     body: `CSS conventions:
 
 1. Use CSS custom properties (--var-name) for theming and reusable values.
@@ -978,13 +1038,20 @@ const langCss = shipped({
 8. Use clamp() for fluid typography.
 9. Prefer transform/opacity animations for performance (GPU-accelerated).
 10. Group properties: position, display, box-model, typography, visual, misc.`,
-    allowed_file_patterns: ['**/*.css', '**/*.scss', '**/*.less', '**/*.module.*', '**/tailwind.config.*'],
+    allowed_file_patterns: [
+        '**/*.css',
+        '**/*.scss',
+        '**/*.less',
+        '**/*.module.*',
+        '**/tailwind.config.*',
+    ],
 });
 
 const langJava = shipped({
     slug: 'lang.java',
     title: 'Java Conventions',
-    description: 'Java-specific patterns: modern Java features, Spring patterns, build tools, testing.',
+    description:
+        'Java-specific patterns: modern Java features, Spring patterns, build tools, testing.',
     tags: ['language', 'java'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['java'],
@@ -1001,7 +1068,13 @@ const langJava = shipped({
 8. Follow Maven/Gradle project structure conventions.
 9. Use JUnit 5 with @Nested classes for test organization.
 10. Prefer constructor injection over field injection in Spring.`,
-    allowed_file_patterns: ['**/*.java', '**/pom.xml', '**/build.gradle*', '**/*.properties', '**/*.yml'],
+    allowed_file_patterns: [
+        '**/*.java',
+        '**/pom.xml',
+        '**/build.gradle*',
+        '**/*.properties',
+        '**/*.yml',
+    ],
 });
 
 const langRust = shipped({
@@ -1011,7 +1084,17 @@ const langRust = shipped({
     tags: ['language', 'rust'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['rust'],
-    keywords: ['rust', 'cargo', 'crate', 'trait', 'lifetime', 'borrow', 'ownership', 'unsafe', 'wasm'],
+    keywords: [
+        'rust',
+        'cargo',
+        'crate',
+        'trait',
+        'lifetime',
+        'borrow',
+        'ownership',
+        'unsafe',
+        'wasm',
+    ],
     body: `Rust conventions:
 
 1. Use Result<T, E> for fallible operations, never panic in library code.
@@ -1053,11 +1136,21 @@ const langGo = shipped({
 const langSql = shipped({
     slug: 'lang.sql',
     title: 'SQL Conventions',
-    description: 'SQL-specific patterns: query optimization, indexing, migrations, parameterized queries.',
+    description:
+        'SQL-specific patterns: query optimization, indexing, migrations, parameterized queries.',
     tags: ['language', 'sql', 'database'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['sql'],
-    keywords: ['sql', 'query', 'migration', 'index', 'join', 'subquery', 'stored procedure', 'view'],
+    keywords: [
+        'sql',
+        'query',
+        'migration',
+        'index',
+        'join',
+        'subquery',
+        'stored procedure',
+        'view',
+    ],
     body: `SQL conventions:
 
 1. ALWAYS use parameterized queries — never concatenate user input into SQL strings.
@@ -1080,12 +1173,23 @@ const langSql = shipped({
 const fwReact = shipped({
     slug: 'fw.react',
     title: 'React Patterns',
-    description: 'React-specific: hooks, component patterns, state management, performance, React 18+.',
+    description:
+        'React-specific: hooks, component patterns, state management, performance, React 18+.',
     tags: ['framework', 'react'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['typescript', 'javascript', 'tsx', 'jsx'],
     frameworks: ['react'],
-    keywords: ['react', 'hook', 'useState', 'useEffect', 'component', 'jsx', 'tsx', 'next', 'remix'],
+    keywords: [
+        'react',
+        'hook',
+        'useState',
+        'useEffect',
+        'component',
+        'jsx',
+        'tsx',
+        'next',
+        'remix',
+    ],
     dependencies: ['lang.typescript'],
     body: `React conventions:
 
@@ -1099,18 +1203,35 @@ const fwReact = shipped({
 8. Use forwardRef only when the component needs to expose a DOM node.
 9. Key prop must be stable and unique — never use array index for dynamic lists.
 10. Prefer controlled components for forms.`,
-    allowed_file_patterns: ['**/*.tsx', '**/*.jsx', '**/*.ts', '**/*.js', '**/*.css', '**/*.module.*'],
+    allowed_file_patterns: [
+        '**/*.tsx',
+        '**/*.jsx',
+        '**/*.ts',
+        '**/*.js',
+        '**/*.css',
+        '**/*.module.*',
+    ],
 });
 
 const fwVue = shipped({
     slug: 'fw.vue',
     title: 'Vue Patterns',
-    description: 'Vue 3-specific: Composition API, script setup, Pinia, VueRouter, Nuxt conventions.',
+    description:
+        'Vue 3-specific: Composition API, script setup, Pinia, VueRouter, Nuxt conventions.',
     tags: ['framework', 'vue'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['typescript', 'javascript', 'vue'],
     frameworks: ['vue', 'nuxt'],
-    keywords: ['vue', 'vuejs', 'nuxt', 'pinia', 'composition api', 'script setup', 'v-model', 'directive'],
+    keywords: [
+        'vue',
+        'vuejs',
+        'nuxt',
+        'pinia',
+        'composition api',
+        'script setup',
+        'v-model',
+        'directive',
+    ],
     dependencies: ['lang.typescript'],
     body: `Vue 3 conventions:
 
@@ -1130,12 +1251,23 @@ const fwVue = shipped({
 const fwNextjs = shipped({
     slug: 'fw.nextjs',
     title: 'Next.js Patterns',
-    description: 'Next.js-specific: App Router, Server Components, API routes, SSR/SSG, middleware.',
+    description:
+        'Next.js-specific: App Router, Server Components, API routes, SSR/SSG, middleware.',
     tags: ['framework', 'nextjs', 'react'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['typescript', 'javascript', 'tsx', 'jsx'],
     frameworks: ['nextjs', 'react'],
-    keywords: ['nextjs', 'next.js', 'app router', 'server component', 'api route', 'ssr', 'ssg', 'middleware', 'rsc'],
+    keywords: [
+        'nextjs',
+        'next.js',
+        'app router',
+        'server component',
+        'api route',
+        'ssr',
+        'ssg',
+        'middleware',
+        'rsc',
+    ],
     dependencies: ['fw.react'],
     body: `Next.js conventions (App Router):
 
@@ -1149,7 +1281,14 @@ const fwNextjs = shipped({
 8. Implement loading.tsx for Suspense boundaries.
 9. Use middleware.ts for auth, redirects, and request rewriting.
 10. Use environment variables with NEXT_PUBLIC_ prefix for client-accessible values.`,
-    allowed_file_patterns: ['**/*.tsx', '**/*.ts', '**/*.jsx', '**/*.js', '**/next.config.*', '**/middleware.ts'],
+    allowed_file_patterns: [
+        '**/*.tsx',
+        '**/*.ts',
+        '**/*.jsx',
+        '**/*.js',
+        '**/next.config.*',
+        '**/middleware.ts',
+    ],
 });
 
 const fwNuxtjs = shipped({
@@ -1160,7 +1299,16 @@ const fwNuxtjs = shipped({
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['typescript', 'javascript', 'vue'],
     frameworks: ['nuxt', 'vue'],
-    keywords: ['nuxt', 'nuxtjs', 'nuxt3', 'useFetch', 'useAsyncData', 'server route', 'nitro', 'composable'],
+    keywords: [
+        'nuxt',
+        'nuxtjs',
+        'nuxt3',
+        'useFetch',
+        'useAsyncData',
+        'server route',
+        'nitro',
+        'composable',
+    ],
     dependencies: ['fw.vue'],
     body: `Nuxt 3 conventions:
 
@@ -1180,12 +1328,21 @@ const fwNuxtjs = shipped({
 const fwTailwind = shipped({
     slug: 'fw.tailwind',
     title: 'Tailwind CSS Patterns',
-    description: 'Tailwind CSS-specific: utility classes, custom configuration, component patterns, responsive design.',
+    description:
+        'Tailwind CSS-specific: utility classes, custom configuration, component patterns, responsive design.',
     tags: ['framework', 'tailwind', 'css'],
     task_types: ['generate', 'refactor', 'review'],
     languages: ['css', 'html', 'typescript', 'javascript'],
     frameworks: ['tailwind'],
-    keywords: ['tailwind', 'tailwindcss', 'utility class', 'responsive', 'dark mode', 'tw-', 'className'],
+    keywords: [
+        'tailwind',
+        'tailwindcss',
+        'utility class',
+        'responsive',
+        'dark mode',
+        'tw-',
+        'className',
+    ],
     dependencies: ['lang.css'],
     body: `Tailwind CSS conventions:
 
@@ -1199,7 +1356,14 @@ const fwTailwind = shipped({
 8. Use @tailwindcss/typography for prose content.
 9. Use ring utilities for focus indicators (accessibility).
 10. Purge unused styles in production via content configuration.`,
-    allowed_file_patterns: ['**/*.tsx', '**/*.jsx', '**/*.vue', '**/*.html', '**/tailwind.config.*', '**/*.css'],
+    allowed_file_patterns: [
+        '**/*.tsx',
+        '**/*.jsx',
+        '**/*.vue',
+        '**/*.html',
+        '**/tailwind.config.*',
+        '**/*.css',
+    ],
 });
 
 const fwGsap = shipped({
@@ -1210,7 +1374,16 @@ const fwGsap = shipped({
     task_types: ['generate', 'refactor', 'debug'],
     languages: ['typescript', 'javascript'],
     frameworks: ['gsap'],
-    keywords: ['gsap', 'animation', 'timeline', 'scrolltrigger', 'tween', 'stagger', 'motion', 'scroll animation'],
+    keywords: [
+        'gsap',
+        'animation',
+        'timeline',
+        'scrolltrigger',
+        'tween',
+        'stagger',
+        'motion',
+        'scroll animation',
+    ],
     dependencies: ['lang.javascript'],
     body: `GSAP animation conventions:
 
@@ -1235,7 +1408,15 @@ const fwElectron = shipped({
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['typescript', 'javascript'],
     frameworks: ['electron'],
-    keywords: ['electron', 'desktop', 'main process', 'renderer', 'ipc', 'browserwindow', 'preload'],
+    keywords: [
+        'electron',
+        'desktop',
+        'main process',
+        'renderer',
+        'ipc',
+        'browserwindow',
+        'preload',
+    ],
     dependencies: ['lang.typescript'],
     body: `Electron conventions:
 
@@ -1249,18 +1430,33 @@ const fwElectron = shipped({
 8. Handle app lifecycle events (ready, window-all-closed, activate).
 9. Use protocol.registerFileProtocol for custom protocols.
 10. Implement auto-update with electron-updater.`,
-    allowed_file_patterns: ['**/*.ts', '**/*.js', '**/*.html', '**/electron-builder.*', '**/forge.config.*'],
+    allowed_file_patterns: [
+        '**/*.ts',
+        '**/*.js',
+        '**/*.html',
+        '**/electron-builder.*',
+        '**/forge.config.*',
+    ],
 });
 
 const fwGatsby = shipped({
     slug: 'fw.gatsby',
     title: 'Gatsby Patterns',
-    description: 'Gatsby-specific: GraphQL data layer, plugins, static generation, image optimization.',
+    description:
+        'Gatsby-specific: GraphQL data layer, plugins, static generation, image optimization.',
     tags: ['framework', 'gatsby', 'react'],
     task_types: ['generate', 'refactor', 'debug'],
     languages: ['typescript', 'javascript', 'tsx', 'jsx'],
     frameworks: ['gatsby', 'react'],
-    keywords: ['gatsby', 'graphql', 'static site', 'gatsby-node', 'gatsby-config', 'plugin', 'createPages'],
+    keywords: [
+        'gatsby',
+        'graphql',
+        'static site',
+        'gatsby-node',
+        'gatsby-config',
+        'plugin',
+        'createPages',
+    ],
     dependencies: ['fw.react'],
     body: `Gatsby conventions:
 
@@ -1274,7 +1470,14 @@ const fwGatsby = shipped({
 8. Structure source data in content/ or data/ directories.
 9. Use TypeScript for type-safe GraphQL queries with codegen.
 10. Leverage incremental builds for large sites.`,
-    allowed_file_patterns: ['**/*.tsx', '**/*.jsx', '**/*.ts', '**/*.js', '**/gatsby-*.js', '**/gatsby-*.ts'],
+    allowed_file_patterns: [
+        '**/*.tsx',
+        '**/*.jsx',
+        '**/*.ts',
+        '**/*.js',
+        '**/gatsby-*.js',
+        '**/gatsby-*.ts',
+    ],
 });
 
 const fwExpress = shipped({
@@ -1299,7 +1502,13 @@ const fwExpress = shipped({
 8. Rate-limit authentication and sensitive endpoints.
 9. Never expose stack traces in production error responses.
 10. Use structured JSON responses with consistent shape: { data, error, meta }.`,
-    allowed_file_patterns: ['**/*.ts', '**/*.js', '**/routes/**', '**/middleware/**', '**/controllers/**'],
+    allowed_file_patterns: [
+        '**/*.ts',
+        '**/*.js',
+        '**/routes/**',
+        '**/middleware/**',
+        '**/controllers/**',
+    ],
 });
 
 // ============================================================================
@@ -1309,13 +1518,26 @@ const fwExpress = shipped({
 const platformWordpress = shipped({
     slug: 'platform.wordpress',
     title: 'WordPress Development',
-    description: 'WordPress-specific: theme/plugin development, hooks, custom post types, WP-CLI, Gutenberg.',
+    description:
+        'WordPress-specific: theme/plugin development, hooks, custom post types, WP-CLI, Gutenberg.',
     tags: ['platform', 'wordpress', 'cms', 'php'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['php', 'javascript', 'css'],
     frameworks: ['wordpress'],
     repo_patterns: ['**/wp-content/**', '**/wp-config.php', '**/.ddev/**'],
-    keywords: ['wordpress', 'wp', 'theme', 'plugin', 'hook', 'action', 'filter', 'gutenberg', 'woocommerce', 'ddev', 'wp-cli'],
+    keywords: [
+        'wordpress',
+        'wp',
+        'theme',
+        'plugin',
+        'hook',
+        'action',
+        'filter',
+        'gutenberg',
+        'woocommerce',
+        'ddev',
+        'wp-cli',
+    ],
     dependencies: ['lang.php', 'lang.html', 'lang.css'],
     body: `WordPress conventions:
 
@@ -1330,19 +1552,37 @@ const platformWordpress = shipped({
 9. Use Gutenberg block development with @wordpress/scripts for modern editor blocks.
 10. Use transients for cached data, options API for persistent settings.
 11. In DDEV environments, use ddev exec, ddev wp, ddev mysql for all commands.`,
-    allowed_file_patterns: ['**/*.php', '**/*.js', '**/*.css', '**/*.scss', '**/functions.php', '**/style.css'],
+    allowed_file_patterns: [
+        '**/*.php',
+        '**/*.js',
+        '**/*.css',
+        '**/*.scss',
+        '**/functions.php',
+        '**/style.css',
+    ],
 });
 
 const platformDrupal = shipped({
     slug: 'platform.drupal',
     title: 'Drupal Development',
-    description: 'Drupal-specific: module development, hooks, Twig templates, Drush, configuration management.',
+    description:
+        'Drupal-specific: module development, hooks, Twig templates, Drush, configuration management.',
     tags: ['platform', 'drupal', 'cms', 'php'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['php', 'twig', 'yaml'],
     frameworks: ['drupal'],
     repo_patterns: ['**/modules/custom/**', '**/themes/custom/**', '**/sites/default/**'],
-    keywords: ['drupal', 'drush', 'module', 'twig', 'config sync', 'entity', 'field', 'paragraph', 'block'],
+    keywords: [
+        'drupal',
+        'drush',
+        'module',
+        'twig',
+        'config sync',
+        'entity',
+        'field',
+        'paragraph',
+        'block',
+    ],
     dependencies: ['lang.php', 'lang.html'],
     body: `Drupal conventions:
 
@@ -1356,18 +1596,36 @@ const platformDrupal = shipped({
 8. Use Form API for form creation and validation.
 9. Use the Plugin API for extensible components (blocks, field formatters, etc.).
 10. Sanitize user input and use the database abstraction layer — never raw SQL.`,
-    allowed_file_patterns: ['**/*.module', '**/*.php', '**/*.twig', '**/*.yml', '**/*.info.yml', '**/*.routing.yml'],
+    allowed_file_patterns: [
+        '**/*.module',
+        '**/*.php',
+        '**/*.twig',
+        '**/*.yml',
+        '**/*.info.yml',
+        '**/*.routing.yml',
+    ],
 });
 
 const platformSalesforce = shipped({
     slug: 'platform.salesforce',
     title: 'Salesforce Development',
-    description: 'Salesforce-specific: Apex, Lightning Web Components, SOQL, metadata, deployments.',
+    description:
+        'Salesforce-specific: Apex, Lightning Web Components, SOQL, metadata, deployments.',
     tags: ['platform', 'salesforce', 'crm'],
     task_types: ['generate', 'refactor', 'debug', 'review'],
     languages: ['apex', 'javascript', 'html'],
     frameworks: ['salesforce', 'lwc'],
-    keywords: ['salesforce', 'apex', 'soql', 'lightning', 'lwc', 'trigger', 'sobject', 'visualforce', 'sfdx'],
+    keywords: [
+        'salesforce',
+        'apex',
+        'soql',
+        'lightning',
+        'lwc',
+        'trigger',
+        'sobject',
+        'visualforce',
+        'sfdx',
+    ],
     body: `Salesforce conventions:
 
 1. Use Lightning Web Components (LWC) for UI. Aura only for legacy.
@@ -1380,18 +1638,35 @@ const platformSalesforce = shipped({
 8. Handle governor limits explicitly (100 SOQL, 150 DML per transaction).
 9. Use SFDX/sf CLI for deployment and metadata management.
 10. Separate business logic from trigger/controller logic.`,
-    allowed_file_patterns: ['**/*.cls', '**/*.trigger', '**/*.js', '**/*.html', '**/*.xml', '**/force-app/**'],
+    allowed_file_patterns: [
+        '**/*.cls',
+        '**/*.trigger',
+        '**/*.js',
+        '**/*.html',
+        '**/*.xml',
+        '**/force-app/**',
+    ],
 });
 
 const platformLamp = shipped({
     slug: 'platform.lamp',
     title: 'LAMP Stack Patterns',
-    description: 'LAMP-specific: Apache config, PHP-FPM, MySQL optimization, server administration.',
+    description:
+        'LAMP-specific: Apache config, PHP-FPM, MySQL optimization, server administration.',
     tags: ['platform', 'lamp', 'server'],
     task_types: ['generate', 'debug', 'review'],
     languages: ['php', 'sql'],
     repo_patterns: ['**/.htaccess', '**/apache2/**', '**/httpd/**'],
-    keywords: ['lamp', 'apache', 'htaccess', 'php-fpm', 'virtual host', 'mod_rewrite', 'cpanel', 'server'],
+    keywords: [
+        'lamp',
+        'apache',
+        'htaccess',
+        'php-fpm',
+        'virtual host',
+        'mod_rewrite',
+        'cpanel',
+        'server',
+    ],
     dependencies: ['lang.php', 'lang.sql'],
     body: `LAMP stack conventions:
 
@@ -1414,7 +1689,18 @@ const platformCpanel = shipped({
     description: 'cPanel-specific: account management, DNS, email, file management, SSH.',
     tags: ['platform', 'cpanel', 'linux', 'hosting'],
     task_types: ['generate', 'debug'],
-    keywords: ['cpanel', 'whm', 'linux', 'ssh', 'dns', 'email', 'hosting', 'server admin', 'ssl', 'cron'],
+    keywords: [
+        'cpanel',
+        'whm',
+        'linux',
+        'ssh',
+        'dns',
+        'email',
+        'hosting',
+        'server admin',
+        'ssl',
+        'cron',
+    ],
     dependencies: ['platform.lamp'],
     body: `cPanel/Linux server conventions:
 
@@ -1434,11 +1720,21 @@ const platformCpanel = shipped({
 const platformLightspeed = shipped({
     slug: 'platform.lightspeed',
     title: 'Lightspeed POS/eCommerce Patterns',
-    description: 'Lightspeed-specific: API integration, product syncing, inventory management, webhooks.',
+    description:
+        'Lightspeed-specific: API integration, product syncing, inventory management, webhooks.',
     tags: ['platform', 'lightspeed', 'ecommerce', 'pos'],
     task_types: ['generate', 'debug'],
     languages: ['php', 'javascript', 'python'],
-    keywords: ['lightspeed', 'pos', 'ecommerce', 'inventory', 'product sync', 'webhook', 'retail', 'api integration'],
+    keywords: [
+        'lightspeed',
+        'pos',
+        'ecommerce',
+        'inventory',
+        'product sync',
+        'webhook',
+        'retail',
+        'api integration',
+    ],
     body: `Lightspeed API conventions:
 
 1. Use OAuth 2.0 authentication with proper token refresh flow.
@@ -1461,11 +1757,22 @@ const platformLightspeed = shipped({
 const dbMysql = shipped({
     slug: 'db.mysql',
     title: 'MySQL / MariaDB Patterns',
-    description: 'MySQL/MariaDB-specific: query optimization, indexing, InnoDB, replication, migrations.',
+    description:
+        'MySQL/MariaDB-specific: query optimization, indexing, InnoDB, replication, migrations.',
     tags: ['database', 'mysql', 'mariadb'],
     task_types: ['generate', 'debug', 'review', 'refactor'],
     languages: ['sql'],
-    keywords: ['mysql', 'mariadb', 'innodb', 'index', 'slow query', 'replication', 'migration', 'trigger', 'stored procedure'],
+    keywords: [
+        'mysql',
+        'mariadb',
+        'innodb',
+        'index',
+        'slow query',
+        'replication',
+        'migration',
+        'trigger',
+        'stored procedure',
+    ],
     dependencies: ['lang.sql'],
     body: `MySQL/MariaDB conventions:
 
@@ -1494,7 +1801,16 @@ const opsDocker = shipped({
     tags: ['devops', 'docker', 'container'],
     task_types: ['generate', 'debug', 'review'],
     repo_patterns: ['**/Dockerfile*', '**/docker-compose*', '**/.dockerignore'],
-    keywords: ['docker', 'dockerfile', 'container', 'docker-compose', 'image', 'volume', 'network', 'multi-stage'],
+    keywords: [
+        'docker',
+        'dockerfile',
+        'container',
+        'docker-compose',
+        'image',
+        'volume',
+        'network',
+        'multi-stage',
+    ],
     body: `Docker conventions:
 
 1. Use multi-stage builds to minimize final image size.
@@ -1507,13 +1823,20 @@ const opsDocker = shipped({
 8. Use health checks (HEALTHCHECK instruction) for service readiness.
 9. Use named volumes for persistent data, bind mounts for development.
 10. Scan images for vulnerabilities (docker scout, trivy).`,
-    allowed_file_patterns: ['**/Dockerfile*', '**/docker-compose*', '**/.dockerignore', '**/*.yml', '**/*.yaml'],
+    allowed_file_patterns: [
+        '**/Dockerfile*',
+        '**/docker-compose*',
+        '**/.dockerignore',
+        '**/*.yml',
+        '**/*.yaml',
+    ],
 });
 
 const opsDdev = shipped({
     slug: 'ops.ddev',
     title: 'DDEV Local Development',
-    description: 'DDEV-specific: project configuration, services, custom commands, database access.',
+    description:
+        'DDEV-specific: project configuration, services, custom commands, database access.',
     tags: ['devops', 'ddev', 'local-dev'],
     task_types: ['generate', 'debug'],
     repo_patterns: ['**/.ddev/config.yaml', '**/.ddev/**'],
@@ -1537,10 +1860,21 @@ const opsDdev = shipped({
 const opsGit = shipped({
     slug: 'ops.git',
     title: 'Git Workflow Patterns',
-    description: 'Git-specific: branching strategies, commit conventions, merge/rebase, conflict resolution.',
+    description:
+        'Git-specific: branching strategies, commit conventions, merge/rebase, conflict resolution.',
     tags: ['devops', 'git', 'version-control'],
     task_types: ['spec', 'debug'],
-    keywords: ['git', 'branch', 'commit', 'merge', 'rebase', 'conflict', 'pull request', 'cherry-pick', 'stash'],
+    keywords: [
+        'git',
+        'branch',
+        'commit',
+        'merge',
+        'rebase',
+        'conflict',
+        'pull request',
+        'cherry-pick',
+        'stash',
+    ],
     body: `Git conventions:
 
 1. Write conventional commits: type(scope): description (fix, feat, chore, docs, refactor, test).
@@ -1559,11 +1893,21 @@ const opsGit = shipped({
 const opsCicd = shipped({
     slug: 'ops.cicd',
     title: 'CI/CD Pipeline Patterns',
-    description: 'CI/CD-specific: GitHub Actions, automated testing, deployment, secrets management.',
+    description:
+        'CI/CD-specific: GitHub Actions, automated testing, deployment, secrets management.',
     tags: ['devops', 'cicd', 'automation'],
     task_types: ['generate', 'debug', 'review'],
     repo_patterns: ['**/.github/workflows/**', '**/.gitlab-ci.yml', '**/Jenkinsfile'],
-    keywords: ['ci', 'cd', 'github actions', 'workflow', 'pipeline', 'deploy', 'automation', 'jenkins'],
+    keywords: [
+        'ci',
+        'cd',
+        'github actions',
+        'workflow',
+        'pipeline',
+        'deploy',
+        'automation',
+        'jenkins',
+    ],
     body: `CI/CD conventions:
 
 1. Run tests, lint, and type-check on every PR.
@@ -1576,16 +1920,34 @@ const opsCicd = shipped({
 8. Fail fast — run cheapest checks (lint, types) before expensive ones (tests).
 9. Use artifacts to pass build outputs between stages.
 10. Implement rollback mechanisms for failed deployments.`,
-    allowed_file_patterns: ['**/.github/workflows/**', '**/.gitlab-ci.yml', '**/Jenkinsfile', '**/*.yml', '**/*.yaml'],
+    allowed_file_patterns: [
+        '**/.github/workflows/**',
+        '**/.gitlab-ci.yml',
+        '**/Jenkinsfile',
+        '**/*.yml',
+        '**/*.yaml',
+    ],
 });
 
 const opsLinux = shipped({
     slug: 'ops.linux',
     title: 'Linux System Administration',
-    description: 'Linux-specific: shell scripting, service management, permissions, networking, monitoring.',
+    description:
+        'Linux-specific: shell scripting, service management, permissions, networking, monitoring.',
     tags: ['devops', 'linux', 'sysadmin'],
     task_types: ['generate', 'debug'],
-    keywords: ['linux', 'bash', 'shell', 'systemd', 'cron', 'ssh', 'firewall', 'permissions', 'nginx', 'systemctl'],
+    keywords: [
+        'linux',
+        'bash',
+        'shell',
+        'systemd',
+        'cron',
+        'ssh',
+        'firewall',
+        'permissions',
+        'nginx',
+        'systemctl',
+    ],
     body: `Linux administration conventions:
 
 1. Use systemd for service management (systemctl start/stop/enable/status).
@@ -1608,10 +1970,21 @@ const opsLinux = shipped({
 const xcutSecurity = shipped({
     slug: 'xcut.security',
     title: 'Application Security Patterns',
-    description: 'Security-specific: OWASP Top 10, input validation, authentication, secrets management.',
+    description:
+        'Security-specific: OWASP Top 10, input validation, authentication, secrets management.',
     tags: ['security', 'owasp', 'cross-cutting'],
     task_types: ['review', 'debug', 'generate'],
-    keywords: ['security', 'owasp', 'xss', 'csrf', 'injection', 'authentication', 'authorization', 'secrets', 'vulnerability'],
+    keywords: [
+        'security',
+        'owasp',
+        'xss',
+        'csrf',
+        'injection',
+        'authentication',
+        'authorization',
+        'secrets',
+        'vulnerability',
+    ],
     body: `Application security conventions (OWASP Top 10):
 
 1. INJECTION: Always use parameterized queries. Never concatenate user input into SQL, commands, or templates.
@@ -1630,11 +2003,21 @@ const xcutSecurity = shipped({
 const xcutAccessibility = shipped({
     slug: 'xcut.accessibility',
     title: 'Web Accessibility (a11y)',
-    description: 'Accessibility-specific: WCAG 2.1 compliance, ARIA, keyboard navigation, screen readers.',
+    description:
+        'Accessibility-specific: WCAG 2.1 compliance, ARIA, keyboard navigation, screen readers.',
     tags: ['accessibility', 'a11y', 'cross-cutting'],
     task_types: ['review', 'generate', 'refactor'],
     languages: ['html', 'tsx', 'jsx', 'vue'],
-    keywords: ['accessibility', 'a11y', 'wcag', 'aria', 'screen reader', 'keyboard', 'focus', 'contrast'],
+    keywords: [
+        'accessibility',
+        'a11y',
+        'wcag',
+        'aria',
+        'screen reader',
+        'keyboard',
+        'focus',
+        'contrast',
+    ],
     dependencies: ['lang.html'],
     body: `Web accessibility conventions (WCAG 2.1 AA):
 
@@ -1648,16 +2031,34 @@ const xcutAccessibility = shipped({
 8. Support reduced motion (prefers-reduced-motion media query).
 9. Pages have proper heading hierarchy and landmark regions.
 10. Test with screen readers (VoiceOver, NVDA) and automated tools (axe, Lighthouse).`,
-    allowed_file_patterns: ['**/*.html', '**/*.tsx', '**/*.jsx', '**/*.vue', '**/*.css', '**/*.scss'],
+    allowed_file_patterns: [
+        '**/*.html',
+        '**/*.tsx',
+        '**/*.jsx',
+        '**/*.vue',
+        '**/*.css',
+        '**/*.scss',
+    ],
 });
 
 const xcutApi = shipped({
     slug: 'xcut.api',
     title: 'REST API Design Patterns',
-    description: 'API-specific: RESTful design, versioning, error responses, pagination, rate limiting.',
+    description:
+        'API-specific: RESTful design, versioning, error responses, pagination, rate limiting.',
     tags: ['api', 'rest', 'cross-cutting'],
     task_types: ['generate', 'review', 'design'],
-    keywords: ['api', 'rest', 'restful', 'endpoint', 'versioning', 'pagination', 'webhook', 'openapi', 'swagger'],
+    keywords: [
+        'api',
+        'rest',
+        'restful',
+        'endpoint',
+        'versioning',
+        'pagination',
+        'webhook',
+        'openapi',
+        'swagger',
+    ],
     body: `REST API design conventions:
 
 1. Use nouns for resources (/users, /orders), HTTP verbs for actions (GET, POST, PUT, DELETE).
@@ -1676,10 +2077,21 @@ const xcutApi = shipped({
 const xcutTesting = shipped({
     slug: 'xcut.testing',
     title: 'Testing Strategy Patterns',
-    description: 'Testing-specific: test pyramid, integration tests, E2E, mocking strategies, CI testing.',
+    description:
+        'Testing-specific: test pyramid, integration tests, E2E, mocking strategies, CI testing.',
     tags: ['testing', 'cross-cutting'],
     task_types: ['test', 'generate', 'review'],
-    keywords: ['test', 'e2e', 'integration', 'mock', 'stub', 'fixture', 'coverage', 'playwright', 'cypress'],
+    keywords: [
+        'test',
+        'e2e',
+        'integration',
+        'mock',
+        'stub',
+        'fixture',
+        'coverage',
+        'playwright',
+        'cypress',
+    ],
     body: `Testing strategy conventions:
 
 1. Follow the test pyramid: many unit tests, fewer integration tests, minimal E2E tests.
@@ -1692,16 +2104,35 @@ const xcutTesting = shipped({
 8. Use snapshot testing sparingly — only for stable output (generated types, configs).
 9. Run tests in CI on every PR — block merge on failure.
 10. Aim for meaningful coverage, not 100% — cover edge cases and error paths.`,
-    allowed_file_patterns: ['**/*.test.*', '**/*.spec.*', '**/*_test.*', '**/test/**', '**/tests/**', '**/__tests__/**'],
+    allowed_file_patterns: [
+        '**/*.test.*',
+        '**/*.spec.*',
+        '**/*_test.*',
+        '**/test/**',
+        '**/tests/**',
+        '**/__tests__/**',
+    ],
 });
 
 const xcutPerformance = shipped({
     slug: 'xcut.performance',
     title: 'Web Performance Patterns',
-    description: 'Performance-specific: Core Web Vitals, bundle optimization, caching, lazy loading.',
+    description:
+        'Performance-specific: Core Web Vitals, bundle optimization, caching, lazy loading.',
     tags: ['performance', 'cross-cutting'],
     task_types: ['refactor', 'review', 'debug'],
-    keywords: ['performance', 'core web vitals', 'lighthouse', 'bundle', 'lazy load', 'cache', 'cdn', 'ttfb', 'cls', 'fcp'],
+    keywords: [
+        'performance',
+        'core web vitals',
+        'lighthouse',
+        'bundle',
+        'lazy load',
+        'cache',
+        'cdn',
+        'ttfb',
+        'cls',
+        'fcp',
+    ],
     body: `Web performance conventions:
 
 1. Measure before optimizing — use Lighthouse, WebPageTest, Chrome DevTools.

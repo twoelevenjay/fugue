@@ -420,84 +420,84 @@ export function registerJohannParticipant(_context: vscode.ExtensionContext): vs
 
             // === ORCHESTRATE ===
             try {
-            // Check if background mode is enabled
-            if (config.backgroundModeEnabled) {
-                // Start background orchestration and return immediately
-                const taskId = await orchestrator.startBackgroundOrchestration(
-                    userMessage,
-                    fullContext,
-                    subagentContext,
-                    model,
-                    request.toolInvocationToken,
-                );
+                // Check if background mode is enabled
+                if (config.backgroundModeEnabled) {
+                    // Start background orchestration and return immediately
+                    const taskId = await orchestrator.startBackgroundOrchestration(
+                        userMessage,
+                        fullContext,
+                        subagentContext,
+                        model,
+                        request.toolInvocationToken,
+                    );
 
-                response.markdown(
-                    `🔄 **Background orchestration started**\n\n` +
-                        `Task ID: \`${taskId}\`\n\n` +
-                        `Your request is being processed in the background. ` +
-                        `You can continue working while Johann orchestrates the task.\n\n` +
-                        `**View progress:**\n` +
-                        `- Watch the status bar for live updates\n` +
-                        `- Use \`/tasks\` to view all background tasks\n` +
-                        `- Run \`Johann: Show Background Tasks\` from the command palette\n\n` +
-                        `You'll receive a notification when the task completes.`,
-                );
+                    response.markdown(
+                        `🔄 **Background orchestration started**\n\n` +
+                            `Task ID: \`${taskId}\`\n\n` +
+                            `Your request is being processed in the background. ` +
+                            `You can continue working while Johann orchestrates the task.\n\n` +
+                            `**View progress:**\n` +
+                            `- Watch the status bar for live updates\n` +
+                            `- Use \`/tasks\` to view all background tasks\n` +
+                            `- Run \`Johann: Show Background Tasks\` from the command palette\n\n` +
+                            `You'll receive a notification when the task completes.`,
+                    );
 
-                response.button({
-                    command: 'johann.showBackgroundTasks',
-                    title: '$(list-unordered) View All Tasks',
-                });
+                    response.button({
+                        command: 'johann.showBackgroundTasks',
+                        title: '$(list-unordered) View All Tasks',
+                    });
 
-                response.button({
-                    command: 'johann.showTaskStatus',
-                    title: '$(info) View This Task',
-                    arguments: [taskId],
-                });
-            } else {
-                // Synchronous execution (current behavior)
-                await orchestrator.orchestrate(
-                    userMessage,
-                    fullContext,
-                    subagentContext,
-                    model,
-                    response,
-                    token,
-                    request.toolInvocationToken,
-                );
-            }
+                    response.button({
+                        command: 'johann.showTaskStatus',
+                        title: '$(info) View This Task',
+                        arguments: [taskId],
+                    });
+                } else {
+                    // Synchronous execution (current behavior)
+                    await orchestrator.orchestrate(
+                        userMessage,
+                        fullContext,
+                        subagentContext,
+                        model,
+                        response,
+                        token,
+                        request.toolInvocationToken,
+                    );
+                }
 
-            return {
-                metadata: {
-                    command: 'orchestrate',
-                    success: true,
-                    summary: userMessage.substring(0, 200),
-                },
-            };
+                return {
+                    metadata: {
+                        command: 'orchestrate',
+                        success: true,
+                        summary: userMessage.substring(0, 200),
+                    },
+                };
             } finally {
-            // === POST-ORCHESTRATION CLEANUP (runs even if orchestration throws) ===
-            // Complete bootstrap if first run
-            if (isFirstRun && johannDir) {
-                try {
-                    await completeBootstrap(johannDir);
-                    logger.info('Bootstrap completed — BOOTSTRAP.md removed.');
-                } catch (bootstrapErr) {
-                    logger.warn(`Bootstrap cleanup failed: ${bootstrapErr}`);
+                // === POST-ORCHESTRATION CLEANUP (runs even if orchestration throws) ===
+                // Complete bootstrap if first run
+                if (isFirstRun && johannDir) {
+                    try {
+                        await completeBootstrap(johannDir);
+                        logger.info('Bootstrap completed — BOOTSTRAP.md removed.');
+                    } catch (bootstrapErr) {
+                        logger.warn(`Bootstrap cleanup failed: ${bootstrapErr}`);
+                    }
                 }
-            }
 
-            // Close session transcript
-            if (transcript) {
-                try {
-                    await transcript.recordAgent('(orchestration complete)');
-                    await transcript.close(userMessage.substring(0, 100));
-                } catch {
-                    // Non-critical
+                // Close session transcript
+                if (transcript) {
+                    try {
+                        await transcript.recordAgent('(orchestration complete)');
+                        await transcript.close(userMessage.substring(0, 100));
+                    } catch {
+                        // Non-critical
+                    }
                 }
-            }
 
-            // Log completion
-            await logEvent('Request completed', `Finished: ${userMessage.substring(0, 100)}`);
-            logger.info(`Request completed: ${userMessage.substring(0, 80)}`);
+                // Log completion
+                await logEvent('Request completed', `Finished: ${userMessage.substring(0, 100)}`);
+                logger.info(`Request completed: ${userMessage.substring(0, 80)}`);
             }
         },
     );

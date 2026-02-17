@@ -51,16 +51,23 @@ const DEFAULT_MAX_TOTAL_OUTPUT_CHARS = 200_000;
  * Complex and expert tasks (e.g., self-modification, multi-file refactors)
  * need significantly higher limits to avoid premature stops.
  */
-const LIMITS_BY_COMPLEXITY: Record<string, { maxToolRounds: number; maxConsecutiveTextRounds: number; maxTotalOutputChars: number }> = {
-    trivial:  { maxToolRounds: 15,  maxConsecutiveTextRounds: 2, maxTotalOutputChars: 100_000 },
-    simple:   { maxToolRounds: 30,  maxConsecutiveTextRounds: 3, maxTotalOutputChars: 200_000 },
-    moderate: { maxToolRounds: 40,  maxConsecutiveTextRounds: 4, maxTotalOutputChars: 350_000 },
-    complex:  { maxToolRounds: 60,  maxConsecutiveTextRounds: 5, maxTotalOutputChars: 500_000 },
-    expert:   { maxToolRounds: 80,  maxConsecutiveTextRounds: 6, maxTotalOutputChars: 750_000 },
+const LIMITS_BY_COMPLEXITY: Record<
+    string,
+    { maxToolRounds: number; maxConsecutiveTextRounds: number; maxTotalOutputChars: number }
+> = {
+    trivial: { maxToolRounds: 15, maxConsecutiveTextRounds: 2, maxTotalOutputChars: 100_000 },
+    simple: { maxToolRounds: 30, maxConsecutiveTextRounds: 3, maxTotalOutputChars: 200_000 },
+    moderate: { maxToolRounds: 40, maxConsecutiveTextRounds: 4, maxTotalOutputChars: 350_000 },
+    complex: { maxToolRounds: 60, maxConsecutiveTextRounds: 5, maxTotalOutputChars: 500_000 },
+    expert: { maxToolRounds: 80, maxConsecutiveTextRounds: 6, maxTotalOutputChars: 750_000 },
 };
 
 /** Get execution limits for a given complexity level. */
-function getLimitsForComplexity(complexity: string): { maxToolRounds: number; maxConsecutiveTextRounds: number; maxTotalOutputChars: number } {
+function getLimitsForComplexity(complexity: string): {
+    maxToolRounds: number;
+    maxConsecutiveTextRounds: number;
+    maxTotalOutputChars: number;
+} {
     return LIMITS_BY_COMPLEXITY[complexity] || LIMITS_BY_COMPLEXITY['moderate'];
 }
 
@@ -1533,10 +1540,14 @@ ${outputForReview}
         const visited = new Set<string>();
 
         const resolve = (current: string): void => {
-            if (visited.has(current)) { return; }
+            if (visited.has(current)) {
+                return;
+            }
             visited.add(current);
             const doc = bySlug.get(current);
-            if (!doc) { return; }
+            if (!doc) {
+                return;
+            }
             // Resolve dependencies first
             if (doc.applies_to.dependencies) {
                 for (const dep of doc.applies_to.dependencies) {

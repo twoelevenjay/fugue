@@ -20,7 +20,7 @@ export class WorkStreamManager {
         workspaceRoot: string,
         sessionId: string,
         storagePath: string,
-        logger: JohannLogger
+        logger: JohannLogger,
     ) {
         this.worktreeManager = new WorktreeManager(workspaceRoot, sessionId);
         this.storagePath = storagePath;
@@ -33,7 +33,9 @@ export class WorkStreamManager {
     async initialize(): Promise<void> {
         const ready = await this.worktreeManager.initialize();
         if (!ready) {
-            this.logger.error('Failed to initialize WorktreeManager. Git repository may be invalid or not found.');
+            this.logger.error(
+                'Failed to initialize WorktreeManager. Git repository may be invalid or not found.',
+            );
             return;
         }
 
@@ -62,7 +64,7 @@ export class WorkStreamManager {
             rootPath: worktree.worktreePath,
             status: 'initializing',
             phases: config.phases,
-            dependencies: config.dependencies || []
+            dependencies: config.dependencies || [],
         };
 
         this.streams.set(stream.id, stream);
@@ -126,10 +128,10 @@ export class WorkStreamManager {
     getStreamStatusSummary(): WorkStreamStatus {
         const all = this.getAllStreams();
         return {
-            activeStreams: all.filter(s => s.status === 'active').length,
-            completedStreams: all.filter(s => s.status === 'completed').length,
-            failedStreams: all.filter(s => s.status === 'failed').length,
-            pendingStreams: all.filter(s => s.status === 'initializing').length
+            activeStreams: all.filter((s) => s.status === 'active').length,
+            completedStreams: all.filter((s) => s.status === 'completed').length,
+            failedStreams: all.filter((s) => s.status === 'failed').length,
+            pendingStreams: all.filter((s) => s.status === 'initializing').length,
         };
     }
 
@@ -143,7 +145,7 @@ export class WorkStreamManager {
             return [];
         }
 
-        const subtaskShims: Subtask[] = streamsArray.map(stream => ({
+        const subtaskShims: Subtask[] = streamsArray.map((stream) => ({
             id: stream.id,
             title: stream.name,
             description: '',
@@ -152,7 +154,7 @@ export class WorkStreamManager {
             successCriteria: [],
             status: 'pending',
             attempts: 0,
-            maxAttempts: 1
+            maxAttempts: 1,
         }));
 
         const dummyPlan: OrchestrationPlan = {
@@ -160,7 +162,7 @@ export class WorkStreamManager {
             subtasks: subtaskShims,
             strategy: 'parallel',
             successCriteria: [],
-            overallComplexity: 'trivial'
+            overallComplexity: 'trivial',
         };
 
         return getExecutionWaves(dummyPlan);
@@ -172,7 +174,7 @@ export class WorkStreamManager {
     async completeWorkStream(id: string): Promise<boolean> {
         this.logger.info(`Completing work stream: ${id}`);
         const stream = this.streams.get(id);
-        if (!stream) return false;
+        if (!stream) {return false;}
 
         stream.status = 'merging';
         await this.saveState();
