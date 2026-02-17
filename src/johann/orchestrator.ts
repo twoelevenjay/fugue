@@ -37,6 +37,7 @@ import { SkillValidator } from './skillValidator';
 import { SkillDoc } from './skillTypes';
 import { RunStateManager, RunPhase } from './runState';
 import { scanBootstrapContext, buildCapabilitySummary, BootstrapResult } from './bootstrapContext';
+import { detectSelfReferentialTask, SelfAwarenessResult } from './selfAwareness';
 
 // ============================================================================
 // ORCHESTRATOR — The top-level controller
@@ -763,6 +764,30 @@ export class Orchestrator {
             );
         }
 
+        // == SELF-AWARENESS: Detect self-referential tasks ==
+        // When Johann is asked to work on his own source code, subagents
+        // need architecture context and elevated execution limits.
+        let selfAwareness: SelfAwarenessResult | undefined;
+        try {
+            selfAwareness = await detectSelfReferentialTask(request, subagentContext);
+            if (selfAwareness.isSelfReferential) {
+                await debugLog.logEvent(
+                    'other',
+                    `Self-referential task detected (confidence: ${(selfAwareness.confidence * 100).toFixed(0)}%): ${selfAwareness.signals.join(', ')}`,
+                );
+                reporter.emit({
+                    type: 'note',
+                    message: `🪞 **Self-referential mode:** Johann detected that this task involves modifying his own source code. Elevated execution limits applied.`,
+                });
+            }
+        } catch (selfAwareErr) {
+            // Non-critical — proceed without self-awareness
+            await debugLog.logEvent(
+                'other',
+                `Self-awareness detection failed: ${selfAwareErr instanceof Error ? selfAwareErr.message : String(selfAwareErr)}`,
+            );
+        }
+
         // Enrich contexts with bootstrap information
         let enrichedFullContext = fullContext;
         let enrichedSubagentContext = subagentContext;
@@ -774,6 +799,12 @@ export class Orchestrator {
             if (capSummary) {
                 enrichedSubagentContext = capSummary + '\n\n' + subagentContext;
             }
+        }
+
+        // Inject self-awareness context for self-referential tasks
+        if (selfAwareness?.isSelfReferential && selfAwareness.architectureContext) {
+            enrichedSubagentContext = selfAwareness.architectureContext + '\n\n' + enrichedSubagentContext;
+            enrichedFullContext = selfAwareness.architectureContext + '\n\n' + enrichedFullContext;
         }
 
         try {
@@ -816,6 +847,29 @@ export class Orchestrator {
                 'PLAN SAVED',
                 `${plan.subtasks.length} subtasks, strategy: ${plan.strategy}`,
             );
+
+            // == SELF-AWARENESS: Elevate subtask complexity for self-referential tasks ==
+            // When Johann is working on his own code, tasks that look "moderate" are
+            // really "complex" because they require reading many large source files.
+            if (selfAwareness?.isSelfReferential) {
+                const complexityFloor = selfAwareness.recommendedComplexity;
+                const complexityOrder = ['trivial', 'simple', 'moderate', 'complex', 'expert'];
+                const floorIdx = complexityOrder.indexOf(complexityFloor);
+                let elevated = 0;
+                for (const subtask of plan.subtasks) {
+                    const currentIdx = complexityOrder.indexOf(subtask.complexity);
+                    if (currentIdx < floorIdx) {
+                        subtask.complexity = complexityFloor;
+                        elevated++;
+                    }
+                }
+                if (elevated > 0) {
+                    await debugLog.logEvent(
+                        'other',
+                        `Self-awareness: elevated ${elevated} subtask(s) to '${complexityFloor}' complexity`,
+                    );
+                }
+            }
 
             // Show the plan
             reporter.showPlan(plan);

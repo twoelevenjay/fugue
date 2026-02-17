@@ -30,20 +30,38 @@ import { SelfHealingDetector } from './selfHealing';
 // - Has success criteria to evaluate against
 // ============================================================================
 
-/** Maximum number of tool-calling loop iterations to prevent runaway agents. */
-const MAX_TOOL_ROUNDS = 30;
+/** Default maximum number of tool-calling loop iterations to prevent runaway agents. */
+const DEFAULT_MAX_TOOL_ROUNDS = 30;
 
 /**
- * Maximum consecutive text-only rounds (no tool calls) before forcing exit.
+ * Default maximum consecutive text-only rounds (no tool calls) before forcing exit.
  * Prevents the model from rambling indefinitely without doing real work.
  */
-const MAX_CONSECUTIVE_TEXT_ROUNDS = 3;
+const DEFAULT_MAX_CONSECUTIVE_TEXT_ROUNDS = 3;
 
 /**
- * Maximum total output size in characters before aborting.
+ * Default maximum total output size in characters before aborting.
  * Prevents unbounded output accumulation from hallucinating models.
  */
-const MAX_TOTAL_OUTPUT_CHARS = 200_000;
+const DEFAULT_MAX_TOTAL_OUTPUT_CHARS = 200_000;
+
+/**
+ * Complexity-based execution limits.
+ * Complex and expert tasks (e.g., self-modification, multi-file refactors)
+ * need significantly higher limits to avoid premature stops.
+ */
+const LIMITS_BY_COMPLEXITY: Record<string, { maxToolRounds: number; maxConsecutiveTextRounds: number; maxTotalOutputChars: number }> = {
+    trivial:  { maxToolRounds: 15,  maxConsecutiveTextRounds: 2, maxTotalOutputChars: 100_000 },
+    simple:   { maxToolRounds: 30,  maxConsecutiveTextRounds: 3, maxTotalOutputChars: 200_000 },
+    moderate: { maxToolRounds: 40,  maxConsecutiveTextRounds: 4, maxTotalOutputChars: 350_000 },
+    complex:  { maxToolRounds: 60,  maxConsecutiveTextRounds: 5, maxTotalOutputChars: 500_000 },
+    expert:   { maxToolRounds: 80,  maxConsecutiveTextRounds: 6, maxTotalOutputChars: 750_000 },
+};
+
+/** Get execution limits for a given complexity level. */
+function getLimitsForComplexity(complexity: string): { maxToolRounds: number; maxConsecutiveTextRounds: number; maxTotalOutputChars: number } {
+    return LIMITS_BY_COMPLEXITY[complexity] || LIMITS_BY_COMPLEXITY['moderate'];
+}
 
 /**
  * How often (in tool-loop rounds) to re-read the ledger and inject an update
@@ -612,14 +630,20 @@ export class SubagentManager {
             let totalToolCalls = 0;
             let consecutiveTextRounds = 0;
 
+            // Get complexity-aware limits for this subtask
+            const limits = getLimitsForComplexity(subtask.complexity);
+            const maxToolRounds = limits.maxToolRounds;
+            const maxConsecutiveTextRounds = limits.maxConsecutiveTextRounds;
+            const maxTotalOutputChars = limits.maxTotalOutputChars;
+
             // === AGENTIC TOOL-CALLING LOOP ===
-            while (round < MAX_TOOL_ROUNDS) {
+            while (round < maxToolRounds) {
                 if (token.isCancellationRequested) {
                     break;
                 }
 
                 // Guard: abort if total output is getting too large
-                if (fullOutput.length > MAX_TOTAL_OUTPUT_CHARS) {
+                if (fullOutput.length > maxTotalOutputChars) {
                     if (stream) {
                         stream.markdown(
                             `\n> ⚠️ Output limit reached (${(fullOutput.length / 1000).toFixed(0)}KB). Stopping execution.\n`,
@@ -777,8 +801,8 @@ export class SubagentManager {
                     // Track consecutive text-only rounds to detect rambling models
                     consecutiveTextRounds++;
                     if (
-                        consecutiveTextRounds >= MAX_CONSECUTIVE_TEXT_ROUNDS &&
-                        round < MAX_TOOL_ROUNDS
+                        consecutiveTextRounds >= maxConsecutiveTextRounds &&
+                        round < maxToolRounds
                     ) {
                         // The model has produced text without tool calls multiple times
                         // in a row. It's probably rambling. Force exit.
@@ -923,7 +947,7 @@ export class SubagentManager {
                 if (
                     ledger?.isReady() &&
                     round % HIVE_MIND_REFRESH_INTERVAL === 0 &&
-                    round < MAX_TOOL_ROUNDS
+                    round < maxToolRounds
                 ) {
                     try {
                         // Re-read ledger.json from disk to pick up changes from

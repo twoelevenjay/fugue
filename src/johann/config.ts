@@ -81,14 +81,14 @@ export interface JohannConfig {
  * Default configuration values.
  */
 const DEFAULTS: JohannConfig = {
-    maxSubtasks: 10,
-    maxAttempts: 3,
+    maxSubtasks: 20,
+    maxAttempts: 5,
     allowParallel: true,
     useWorktrees: true,
     memoryDir: '.vscode/johann',
     maxBootstrapChars: 15000,
     maxDailyNoteEntries: 100,
-    heartbeatEnabled: false,
+    heartbeatEnabled: true,
     heartbeatIntervalMinutes: 15,
     transcriptsEnabled: true,
     maxTranscriptBytes: 1_000_000, // 1MB
@@ -102,9 +102,9 @@ const DEFAULTS: JohannConfig = {
     modelPickerEnabled: true,
     fixedModel: '',
     blockedModels: [],
-    backgroundModeEnabled: false,
+    backgroundModeEnabled: true,
     allowOpusEscalation: false,
-    toolInvocationTimeoutMs: 120000,
+    toolInvocationTimeoutMs: 180000,
     autoBackgroundLongRunningCommands: true,
     yoloMaxRequests: 200,
     skillAutonomousCreation: true,

@@ -274,7 +274,7 @@ export class TaskDecomposer {
                     : [],
                 status: 'pending',
                 attempts: 0,
-                maxAttempts: 3,
+                maxAttempts: 5,
                 useMultiPass: raw.useMultiPass === true,
             });
         }
@@ -314,7 +314,7 @@ export class TaskDecomposer {
                     successCriteria: ['Task completed successfully'],
                     status: 'pending',
                     attempts: 0,
-                    maxAttempts: 3,
+                    maxAttempts: 5,
                 },
             ],
         };

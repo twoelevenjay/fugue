@@ -205,8 +205,8 @@ export interface OrchestratorConfig {
 }
 
 export const DEFAULT_CONFIG: OrchestratorConfig = {
-    maxSubtasks: 10,
-    maxAttemptsPerSubtask: 3,
+    maxSubtasks: 20,
+    maxAttemptsPerSubtask: 5,
     allowParallelExecution: true,
     useWorktrees: true,
     memoryDir: '.vscode/johann',
