@@ -150,6 +150,7 @@ export function registerJohannParticipant(_context: vscode.ExtensionContext): vs
         maxAttemptsPerSubtask: config.maxAttempts,
         allowParallelExecution: config.allowParallel,
         memoryDir: config.memoryDir,
+        globalStorageUri: _context.globalStorageUri,
     });
 
     const logger = createLogger();

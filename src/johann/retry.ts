@@ -82,6 +82,7 @@ const API_COMPAT_PATTERNS = [
     'unsupported_value',
     'invalid_request_error',
     'context_management',
+    'no lowest priority node', // gpt-4o-mini fails 100% with this graph-scheduling error
 ];
 
 // Patterns for auth errors

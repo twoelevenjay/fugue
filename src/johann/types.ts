@@ -202,6 +202,8 @@ export interface OrchestratorConfig {
     useWorktrees: boolean;
     /** Memory directory relative to workspace root */
     memoryDir: string;
+    /** VS Code global storage URI (for global skill store) */
+    globalStorageUri?: import('vscode').Uri;
 }
 
 export const DEFAULT_CONFIG: OrchestratorConfig = {

@@ -36,6 +36,8 @@ import { SelfHealingDetector } from './selfHealing';
 import { LocalSkillStore } from './skillStore';
 import { SkillValidator } from './skillValidator';
 import { SkillDoc } from './skillTypes';
+import { SkillSystem } from './skillSystem';
+import { SHIPPED_SKILLS } from './shippedSkills';
 import { RunStateManager, RunPhase } from './runState';
 import { scanBootstrapContext, buildCapabilitySummary, BootstrapResult } from './bootstrapContext';
 import { detectSelfReferentialTask, SelfAwarenessResult } from './selfAwareness';
@@ -144,6 +146,7 @@ export class Orchestrator {
     private selfHealing: SelfHealingDetector;
     private skillStore: LocalSkillStore;
     private skillValidator: SkillValidator;
+    private skillSystem: SkillSystem | undefined;
 
     constructor(config: OrchestratorConfig = DEFAULT_CONFIG) {
         this.config = config;
@@ -482,6 +485,7 @@ export class Orchestrator {
                 `Starting planning for: ${request.substring(0, 200)}`,
             );
 
+            const bgSkillSummary = this.buildSkillSummaryForPlanner();
             const plan = await this.taskDecomposer.decompose(
                 request,
                 enrichedFullContext,
@@ -491,6 +495,7 @@ export class Orchestrator {
                 undefined, // No stream in background mode
                 debugLog,
                 persist,
+                bgSkillSummary,
             );
 
             session.plan = plan;
@@ -825,6 +830,9 @@ export class Orchestrator {
 
             await this.hookRunner.run('before_planning', { request, session });
 
+            // Build a lightweight skill summary for the planner from shipped skills
+            const skillSummary = this.buildSkillSummaryForPlanner();
+
             const plan = await this.taskDecomposer.decompose(
                 request,
                 enrichedFullContext,
@@ -834,6 +842,7 @@ export class Orchestrator {
                 reporter.stream,
                 debugLog,
                 persist,
+                skillSummary,
             );
 
             session.plan = plan;
@@ -908,6 +917,29 @@ export class Orchestrator {
                 await debugLog.logEvent(
                     'other',
                     `Execution ledger initialized with ${plan.subtasks.length} subtasks`,
+                );
+            }
+
+            // Initialize the SkillSystem for skill-based routing
+            try {
+                const sessionDirUri = persist.getSessionDir();
+                if (this.config.globalStorageUri && sessionDirUri) {
+                    this.skillSystem = new SkillSystem({
+                        globalStorageUri: this.config.globalStorageUri,
+                        sessionId: session.sessionId,
+                        sessionDirUri,
+                    });
+                    await this.skillSystem.initialize();
+                    await debugLog.logEvent(
+                        'other',
+                        `Skill system initialized: ${this.skillSystem.getAllSkills().length} skills available`,
+                    );
+                }
+            } catch (skillErr) {
+                // Non-critical — proceed without skill system
+                await debugLog.logEvent(
+                    'other',
+                    `Skill system initialization failed: ${extractErrorMessage(skillErr)}`,
                 );
             }
 
@@ -1036,6 +1068,15 @@ export class Orchestrator {
                     `frozen=${delegationStats.frozen}, ` +
                     `runawaySignals=${delegationStats.runawaySignals}`,
             );
+
+            // Finalize skill system (promotion UI, stale warnings)
+            if (this.skillSystem) {
+                try {
+                    await this.skillSystem.finalize();
+                } catch {
+                    // Non-critical
+                }
+            }
 
             await debugLog.finalize('completed');
         } catch (err) {
@@ -1752,11 +1793,12 @@ export class Orchestrator {
                 debugLog,
                 toolToken,
                 ledger,
-                undefined, // skills
+                undefined, // old skills (deprecated — using skillDocs instead)
                 undefined, // messageBus
                 undefined, // hookRunner
                 this.rateLimitGuard,
                 this.delegationGuard,
+                this.skillSystem ? [...this.skillSystem.getAllSkills()] : undefined, // skillDocs
             );
 
             if (!result.success) {
@@ -2309,6 +2351,28 @@ export class Orchestrator {
 
     private generateSessionId(): string {
         return `johann-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    }
+
+    /**
+     * Build a compact skill summary for the task decomposer.
+     * Uses shipped skills (always available) plus any already-loaded SkillSystem skills.
+     * Format: slug — description [keywords]
+     */
+    private buildSkillSummaryForPlanner(): string {
+        const skills = this.skillSystem
+            ? [...this.skillSystem.getAllSkills()]
+            : [...SHIPPED_SKILLS];
+
+        if (skills.length === 0) {
+            return '';
+        }
+
+        const lines: string[] = [];
+        for (const skill of skills) {
+            const kw = skill.applies_to.keywords.slice(0, 5).join(', ');
+            lines.push(`- **${skill.metadata.slug}**: ${skill.metadata.description} [${kw}]`);
+        }
+        return lines.join('\n');
     }
 
     /**

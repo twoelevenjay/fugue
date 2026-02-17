@@ -6,6 +6,7 @@ import { getConfig } from './config';
 import { ExecutionLedger } from './executionLedger';
 import { extractSummary, distillContext, SUMMARY_BLOCK_INSTRUCTION } from './contextDistiller';
 import { Skill, loadSkillContent } from './skills';
+import { SkillDoc } from './skillTypes';
 import { MessageBus, parseHiveSignals, HIVE_SIGNAL_INSTRUCTION } from './messageBus';
 import { HookRunner } from './hooks';
 import { RateLimitGuard } from './rateLimitGuard';
@@ -577,6 +578,7 @@ export class SubagentManager {
         hookRunner?: HookRunner,
         rateLimitGuard?: RateLimitGuard,
         delegationGuard?: DelegationGuard,
+        skillDocs?: SkillDoc[],
     ): Promise<SubtaskResult> {
         const startTime = Date.now();
 
@@ -603,6 +605,7 @@ export class SubagentManager {
                 dependencyResults,
                 dynamicContext,
                 skills,
+                skillDocs,
             );
 
             // Discover available tools
@@ -1309,6 +1312,7 @@ ${outputForReview}
         dependencyResults: Map<string, SubtaskResult>,
         workspaceContext: string,
         skills?: Skill[],
+        skillDocs?: SkillDoc[],
     ): string {
         const parts: string[] = [];
 
@@ -1318,8 +1322,26 @@ ${outputForReview}
         const delegationPolicy = getDelegationPolicy();
         parts.push(buildDelegationConstraintBlock(delegationPolicy));
 
-        // Inject skill-specific instructions if a skill applies to this task
-        if (subtask.skillHint && skills) {
+        // Inject skill-specific instructions from the new SkillDoc system (with dependency resolution)
+        if (subtask.skillHint && skillDocs && skillDocs.length > 0) {
+            const resolved = this.resolveSkillWithDependencies(subtask.skillHint, skillDocs);
+            if (resolved.length > 0) {
+                parts.push('=== SKILL INSTRUCTIONS ===');
+                for (const doc of resolved) {
+                    parts.push(`--- ${doc.metadata.slug} v${doc.metadata.version} ---`);
+                    parts.push(doc.instruction.body);
+                    if (doc.instruction.steps && doc.instruction.steps.length > 0) {
+                        parts.push('\nSteps:');
+                        for (const step of doc.instruction.steps) {
+                            parts.push(`- ${step}`);
+                        }
+                    }
+                    parts.push('');
+                }
+            }
+        }
+        // Fallback: inject skill from old Skill system if no SkillDoc match
+        else if (subtask.skillHint && skills) {
             const skillContent = loadSkillContent(skills, subtask.skillHint);
             if (skillContent) {
                 parts.push(`=== SKILL: ${subtask.skillHint} ===`);
@@ -1494,5 +1516,37 @@ ${outputForReview}
         } catch {
             return undefined;
         }
+    }
+
+    /**
+     * Resolve a skill and all its transitive dependencies from the SkillDoc array.
+     * Returns the skill bundle in dependency-first order (dependencies before the skill itself).
+     * Cycle-safe via visited set.
+     */
+    private resolveSkillWithDependencies(slug: string, allSkills: SkillDoc[]): SkillDoc[] {
+        const bySlug = new Map<string, SkillDoc>();
+        for (const s of allSkills) {
+            bySlug.set(s.metadata.slug, s);
+        }
+
+        const result: SkillDoc[] = [];
+        const visited = new Set<string>();
+
+        const resolve = (current: string): void => {
+            if (visited.has(current)) { return; }
+            visited.add(current);
+            const doc = bySlug.get(current);
+            if (!doc) { return; }
+            // Resolve dependencies first
+            if (doc.applies_to.dependencies) {
+                for (const dep of doc.applies_to.dependencies) {
+                    resolve(dep);
+                }
+            }
+            result.push(doc);
+        };
+
+        resolve(slug);
+        return result;
     }
 }

@@ -128,7 +128,8 @@ Return a JSON object with this EXACT structure:
       "complexity": "trivial" | "simple" | "moderate" | "complex" | "expert",
       "useMultiPass": false,
       "dependsOn": [],
-      "successCriteria": ["Criterion 1", "..."]
+      "successCriteria": ["Criterion 1", "..."],
+      "skillHint": "optional — slug of a skill that applies to this subtask (e.g., 'fw.react', 'platform.wordpress', 'lang.python')"
     }
   ]
 }
@@ -150,8 +151,9 @@ export class TaskDecomposer {
         stream?: vscode.ChatResponseStream,
         debugLog?: DebugConversationLog,
         persist?: SessionPersistence,
+        availableSkillsSummary?: string,
     ): Promise<OrchestrationPlan> {
-        const userPrompt = this.buildDecompositionPrompt(request, workspaceContext, memoryContext);
+        const userPrompt = this.buildDecompositionPrompt(request, workspaceContext, memoryContext, availableSkillsSummary);
 
         const fullPrompt = DECOMPOSITION_SYSTEM_PROMPT + '\n\n---\n\n' + userPrompt;
         const messages = [vscode.LanguageModelChatMessage.User(fullPrompt)];
@@ -206,6 +208,7 @@ export class TaskDecomposer {
         request: string,
         workspaceContext: string,
         memoryContext: string,
+        availableSkillsSummary?: string,
     ): string {
         const parts: string[] = [];
 
@@ -218,6 +221,15 @@ export class TaskDecomposer {
         if (memoryContext) {
             parts.push('=== PREVIOUS SESSION MEMORY ===');
             parts.push(memoryContext);
+            parts.push('');
+        }
+
+        if (availableSkillsSummary) {
+            parts.push('=== AVAILABLE SKILLS ===');
+            parts.push('When a subtask matches one of these skills, set "skillHint" to the skill slug.');
+            parts.push('The skill\'s instructions will be automatically injected into the subagent.');
+            parts.push('');
+            parts.push(availableSkillsSummary);
             parts.push('');
         }
 
@@ -276,6 +288,7 @@ export class TaskDecomposer {
                 attempts: 0,
                 maxAttempts: 5,
                 useMultiPass: raw.useMultiPass === true,
+                skillHint: typeof raw.skillHint === 'string' ? raw.skillHint : undefined,
             });
         }
 

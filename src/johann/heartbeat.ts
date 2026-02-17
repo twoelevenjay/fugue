@@ -1,6 +1,7 @@
 import { getConfig } from './config';
-import { readBootstrapFile, getJohannWorkspaceUri } from './bootstrap';
+import { readBootstrapFile, getJohannWorkspaceUri, writeBootstrapFile } from './bootstrap';
 import { logEvent } from './dailyNotes';
+import { listDailyNotes, readDailyNotes } from './dailyNotes';
 import { JohannLogger } from './logger';
 
 // ============================================================================
@@ -28,6 +29,16 @@ export interface HeartbeatCheck {
     done: boolean;
     /** Whether it's a recurring check or one-time */
     recurring: boolean;
+}
+
+/**
+ * A distilled entry extracted from daily notes for MEMORY.md.
+ */
+interface DistilledEntry {
+    category: 'learning' | 'decision' | 'error';
+    title: string;
+    body: string;
+    date: string;
 }
 
 /**
@@ -126,14 +137,18 @@ export class HeartbeatManager {
             const checks = await this.loadChecks();
             this.logger.debug(`Loaded ${checks.length} heartbeat checks.`);
 
-            // 2. Execute lightweight checks (file-based, no LLM)
+            // 2. Execute checks
             for (const check of checks) {
                 if (check.done) {
                     continue;
                 }
 
-                // Log that we saw the check
-                this.logger.debug(`Heartbeat check: ${check.description}`);
+                // Distill daily notes into MEMORY.md
+                if (check.description.toLowerCase().includes('distill')) {
+                    await this.distillDailyNotes();
+                } else {
+                    this.logger.debug(`Heartbeat check (no handler): ${check.description}`);
+                }
             }
 
             // 3. Log the heartbeat event
@@ -192,6 +207,169 @@ export class HeartbeatManager {
         }
 
         return checks;
+    }
+
+    /**
+     * Distill recent daily notes into MEMORY.md.
+     *
+     * - Reads daily notes from the last 3 days
+     * - Extracts high-value entries (learnings, decisions, errors)
+     * - Appends them to the appropriate sections in MEMORY.md
+     * - Skips entries already present (dedup by title)
+     * - Lightweight: no LLM calls, pure pattern matching
+     */
+    private async distillDailyNotes(): Promise<void> {
+        const base = getJohannWorkspaceUri();
+        if (!base) {
+            return;
+        }
+
+        // Read recent daily note files
+        const dates = await listDailyNotes();
+        if (dates.length === 0) {
+            this.logger.debug('No daily notes to distill.');
+            return;
+        }
+
+        // Gather high-value entries from the last 3 days
+        const extracted: DistilledEntry[] = [];
+        for (const date of dates.slice(0, 3)) {
+            const content = await readDailyNotes(date);
+            if (!content) {
+                continue;
+            }
+            extracted.push(...this.extractHighValueEntries(content, date));
+        }
+
+        if (extracted.length === 0) {
+            this.logger.debug('No high-value entries to distill.');
+            return;
+        }
+
+        // Read current MEMORY.md
+        const currentMemory = await readBootstrapFile(base, 'MEMORY.md');
+        if (!currentMemory) {
+            return;
+        }
+
+        // Dedup: skip entries whose title already appears in MEMORY.md
+        const newEntries = extracted.filter(
+            (e) => !currentMemory.includes(e.title),
+        );
+        if (newEntries.length === 0) {
+            this.logger.debug('All high-value entries already distilled.');
+            return;
+        }
+
+        // Append entries to the appropriate sections
+        const updatedMemory = this.appendToMemorySections(currentMemory, newEntries);
+        await writeBootstrapFile(base, 'MEMORY.md', updatedMemory);
+
+        this.logger.info(`Distilled ${newEntries.length} entries into MEMORY.md.`);
+        await logEvent(
+            'Memory Distillation',
+            `Distilled ${newEntries.length} entries from daily notes into MEMORY.md.`,
+        );
+    }
+
+    /**
+     * Extract high-value entries from a daily note's content.
+     * Targets [learning], [decision], and [error] tagged entries.
+     */
+    private extractHighValueEntries(content: string, date: string): DistilledEntry[] {
+        const entries: DistilledEntry[] = [];
+        // Match ### TIME — [category] Title sections
+        const entryPattern = /^### .+? — \[(learning|decision|error)\] (.+)$/gm;
+        let match;
+
+        while ((match = entryPattern.exec(content)) !== null) {
+            const category = match[1] as 'learning' | 'decision' | 'error';
+            const title = match[2].trim();
+
+            // Extract body until next ### or end of string
+            const startIdx = match.index + match[0].length;
+            const nextHeader = content.indexOf('\n### ', startIdx);
+            const body = content
+                .substring(startIdx, nextHeader === -1 ? undefined : nextHeader)
+                .trim();
+
+            // Compact the body to a single bullet-friendly line
+            const compact = body
+                .split('\n')
+                .map((l) => l.trim())
+                .filter((l) => l.length > 0)
+                .join(' ')
+                .substring(0, 200);
+
+            entries.push({ category, title, body: compact, date });
+        }
+
+        return entries;
+    }
+
+    /**
+     * Append distilled entries to the correct sections in MEMORY.md.
+     */
+    private appendToMemorySections(memory: string, entries: DistilledEntry[]): string {
+        // Map categories to section headers in MEMORY.md
+        const sectionMap: Record<string, string> = {
+            learning: '## Patterns & Learnings',
+            decision: '## Decisions & Rationale',
+            error: '## Patterns & Learnings', // errors are learnings
+        };
+
+        // Group entries by target section
+        const grouped = new Map<string, DistilledEntry[]>();
+        for (const entry of entries) {
+            const section = sectionMap[entry.category];
+            if (!grouped.has(section)) {
+                grouped.set(section, []);
+            }
+            grouped.get(section)!.push(entry);
+        }
+
+        let result = memory;
+        for (const [sectionHeader, sectionEntries] of grouped) {
+            const idx = result.indexOf(sectionHeader);
+            if (idx === -1) {
+                continue;
+            }
+
+            // Find the end of the section header line
+            const headerEnd = result.indexOf('\n', idx);
+            if (headerEnd === -1) {
+                continue;
+            }
+
+            // Build the new bullet points
+            const bullets = sectionEntries
+                .map((e) => `- **[${e.date}]** ${e.title}: ${e.body}`)
+                .join('\n');
+
+            // Remove the placeholder if present
+            const placeholder = '- (nothing recorded yet)';
+            const placeholderIdx = result.indexOf(placeholder, headerEnd);
+            // Only remove if it's within this section (before next ## or end)
+            const nextSection = result.indexOf('\n## ', headerEnd + 1);
+            if (
+                placeholderIdx !== -1 &&
+                (nextSection === -1 || placeholderIdx < nextSection)
+            ) {
+                result =
+                    result.substring(0, placeholderIdx) +
+                    bullets +
+                    result.substring(placeholderIdx + placeholder.length);
+            } else {
+                // Append after the header line
+                result =
+                    result.substring(0, headerEnd + 1) +
+                    bullets +
+                    '\n' +
+                    result.substring(headerEnd + 1);
+            }
+        }
+
+        return result;
     }
 
     /**

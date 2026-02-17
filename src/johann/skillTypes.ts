@@ -105,6 +105,8 @@ export interface SkillAppliesTo {
     repo_patterns?: string[];
     /** Keywords for inference-based routing */
     keywords: string[];
+    /** Skill slugs this skill depends on (loaded together as a bundle) */
+    dependencies?: string[];
 }
 
 export interface SkillInstruction {
