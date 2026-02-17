@@ -7,7 +7,7 @@ import {
     EscalationRecord,
 } from './types';
 import { createLogger } from './logger';
-import { atomicWrite, safeAppend, withFileLock } from './safeIO';
+import { atomicWrite, safeAppend } from './safeIO';
 
 const logger = createLogger();
 
@@ -128,7 +128,9 @@ export class SessionPersistence {
     async initialize(): Promise<boolean> {
         const baseDir = this.getBaseDir();
         if (!baseDir) {
-            logger.warn('SessionPersistence: No workspace folder found — cannot initialize disk persistence.');
+            logger.warn(
+                'SessionPersistence: No workspace folder found — cannot initialize disk persistence.',
+            );
             return false;
         }
 
@@ -173,9 +175,7 @@ export class SessionPersistence {
             lastUpdated: new Date().toISOString(),
             planSummary: session.plan?.summary,
             subtaskCount: session.plan?.subtasks.length,
-            completedCount: session.plan?.subtasks.filter(
-                st => st.status === 'completed'
-            ).length,
+            completedCount: session.plan?.subtasks.filter((st) => st.status === 'completed').length,
         };
 
         await this.writeJson('session.json', persisted);
@@ -188,7 +188,9 @@ export class SessionPersistence {
      */
     async writePlan(plan: OrchestrationPlan): Promise<void> {
         if (!this.initialized) {
-            logger.warn('SessionPersistence.writePlan: skipped — not initialized. Plan is ONLY in memory!');
+            logger.warn(
+                'SessionPersistence.writePlan: skipped — not initialized. Plan is ONLY in memory!',
+            );
             return;
         }
 
@@ -215,7 +217,9 @@ export class SessionPersistence {
      * Uses safeAppend for crash-safety and mutex protection.
      */
     async appendPlanStream(chunk: string): Promise<void> {
-        if (!this.initialized) return;
+        if (!this.initialized) {
+            return;
+        }
         try {
             const uri = vscode.Uri.joinPath(this.sessionDir, 'plan-stream.txt');
             await safeAppend(uri, chunk, undefined, false /* no dedup for streaming chunks */);
@@ -234,11 +238,11 @@ export class SessionPersistence {
      * Uses safeAppend for crash-safety and mutex protection.
      */
     async appendExecutionLog(event: string, detail?: string): Promise<void> {
-        if (!this.initialized) return;
+        if (!this.initialized) {
+            return;
+        }
         const ts = new Date().toISOString();
-        const line = detail
-            ? `[${ts}] ${event}: ${detail}\n`
-            : `[${ts}] ${event}\n`;
+        const line = detail ? `[${ts}] ${event}: ${detail}\n` : `[${ts}] ${event}\n`;
         try {
             const uri = vscode.Uri.joinPath(this.sessionDir, 'execution.log');
             await safeAppend(uri, line, undefined, false /* no dedup for timestamped log lines */);
@@ -252,7 +256,9 @@ export class SessionPersistence {
      * Provides a quick at-a-glance view of session progress.
      */
     async writeStatusMarkdown(plan: OrchestrationPlan, activeSubtaskId?: string): Promise<void> {
-        if (!this.initialized) return;
+        if (!this.initialized) {
+            return;
+        }
 
         const lines: string[] = [];
         lines.push(`# Session: ${this.sessionId}`);
@@ -265,19 +271,30 @@ export class SessionPersistence {
         lines.push(``);
 
         for (const st of plan.subtasks) {
-            const icon = st.status === 'completed' ? '✅'
-                : st.status === 'in-progress' ? '🔄'
-                : st.status === 'failed' ? '❌'
-                : st.status === 'escalated' ? '⬆️'
-                : st.status === 'reviewing' ? '🔍'
-                : '⏳';
+            const icon =
+                st.status === 'completed'
+                    ? '✅'
+                    : st.status === 'in-progress'
+                      ? '🔄'
+                      : st.status === 'failed'
+                        ? '❌'
+                        : st.status === 'escalated'
+                          ? '⬆️'
+                          : st.status === 'reviewing'
+                            ? '🔍'
+                            : '⏳';
             const active = st.id === activeSubtaskId ? ' **← ACTIVE**' : '';
             const model = st.assignedModel ? ` (${st.assignedModel})` : '';
             const attempts = st.attempts > 0 ? ` [attempt ${st.attempts}/${st.maxAttempts}]` : '';
-            lines.push(`${icon} **${st.id}: ${st.title}** — ${st.status}${model}${attempts}${active}`);
+            lines.push(
+                `${icon} **${st.id}: ${st.title}** — ${st.status}${model}${attempts}${active}`,
+            );
 
             if (st.result) {
-                const dur = st.result.durationMs > 0 ? ` (${(st.result.durationMs / 1000).toFixed(1)}s)` : '';
+                const dur =
+                    st.result.durationMs > 0
+                        ? ` (${(st.result.durationMs / 1000).toFixed(1)}s)`
+                        : '';
                 lines.push(`   - Result: ${st.result.success ? 'SUCCESS' : 'FAILED'}${dur}`);
                 if (st.result.reviewNotes) {
                     lines.push(`   - Review: ${st.result.reviewNotes.substring(0, 200)}`);
@@ -285,7 +302,7 @@ export class SessionPersistence {
             }
         }
 
-        const completed = plan.subtasks.filter(st => st.status === 'completed').length;
+        const completed = plan.subtasks.filter((st) => st.status === 'completed').length;
         const total = plan.subtasks.length;
         lines.push(``);
         lines.push(`---`);
@@ -299,7 +316,9 @@ export class SessionPersistence {
      * Called on every status change: pending → in-progress → reviewing → completed/failed.
      */
     async writeSubtaskUpdate(subtask: Subtask): Promise<void> {
-        if (!this.initialized) return;
+        if (!this.initialized) {
+            return;
+        }
         await this.writeSubtaskFile(subtask);
     }
 
@@ -307,8 +326,14 @@ export class SessionPersistence {
      * Write the subtask result to its file.
      * Called as soon as the subagent returns a result (before review).
      */
-    async writeSubtaskResult(subtaskId: string, result: SubtaskResult, subtask: Subtask): Promise<void> {
-        if (!this.initialized) return;
+    async writeSubtaskResult(
+        subtaskId: string,
+        result: SubtaskResult,
+        subtask: Subtask,
+    ): Promise<void> {
+        if (!this.initialized) {
+            return;
+        }
 
         subtask.result = result;
         await this.writeSubtaskFile(subtask);
@@ -318,7 +343,9 @@ export class SessionPersistence {
      * Write escalation records to disk.
      */
     async writeEscalations(escalations: EscalationRecord[]): Promise<void> {
-        if (!this.initialized) return;
+        if (!this.initialized) {
+            return;
+        }
         await this.writeJson('escalations.json', escalations);
     }
 
@@ -327,7 +354,9 @@ export class SessionPersistence {
      * Preserved so a resumed session has the same context.
      */
     async writeContext(context: string): Promise<void> {
-        if (!this.initialized) return;
+        if (!this.initialized) {
+            return;
+        }
         await this.writeText('context.txt', context);
     }
 
@@ -361,12 +390,16 @@ export class SessionPersistence {
     async readForResume(): Promise<ResumableSession | null> {
         if (!this.initialized) {
             const ok = await this.initialize();
-            if (!ok) return null;
+            if (!ok) {
+                return null;
+            }
         }
 
         // Read session metadata
         const sessionData = await this.readJson<PersistedSession>('session.json');
-        if (!sessionData) return null;
+        if (!sessionData) {
+            return null;
+        }
 
         // Read plan
         const plan = await this.readJson<OrchestrationPlan>('plan.json');
@@ -379,7 +412,7 @@ export class SessionPersistence {
         if (plan) {
             for (const subtask of plan.subtasks) {
                 const persisted = await this.readJson<PersistedSubtask>(
-                    `subtasks/${subtask.id}.json`
+                    `subtasks/${subtask.id}.json`,
                 );
                 if (persisted) {
                     // Restore status from disk
@@ -406,10 +439,10 @@ export class SessionPersistence {
         }
 
         // Read escalations
-        const escalations = await this.readJson<EscalationRecord[]>('escalations.json') || [];
+        const escalations = (await this.readJson<EscalationRecord[]>('escalations.json')) || [];
 
         // Read context
-        const context = await this.readText('context.txt') || '';
+        const context = (await this.readText('context.txt')) || '';
 
         return {
             sessionId: sessionData.sessionId,
@@ -448,25 +481,29 @@ export class SessionPersistence {
      */
     static async findResumable(): Promise<ResumableSession[]> {
         const baseDir = SessionPersistence.prototype.getBaseDir.call({});
-        if (!baseDir) return [];
+        if (!baseDir) {
+            return [];
+        }
 
         const resumable: ResumableSession[] = [];
 
         try {
             const entries = await vscode.workspace.fs.readDirectory(baseDir);
-            const sessionDirs = entries.filter(
-                ([, type]) => type === vscode.FileType.Directory
-            );
+            const sessionDirs = entries.filter(([, type]) => type === vscode.FileType.Directory);
 
             for (const [dirName] of sessionDirs) {
                 // Skip non-session directories (subtasks, debug, memory, etc.)
-                if (!dirName.startsWith('johann-')) continue;
+                if (!dirName.startsWith('johann-')) {
+                    continue;
+                }
 
                 const persist = new SessionPersistence(dirName);
                 await persist.initialize();
 
                 const session = await persist.readForResume();
-                if (!session) continue;
+                if (!session) {
+                    continue;
+                }
 
                 // Only include sessions that have a plan and aren't completed
                 if (
@@ -484,7 +521,7 @@ export class SessionPersistence {
 
         // Sort by most recently updated
         resumable.sort(
-            (a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime()
+            (a, b) => new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime(),
         );
 
         return resumable;
@@ -504,7 +541,9 @@ export class SessionPersistence {
 
     private getBaseDir(): vscode.Uri | undefined {
         const folders = vscode.workspace.workspaceFolders;
-        if (!folders || folders.length === 0) return undefined;
+        if (!folders || folders.length === 0) {
+            return undefined;
+        }
         return vscode.Uri.joinPath(folders[0].uri, '.vscode', 'johann', 'sessions');
     }
 
@@ -578,10 +617,7 @@ export class SessionPersistence {
             // Ensure parent directory exists for nested paths
             const parts = filename.split('/');
             if (parts.length > 1) {
-                const parentDir = vscode.Uri.joinPath(
-                    this.sessionDir,
-                    ...parts.slice(0, -1)
-                );
+                const parentDir = vscode.Uri.joinPath(this.sessionDir, ...parts.slice(0, -1));
                 await vscode.workspace.fs.createDirectory(parentDir);
             }
 

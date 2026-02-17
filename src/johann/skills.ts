@@ -51,7 +51,9 @@ export interface SkillListing {
  */
 export async function discoverSkills(): Promise<Skill[]> {
     const base = getJohannWorkspaceUri();
-    if (!base) return [];
+    if (!base) {
+        return [];
+    }
 
     const skillsDir = vscode.Uri.joinPath(base, 'skills');
 
@@ -60,7 +62,9 @@ export async function discoverSkills(): Promise<Skill[]> {
         const skills: Skill[] = [];
 
         for (const [name, type] of entries) {
-            if (type !== vscode.FileType.Directory) continue;
+            if (type !== vscode.FileType.Directory) {
+                continue;
+            }
 
             const skillDir = vscode.Uri.joinPath(skillsDir, name);
             const skill = await loadSkill(name, skillDir);
@@ -90,10 +94,11 @@ async function loadSkill(name: string, dirUri: vscode.Uri): Promise<Skill | unde
         // Find supporting files
         const entries = await vscode.workspace.fs.readDirectory(dirUri);
         const supportingFiles = entries
-            .filter(([fname, ftype]) =>
-                ftype === vscode.FileType.File &&
-                fname !== 'SKILL.md' &&
-                (fname.endsWith('.md') || fname.endsWith('.txt'))
+            .filter(
+                ([fname, ftype]) =>
+                    ftype === vscode.FileType.File &&
+                    fname !== 'SKILL.md' &&
+                    (fname.endsWith('.md') || fname.endsWith('.txt')),
             )
             .map(([fname]) => fname);
 
@@ -132,7 +137,10 @@ async function loadSkill(name: string, dirUri: vscode.Uri): Promise<Skill | unde
  * Instructions here...
  * ```
  */
-function parseSkillMd(content: string, fallbackName: string): { description: string; instructions: string; keywords: string[] } {
+function parseSkillMd(
+    content: string,
+    fallbackName: string,
+): { description: string; instructions: string; keywords: string[] } {
     // Try YAML front matter first
     const frontMatterMatch = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n([\s\S]*)$/);
     if (frontMatterMatch) {
@@ -192,20 +200,28 @@ function parseSkillMd(content: string, fallbackName: string): { description: str
  */
 function parseYamlKeywords(frontMatter: string): string[] {
     // Inline format: keywords: word1, word2
-    const inlineMatch = frontMatter.match(/^keywords:\s*(.+)$/mi);
+    const inlineMatch = frontMatter.match(/^keywords:\s*(.+)$/im);
     if (inlineMatch) {
         const value = inlineMatch[1].trim();
         // Handle [bracketed] format
         const cleaned = value.replace(/^\[|\]$/g, '');
-        return cleaned.split(',').map(k => k.trim().toLowerCase()).filter(Boolean);
+        return cleaned
+            .split(',')
+            .map((k) => k.trim().toLowerCase())
+            .filter(Boolean);
     }
 
     // List format: keywords:\n  - word1\n  - word2
-    const listMatch = frontMatter.match(/^keywords:\s*\n((?:\s+-\s+.+\n?)+)/mi);
+    const listMatch = frontMatter.match(/^keywords:\s*\n((?:\s+-\s+.+\n?)+)/im);
     if (listMatch) {
         return listMatch[1]
             .split('\n')
-            .map(line => line.replace(/^\s+-\s+/, '').trim().toLowerCase())
+            .map((line) =>
+                line
+                    .replace(/^\s+-\s+/, '')
+                    .trim()
+                    .toLowerCase(),
+            )
             .filter(Boolean);
     }
 
@@ -230,14 +246,14 @@ export async function readSkillFile(skill: Skill, filename: string): Promise<str
  * Returns an array of "name: description" strings.
  */
 export function formatSkillsForPrompt(skills: Skill[]): string[] {
-    return skills.map(s => `**${s.name}**: ${s.description}`);
+    return skills.map((s) => `**${s.name}**: ${s.description}`);
 }
 
 /**
  * Get the full instructions for a specific skill.
  */
 export function getSkillInstructions(skills: Skill[], name: string): string | undefined {
-    const skill = skills.find(s => s.name === name);
+    const skill = skills.find((s) => s.name === name);
     return skill?.instructions;
 }
 
@@ -246,7 +262,9 @@ export function getSkillInstructions(skills: Skill[], name: string): string | un
  */
 export async function createSkill(name: string, description: string): Promise<Skill | undefined> {
     const base = getJohannWorkspaceUri();
-    if (!base) return undefined;
+    if (!base) {
+        return undefined;
+    }
 
     const skillDir = vscode.Uri.joinPath(base, 'skills', name);
     try {
@@ -286,7 +304,7 @@ When this skill is triggered:
  * exist. Full content is loaded on demand via `loadSkillContent()`.
  */
 export function getSkillListing(skills: Skill[]): SkillListing[] {
-    return skills.map(s => ({
+    return skills.map((s) => ({
         name: s.name,
         description: s.description,
         keywords: s.keywords,
@@ -316,7 +334,7 @@ export function formatSkillListingXml(skills: Skill[]): string {
  * Returns the full instruction body, or undefined if not found.
  */
 export function loadSkillContent(skills: Skill[], name: string): string | undefined {
-    const skill = skills.find(s => s.name === name);
+    const skill = skills.find((s) => s.name === name);
     return skill?.instructions;
 }
 
@@ -343,7 +361,7 @@ export function inferSkillFromDescription(
     }
 
     const descLower = description.toLowerCase();
-    const descTokens = new Set(descLower.split(/\W+/).filter(t => t.length > 2));
+    const descTokens = new Set(descLower.split(/\W+/).filter((t) => t.length > 2));
 
     let bestSkill: string | undefined;
     let bestScore = 0;

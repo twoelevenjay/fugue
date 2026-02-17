@@ -1,9 +1,5 @@
 import * as vscode from 'vscode';
-import {
-    BOOTSTRAP_TEMPLATES,
-    SUBAGENT_BOOTSTRAP_FILES,
-    PRIVATE_BOOTSTRAP_FILES,
-} from './templates';
+import { BOOTSTRAP_TEMPLATES, SUBAGENT_BOOTSTRAP_FILES } from './templates';
 
 // ============================================================================
 // BOOTSTRAP LOADER — Loads and manages workspace bootstrap files
@@ -43,7 +39,9 @@ const DEFAULT_MAX_BOOTSTRAP_CHARS = 15000;
  */
 export function getJohannWorkspaceUri(): vscode.Uri | undefined {
     const folders = vscode.workspace.workspaceFolders;
-    if (!folders || folders.length === 0) return undefined;
+    if (!folders || folders.length === 0) {
+        return undefined;
+    }
     return vscode.Uri.joinPath(folders[0].uri, '.vscode', 'johann');
 }
 
@@ -109,9 +107,7 @@ async function writeFile(uri: vscode.Uri, content: string): Promise<void> {
  * deletes it, it must NOT be re-created. We detect a true first run by
  * checking whether the Johann directory itself existed before this call.
  */
-export async function initializeBootstrapWorkspace(
-    baseUri: vscode.Uri
-): Promise<boolean> {
+export async function initializeBootstrapWorkspace(baseUri: vscode.Uri): Promise<boolean> {
     // Check if the Johann directory already exists BEFORE ensuring dirs.
     // If it exists, this is NOT a first run — even if BOOTSTRAP.md is gone.
     const dirAlreadyExists = await fileExists(baseUri);
@@ -141,13 +137,10 @@ export async function initializeBootstrapWorkspace(
     // Create .gitignore for the johann directory (don't track sessions)
     const gitignoreUri = vscode.Uri.joinPath(baseUri, '.gitignore');
     if (!(await fileExists(gitignoreUri))) {
-        await writeFile(gitignoreUri, [
-            '# Johann workspace',
-            'sessions/',
-            'registry/',
-            '*.sqlite',
-            '',
-        ].join('\n'));
+        await writeFile(
+            gitignoreUri,
+            ['# Johann workspace', 'sessions/', 'registry/', '*.sqlite', ''].join('\n'),
+        );
     }
 
     return isFirstRun;
@@ -169,9 +162,7 @@ export async function completeBootstrap(baseUri: vscode.Uri): Promise<void> {
  * Load all bootstrap files from the workspace.
  * Creates missing files from templates automatically.
  */
-export async function loadBootstrapFiles(
-    baseUri: vscode.Uri
-): Promise<BootstrapContext> {
+export async function loadBootstrapFiles(baseUri: vscode.Uri): Promise<BootstrapContext> {
     // Ensure workspace exists and templates are in place
     const isFirstRun = await initializeBootstrapWorkspace(baseUri);
 
@@ -200,12 +191,14 @@ export async function loadBootstrapFiles(
  */
 export function filterBootstrapFilesForSession(
     files: BootstrapFile[],
-    mode: 'full' | 'minimal' | 'none'
+    mode: 'full' | 'minimal' | 'none',
 ): BootstrapFile[] {
-    if (mode === 'none') return [];
+    if (mode === 'none') {
+        return [];
+    }
 
     if (mode === 'minimal') {
-        return files.filter(f => SUBAGENT_BOOTSTRAP_FILES.includes(f.name));
+        return files.filter((f) => SUBAGENT_BOOTSTRAP_FILES.includes(f.name));
     }
 
     // Full mode — include everything
@@ -218,9 +211,11 @@ export function filterBootstrapFilesForSession(
  */
 export function formatBootstrapForPrompt(
     files: BootstrapFile[],
-    maxChars: number = DEFAULT_MAX_BOOTSTRAP_CHARS
+    maxChars: number = DEFAULT_MAX_BOOTSTRAP_CHARS,
 ): string {
-    if (files.length === 0) return '';
+    if (files.length === 0) {
+        return '';
+    }
 
     const sections: string[] = [];
     sections.push('# Project Context — Johann Workspace Files\n');
@@ -260,7 +255,7 @@ export function formatBootstrapForPrompt(
 export async function writeBootstrapFile(
     baseUri: vscode.Uri,
     filename: string,
-    content: string
+    content: string,
 ): Promise<void> {
     const fileUri = vscode.Uri.joinPath(baseUri, filename);
     await writeFile(fileUri, content);
@@ -269,10 +264,7 @@ export async function writeBootstrapFile(
 /**
  * Read a specific bootstrap file.
  */
-export async function readBootstrapFile(
-    baseUri: vscode.Uri,
-    filename: string
-): Promise<string> {
+export async function readBootstrapFile(baseUri: vscode.Uri, filename: string): Promise<string> {
     const fileUri = vscode.Uri.joinPath(baseUri, filename);
     return readFileContent(fileUri);
 }

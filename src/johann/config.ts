@@ -134,26 +134,50 @@ export function getConfig(): JohannConfig {
         maxBootstrapChars: cfg.get<number>('maxBootstrapChars', DEFAULTS.maxBootstrapChars),
         maxDailyNoteEntries: cfg.get<number>('maxDailyNoteEntries', DEFAULTS.maxDailyNoteEntries),
         heartbeatEnabled: cfg.get<boolean>('heartbeatEnabled', DEFAULTS.heartbeatEnabled),
-        heartbeatIntervalMinutes: cfg.get<number>('heartbeatIntervalMinutes', DEFAULTS.heartbeatIntervalMinutes),
+        heartbeatIntervalMinutes: cfg.get<number>(
+            'heartbeatIntervalMinutes',
+            DEFAULTS.heartbeatIntervalMinutes,
+        ),
         transcriptsEnabled: cfg.get<boolean>('transcriptsEnabled', DEFAULTS.transcriptsEnabled),
         maxTranscriptBytes: cfg.get<number>('maxTranscriptBytes', DEFAULTS.maxTranscriptBytes),
         logLevel: cfg.get<string>('logLevel', DEFAULTS.logLevel) as JohannConfig['logLevel'],
         onboardingEnabled: cfg.get<boolean>('onboardingEnabled', DEFAULTS.onboardingEnabled),
         autoDistill: cfg.get<boolean>('autoDistill', DEFAULTS.autoDistill),
-        promptMode: cfg.get<string>('promptMode', DEFAULTS.promptMode) as JohannConfig['promptMode'],
+        promptMode: cfg.get<string>(
+            'promptMode',
+            DEFAULTS.promptMode,
+        ) as JohannConfig['promptMode'],
         largeInputChunkSize: cfg.get<number>('largeInputChunkSize', DEFAULTS.largeInputChunkSize),
         maxInputSize: cfg.get<number>('maxInputSize', DEFAULTS.maxInputSize),
-        debugConversationLog: cfg.get<boolean>('debugConversationLog', DEFAULTS.debugConversationLog),
+        debugConversationLog: cfg.get<boolean>(
+            'debugConversationLog',
+            DEFAULTS.debugConversationLog,
+        ),
         modelPickerEnabled: cfg.get<boolean>('modelPickerEnabled', DEFAULTS.modelPickerEnabled),
         fixedModel: cfg.get<string>('fixedModel', DEFAULTS.fixedModel),
         blockedModels: cfg.get<string[]>('blockedModels', DEFAULTS.blockedModels),
-        backgroundModeEnabled: cfg.get<boolean>('backgroundModeEnabled', DEFAULTS.backgroundModeEnabled),
+        backgroundModeEnabled: cfg.get<boolean>(
+            'backgroundModeEnabled',
+            DEFAULTS.backgroundModeEnabled,
+        ),
         allowOpusEscalation: cfg.get<boolean>('allowOpusEscalation', DEFAULTS.allowOpusEscalation),
-        toolInvocationTimeoutMs: cfg.get<number>('toolInvocationTimeoutMs', DEFAULTS.toolInvocationTimeoutMs),
-        autoBackgroundLongRunningCommands: cfg.get<boolean>('autoBackgroundLongRunningCommands', DEFAULTS.autoBackgroundLongRunningCommands),
+        toolInvocationTimeoutMs: cfg.get<number>(
+            'toolInvocationTimeoutMs',
+            DEFAULTS.toolInvocationTimeoutMs,
+        ),
+        autoBackgroundLongRunningCommands: cfg.get<boolean>(
+            'autoBackgroundLongRunningCommands',
+            DEFAULTS.autoBackgroundLongRunningCommands,
+        ),
         yoloMaxRequests: cfg.get<number>('yoloMaxRequests', DEFAULTS.yoloMaxRequests),
-        skillAutonomousCreation: cfg.get<boolean>('skillAutonomousCreation', DEFAULTS.skillAutonomousCreation),
-        skillPromotionEnabled: cfg.get<boolean>('skillPromotionEnabled', DEFAULTS.skillPromotionEnabled),
+        skillAutonomousCreation: cfg.get<boolean>(
+            'skillAutonomousCreation',
+            DEFAULTS.skillAutonomousCreation,
+        ),
+        skillPromotionEnabled: cfg.get<boolean>(
+            'skillPromotionEnabled',
+            DEFAULTS.skillPromotionEnabled,
+        ),
         skillMaxLocal: cfg.get<number>('skillMaxLocal', DEFAULTS.skillMaxLocal),
         skillMaxNewPerRun: cfg.get<number>('skillMaxNewPerRun', DEFAULTS.skillMaxNewPerRun),
     };
@@ -165,7 +189,7 @@ export function getConfig(): JohannConfig {
 export async function setConfig<K extends keyof JohannConfig>(
     key: K,
     value: JohannConfig[K],
-    target: vscode.ConfigurationTarget = vscode.ConfigurationTarget.Workspace
+    target: vscode.ConfigurationTarget = vscode.ConfigurationTarget.Workspace,
 ): Promise<void> {
     const cfg = vscode.workspace.getConfiguration(SECTION);
     await cfg.update(key, value, target);
@@ -181,10 +205,8 @@ export function getDefaults(): JohannConfig {
 /**
  * Listen for configuration changes.
  */
-export function onConfigChange(
-    callback: (config: JohannConfig) => void
-): vscode.Disposable {
-    return vscode.workspace.onDidChangeConfiguration(e => {
+export function onConfigChange(callback: (config: JohannConfig) => void): vscode.Disposable {
+    return vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration(SECTION)) {
             callback(getConfig());
         }
@@ -253,7 +275,7 @@ export function getCopilotAgentSettings(): CopilotAgentSettings {
 export async function setCopilotAgentSettings(
     autoApprove: boolean,
     maxRequests: number,
-    target: vscode.ConfigurationTarget = vscode.ConfigurationTarget.Workspace
+    target: vscode.ConfigurationTarget = vscode.ConfigurationTarget.Workspace,
 ): Promise<void> {
     const copilotCfg = vscode.workspace.getConfiguration('github.copilot.chat.agent');
     await copilotCfg.update('autoApprove', autoApprove, target);
@@ -270,10 +292,13 @@ export function formatCopilotSettings(): string {
         return '⚠️ Could not read Copilot agent settings. Is GitHub Copilot installed?';
     }
 
-    const approveStatus = settings.autoApprove ? '🟢 Enabled' : '🔴 Disabled (confirmations active)';
-    const requestLimit = settings.maxRequests > 0
-        ? `${settings.maxRequests} requests per session`
-        : 'Not set (default)';
+    const approveStatus = settings.autoApprove
+        ? '🟢 Enabled'
+        : '🔴 Disabled (confirmations active)';
+    const requestLimit =
+        settings.maxRequests > 0
+            ? `${settings.maxRequests} requests per session`
+            : 'Not set (default)';
 
     return [
         '### GitHub Copilot Agent Settings',
@@ -318,7 +343,7 @@ export function getCopilotModelSettings(): CopilotModelSettings {
         const chatCfg = vscode.workspace.getConfiguration('chat.models');
         const visible = chatCfg.get<string[]>('visible');
         const hidden = chatCfg.get<string[]>('hidden');
-        
+
         if (visible || hidden) {
             return {
                 visibleModels: visible || [],
@@ -336,7 +361,7 @@ export function getCopilotModelSettings(): CopilotModelSettings {
         const copilotCfg = vscode.workspace.getConfiguration('github.copilot.chat.models');
         const visible = copilotCfg.get<string[]>('visible');
         const hidden = copilotCfg.get<string[]>('hidden');
-        
+
         if (visible || hidden) {
             return {
                 visibleModels: visible || [],
@@ -360,19 +385,19 @@ export function getCopilotModelSettings(): CopilotModelSettings {
 /**
  * Auto-populate Johann's model restrictions from Copilot settings if Johann settings are empty.
  * This provides a migration path for users upgrading from older setups.
- * 
+ *
  * Returns true if settings were migrated, false otherwise.
  */
 export async function migrateModelSettingsFromCopilot(): Promise<boolean> {
     const johannCfg = getConfig();
-    
+
     // Only migrate if Johann settings are empty (user hasn't configured yet)
     if (johannCfg.blockedModels.length > 0) {
         return false; // User has already configured Johann
     }
 
     const copilotSettings = getCopilotModelSettings();
-    
+
     if (!copilotSettings.found) {
         return false; // No Copilot settings to migrate
     }

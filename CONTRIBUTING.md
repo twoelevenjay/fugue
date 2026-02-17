@@ -10,23 +10,25 @@ Thanks for your interest in contributing to Fugue for GitHub Copilot!
 ## Development Setup
 
 1. **Clone the repository**
-   ```bash
-   git clone https://github.com/leonshelhamer/fugue.git
-   cd fugue
-   ```
+
+    ```bash
+    git clone https://github.com/leonshelhamer/fugue.git
+    cd fugue
+    ```
 
 2. **Install dependencies**
-   ```bash
-   npm install
-   ```
+
+    ```bash
+    npm install
+    ```
 
 3. **Run in development mode**
-   - Press `F5` in VS Code to launch the Extension Development Host
-   - Or run `npm run watch` to compile on changes
+    - Press `F5` in VS Code to launch the Extension Development Host
+    - Or run `npm run watch` to compile on changes
 
 4. **Test the extension**
-   - In the Extension Development Host, open Copilot Chat
-   - Type `@ramble` followed by a test request
+    - In the Extension Development Host, open Copilot Chat
+    - Type `@ramble` followed by a test request
 
 ## Project Structure
 
@@ -89,9 +91,9 @@ See [SECURITY.md](SECURITY.md) for the full security model. Key rules for contri
 2. **Create a branch** for your feature: `git checkout -b feature/my-feature`
 3. **Make your changes** with clear, atomic commits
 4. **Run all checks:**
-   ```bash
-   npm run lint && npm run format:check && npm run typecheck && npm test
-   ```
+    ```bash
+    npm run lint && npm run format:check && npm run typecheck && npm test
+    ```
 5. **Push** and open a Pull Request
 
 ### PR Checklist

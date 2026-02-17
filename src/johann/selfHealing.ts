@@ -32,12 +32,12 @@ import { getLogger } from './logger';
  * Known failure patterns that can be prevented with skills.
  */
 export type FailurePatternType =
-    | 'non-agentic-behavior'      // Subagent told user to do something instead of doing it
-    | 'stub-placeholder'          // Subagent used TODO/placeholder comments
-    | 'missing-implementation'    // Subagent created skeleton without real logic
-    | 'incorrect-imports'         // Subagent used wrong import paths
-    | 'missing-error-handling'    // Subagent omitted error handling
-    | 'incomplete-task';          // Subagent only partially completed task
+    | 'non-agentic-behavior' // Subagent told user to do something instead of doing it
+    | 'stub-placeholder' // Subagent used TODO/placeholder comments
+    | 'missing-implementation' // Subagent created skeleton without real logic
+    | 'incorrect-imports' // Subagent used wrong import paths
+    | 'missing-error-handling' // Subagent omitted error handling
+    | 'incomplete-task'; // Subagent only partially completed task
 
 export interface DetectedFailure {
     /** Type of failure detected */
@@ -68,7 +68,7 @@ export class SelfHealingDetector {
         subtaskId: string,
         description: string,
         reviewResult: any, // The parsed review JSON
-        output: string
+        output: string,
     ): DetectedFailure | undefined {
         const checklist = reviewResult.checklist;
         if (!checklist) {
@@ -178,7 +178,7 @@ export class SelfHealingDetector {
     async createSkillFromFailure(
         failure: DetectedFailure,
         localStore: LocalSkillStore,
-        validator: SkillValidator
+        validator: SkillValidator,
     ): Promise<SkillDoc | undefined> {
         const generator = SKILL_GENERATORS[failure.type];
         if (!generator) {
@@ -192,7 +192,7 @@ export class SelfHealingDetector {
         const validation = validator.validate(draft);
         if (!validation.valid) {
             this.logger.warn(
-                `Generated skill failed validation for ${failure.type}: ${validation.errors.join('; ')}`
+                `Generated skill failed validation for ${failure.type}: ${validation.errors.join('; ')}`,
             );
             return undefined;
         }
@@ -202,7 +202,7 @@ export class SelfHealingDetector {
         await localStore.saveSkill(draft);
 
         this.logger.info(
-            `Self-healing: created skill "${draft.metadata.slug}" to prevent ${failure.type}`
+            `Self-healing: created skill "${draft.metadata.slug}" to prevent ${failure.type}`,
         );
 
         return draft;
@@ -229,7 +229,8 @@ const SKILL_GENERATORS: Record<FailurePatternType, SkillGenerator> = {
             slug: 'enforce-agentic-execution',
             version: '1.0.0',
             title: 'Enforce Agentic Execution (No User-Directed Instructions)',
-            description: 'Prevents subagents from telling the user to do things instead of doing them autonomously',
+            description:
+                'Prevents subagents from telling the user to do things instead of doing them autonomously',
             tags: ['self-healing', 'agentic', 'execution', 'quality'],
             scope: 'local',
             origin: 'autonomous',
@@ -238,8 +239,17 @@ const SKILL_GENERATORS: Record<FailurePatternType, SkillGenerator> = {
         applies_to: {
             task_types: ['generate', 'refactor', 'test', 'debug', 'edit', 'design'],
             keywords: [
-                'run', 'start', 'install', 'configure', 'setup', 'launch',
-                'execute', 'command', 'service', 'docker', 'ddev',
+                'run',
+                'start',
+                'install',
+                'configure',
+                'setup',
+                'launch',
+                'execute',
+                'command',
+                'service',
+                'docker',
+                'ddev',
             ],
         },
         instruction: {
@@ -249,7 +259,7 @@ const SKILL_GENERATORS: Record<FailurePatternType, SkillGenerator> = {
 
 This skill was created because a subagent returned user-directed instructions instead of taking autonomous action. Evidence:
 
-${failure.evidence.map(e => `- "${e}"`).join('\n')}
+${failure.evidence.map((e) => `- "${e}"`).join('\n')}
 
 ## Your Responsibility
 
@@ -324,7 +334,8 @@ When this skill is active:
             slug: 'no-stubs-or-placeholders',
             version: '1.0.0',
             title: 'Prevent Stub/Placeholder Code',
-            description: 'Ensures all code is fully implemented without TODO comments or placeholder patterns',
+            description:
+                'Ensures all code is fully implemented without TODO comments or placeholder patterns',
             tags: ['self-healing', 'quality', 'implementation'],
             scope: 'local',
             origin: 'autonomous',
@@ -340,7 +351,7 @@ When this skill is active:
 ## The Problem This Skill Prevents
 
 Detected stub/placeholder patterns:
-${failure.evidence.map(e => `- ${e}`).join('\n')}
+${failure.evidence.map((e) => `- ${e}`).join('\n')}
 
 ## Prohibited Patterns
 
@@ -416,7 +427,7 @@ Do not return until checklist is complete.`,
     }),
 
     // Placeholders for other patterns — will be implemented when needed
-    'missing-implementation': () => ({} as SkillDoc),
-    'incorrect-imports': () => ({} as SkillDoc),
-    'missing-error-handling': () => ({} as SkillDoc),
+    'missing-implementation': () => ({}) as SkillDoc,
+    'incorrect-imports': () => ({}) as SkillDoc,
+    'missing-error-handling': () => ({}) as SkillDoc,
 };

@@ -1,7 +1,5 @@
 import * as assert from 'assert';
-import {
-    RunStateManager,
-} from '../../johann/runState';
+import { RunStateManager } from '../../johann/runState';
 
 // ============================================================================
 // RunStateManager tests
@@ -250,7 +248,9 @@ suite('RunStateManager', () => {
 
     test('onStateChange fires on startRun', async () => {
         let fired = false;
-        const sub = manager.onStateChange(() => { fired = true; });
+        const sub = manager.onStateChange(() => {
+            fired = true;
+        });
         await manager.startRun('run-evt1', 'test');
         assert.strictEqual(fired, true);
         sub.dispose();
@@ -261,7 +261,9 @@ suite('RunStateManager', () => {
         await manager.registerTasks([{ id: 'st-1', title: 'Task' }]);
 
         let fireCount = 0;
-        const sub = manager.onStateChange(() => { fireCount++; });
+        const sub = manager.onStateChange(() => {
+            fireCount++;
+        });
         await manager.updateTask('st-1', { status: 'running' });
         assert.ok(fireCount >= 1);
         sub.dispose();

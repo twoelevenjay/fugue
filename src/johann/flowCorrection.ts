@@ -1,4 +1,4 @@
-import { OrchestrationPlan, Subtask, SubtaskResult, TaskComplexity } from './types';
+import { OrchestrationPlan, SubtaskResult, TaskComplexity } from './types';
 import { getDownstreamTasks } from './graphManager';
 import { getLogger } from './logger';
 
@@ -123,7 +123,7 @@ export class FlowCorrectionManager {
         request: CorrectionRequest,
         plan: OrchestrationPlan,
         results: Map<string, SubtaskResult>,
-        completed: Set<string>
+        completed: Set<string>,
     ): CorrectionResult {
         const logger = getLogger();
 
@@ -131,12 +131,13 @@ export class FlowCorrectionManager {
         if (this.totalCorrections >= this.config.maxTotalCorrections) {
             logger.warn(
                 `[FlowCorrection] Global correction budget exhausted ` +
-                `(${this.totalCorrections}/${this.config.maxTotalCorrections}). ` +
-                `Rejecting correction for ${request.targetTaskId}.`
+                    `(${this.totalCorrections}/${this.config.maxTotalCorrections}). ` +
+                    `Rejecting correction for ${request.targetTaskId}.`,
             );
             return {
                 accepted: false,
-                reason: `Global correction budget exhausted (${this.config.maxTotalCorrections} max). ` +
+                reason:
+                    `Global correction budget exhausted (${this.config.maxTotalCorrections} max). ` +
                     `Task "${request.targetTaskId}" will not be re-run.`,
                 invalidatedTasks: [],
                 request,
@@ -148,11 +149,12 @@ export class FlowCorrectionManager {
         if (taskHistory.correctionCount >= this.config.maxCorrectionsPerTask) {
             logger.warn(
                 `[FlowCorrection] Per-task budget exhausted for "${request.targetTaskId}" ` +
-                `(${taskHistory.correctionCount}/${this.config.maxCorrectionsPerTask}).`
+                    `(${taskHistory.correctionCount}/${this.config.maxCorrectionsPerTask}).`,
             );
             return {
                 accepted: false,
-                reason: `Task "${request.targetTaskId}" has already been corrected ` +
+                reason:
+                    `Task "${request.targetTaskId}" has already been corrected ` +
                     `${taskHistory.correctionCount} time(s) (max ${this.config.maxCorrectionsPerTask}). ` +
                     `Further corrections would risk an infinite loop.`,
                 invalidatedTasks: [],
@@ -161,7 +163,7 @@ export class FlowCorrectionManager {
         }
 
         // ── Guard: target task must exist ──────────────────────────────────
-        const targetTask = plan.subtasks.find(st => st.id === request.targetTaskId);
+        const targetTask = plan.subtasks.find((st) => st.id === request.targetTaskId);
         if (!targetTask) {
             return {
                 accepted: false,
@@ -178,8 +180,8 @@ export class FlowCorrectionManager {
 
         logger.info(
             `[FlowCorrection] Accepted correction for "${request.targetTaskId}" ` +
-            `(requested by "${request.requestedBy}"). ` +
-            `Invalidating ${invalidated.length} task(s): ${invalidated.join(', ')}`
+                `(requested by "${request.requestedBy}"). ` +
+                `Invalidating ${invalidated.length} task(s): ${invalidated.join(', ')}`,
         );
 
         // ── Record correction ──────────────────────────────────────────────
@@ -196,7 +198,7 @@ export class FlowCorrectionManager {
             results.delete(taskId);
 
             // Reset task status and attempts
-            const subtask = plan.subtasks.find(st => st.id === taskId);
+            const subtask = plan.subtasks.find((st) => st.id === taskId);
             if (subtask) {
                 subtask.status = 'pending';
                 subtask.result = undefined;
@@ -208,7 +210,7 @@ export class FlowCorrectionManager {
                     subtask.complexity = this.boostComplexity(subtask.complexity);
                     logger.info(
                         `[FlowCorrection] Boosted complexity for "${taskId}" ` +
-                        `to "${subtask.complexity}" for correction re-run`
+                            `to "${subtask.complexity}" for correction re-run`,
                     );
                 }
             }
@@ -216,7 +218,8 @@ export class FlowCorrectionManager {
 
         return {
             accepted: true,
-            reason: `Correction accepted. Invalidated ${invalidated.length} task(s). ` +
+            reason:
+                `Correction accepted. Invalidated ${invalidated.length} task(s). ` +
                 `Re-running "${request.targetTaskId}" with correction context.`,
             invalidatedTasks: invalidated,
             request,
@@ -263,7 +266,7 @@ export class FlowCorrectionManager {
 
         lines.push(
             'IMPORTANT: Address ALL corrections above. Do NOT repeat the same mistakes. ' +
-            'If you are unsure, ask clarifying questions rather than guessing.'
+                'If you are unsure, ask clarifying questions rather than guessing.',
         );
         lines.push('=== END CORRECTION NOTICE ===');
         lines.push('');
@@ -282,10 +285,7 @@ export class FlowCorrectionManager {
      * This is parsed the same way HIVE_SIGNALs work — HTML comments that
      * are invisible in rendered markdown but machine-parseable.
      */
-    static parseCorrectionSignals(
-        reviewOutput: string,
-        requestedBy: string
-    ): CorrectionRequest[] {
+    static parseCorrectionSignals(reviewOutput: string, requestedBy: string): CorrectionRequest[] {
         const requests: CorrectionRequest[] = [];
         const pattern = /<!--CORRECTION:([^:]+):([^:]+):([^>]+)-->/g;
         let match: RegExpExecArray | null;
@@ -333,7 +333,9 @@ not when the current task simply failed on its own.
      */
     getDiagnostics(): string {
         const lines: string[] = ['=== Flow Correction Diagnostics ===', ''];
-        lines.push(`Total corrections: ${this.totalCorrections}/${this.config.maxTotalCorrections}`);
+        lines.push(
+            `Total corrections: ${this.totalCorrections}/${this.config.maxTotalCorrections}`,
+        );
         lines.push('');
 
         if (this.history.size === 0) {
@@ -341,7 +343,7 @@ not when the current task simply failed on its own.
         } else {
             for (const [taskId, hist] of this.history) {
                 lines.push(
-                    `**${taskId}:** ${hist.correctionCount}/${this.config.maxCorrectionsPerTask} corrections`
+                    `**${taskId}:** ${hist.correctionCount}/${this.config.maxCorrectionsPerTask} corrections`,
                 );
                 for (const c of hist.corrections) {
                     lines.push(`  - From "${c.requestedBy}": ${c.problem}`);

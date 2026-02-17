@@ -17,9 +17,9 @@
 - **Uses LLM reasoning** to identify missing assumptions, ambiguity, and gaps
 - **Asks clarifying questions** until sufficient precision is reached (up to 3 rounds)
 - **Outputs a finalized, structured prompt** ready for execution — in three forms:
-  - **Rendered Markdown** for visual review
-  - **Raw copyable Markdown** in a code block
-  - **A one-click option** to forward directly to `@johann` for orchestrated execution
+    - **Rendered Markdown** for visual review
+    - **Raw copyable Markdown** in a code block
+    - **A one-click option** to forward directly to `@johann` for orchestrated execution
 
 `@ramble` does not execute changes. It designs the execution context.
 
@@ -63,20 +63,23 @@ Together they create a structured AI workflow layer that upgrades GitHub Copilot
 ### Example
 
 **You type:**
+
 ```
-@ramble okay so we have this API that's getting slow and I think it's the database 
-queries, there's like 5 of them running sequentially when they could probably run 
-in parallel, also the caching is broken I think, users are complaining about stale 
+@ramble okay so we have this API that's getting slow and I think it's the database
+queries, there's like 5 of them running sequentially when they could probably run
+in parallel, also the caching is broken I think, users are complaining about stale
 data, oh and we need to add rate limiting before we launch next week
 ```
 
 **Fugue extracts:**
+
 - Goal: Optimize API performance and add rate limiting before launch
 - Current issues: Sequential DB queries, broken caching (stale data)
 - Constraints: Launch deadline next week
 - Success criteria: Parallel queries, working cache, rate limiting implemented
 
 **Fugue asks** (only if needed):
+
 - Which API endpoints are affected?
 - What caching solution are you using?
 
@@ -84,24 +87,24 @@ data, oh and we need to add rate limiting before we launch next week
 
 ## @ramble Commands
 
-| Command | Description |
-|---------|-----------|
-| `@ramble <your request>` | Start a new session |
-| `@ramble reset` | Clear session and start fresh |
-| `@ramble refresh` | Reload workspace context |
+| Command                            | Description                                |
+| ---------------------------------- | ------------------------------------------ |
+| `@ramble <your request>`           | Start a new session                        |
+| `@ramble reset`                    | Clear session and start fresh              |
+| `@ramble refresh`                  | Reload workspace context                   |
 | `Fugue: Copy Last Compiled Prompt` | Copy the last compiled prompt to clipboard |
 
 ## @johann Commands
 
-| Command | Description |
-|---------|-------------|
-| `@johann <task>` | Send a task for orchestrated execution |
-| `@johann /help` | Show available directives |
-| `@johann /status` | Show Johann's state and statistics |
-| `@johann /memory` | Show long-term memory |
-| `@johann /search <query>` | Search across all memory |
-| `@johann /yolo on\|off` | Show setup guide for Copilot's YOLO mode settings |
-| `@johann /config` | Show current configuration |
+| Command                   | Description                                       |
+| ------------------------- | ------------------------------------------------- |
+| `@johann <task>`          | Send a task for orchestrated execution            |
+| `@johann /help`           | Show available directives                         |
+| `@johann /status`         | Show Johann's state and statistics                |
+| `@johann /memory`         | Show long-term memory                             |
+| `@johann /search <query>` | Search across all memory                          |
+| `@johann /yolo on\|off`   | Show setup guide for Copilot's YOLO mode settings |
+| `@johann /config`         | Show current configuration                        |
 
 ## Workspace Context
 
@@ -119,11 +122,13 @@ Use `@ramble refresh` to reload context after making changes to these files.
 Fugue uses GitHub Copilot's language model to intelligently analyze your request. Unlike rigid templates, it understands context and only asks questions when information is genuinely missing.
 
 **What gets preserved:**
+
 - All distinct facts, examples, and technical details
 - Relationships between systems/components
 - Analogies and concept explanations
 
 **What gets cleaned up:**
+
 - Filler words (um, uh, you know)
 - Duplicate mentions of the same fact
 - Scattered fragments get organized together
@@ -159,4 +164,3 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code standards, an
 ## License
 
 [MIT](LICENSE)
-

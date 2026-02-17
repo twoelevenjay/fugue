@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
-import { OrchestrationPlan, Subtask, TaskComplexity, TaskType, ModelInfo } from './types';
-import { withRetry, PLANNING_RETRY_POLICY, classifyError, extractErrorMessage } from './retry';
+import { OrchestrationPlan, Subtask, TaskComplexity, TaskType } from './types';
+import { withRetry, PLANNING_RETRY_POLICY } from './retry';
 import { DebugConversationLog } from './debugConversationLog';
 import { SessionPersistence } from './sessionPersistence';
 
@@ -149,14 +149,12 @@ export class TaskDecomposer {
         token: vscode.CancellationToken,
         stream?: vscode.ChatResponseStream,
         debugLog?: DebugConversationLog,
-        persist?: SessionPersistence
+        persist?: SessionPersistence,
     ): Promise<OrchestrationPlan> {
         const userPrompt = this.buildDecompositionPrompt(request, workspaceContext, memoryContext);
 
         const fullPrompt = DECOMPOSITION_SYSTEM_PROMPT + '\n\n---\n\n' + userPrompt;
-        const messages = [
-            vscode.LanguageModelChatMessage.User(fullPrompt)
-        ];
+        const messages = [vscode.LanguageModelChatMessage.User(fullPrompt)];
 
         if (stream) {
             stream.markdown('<details><summary>🧠 Planning thought process</summary>\n\n');
@@ -199,10 +197,10 @@ export class TaskDecomposer {
                 if (stream) {
                     stream.markdown(
                         `\n\n> ⚠️ **${error.category} error** during planning (attempt ${attempt}/${maxRetries}): ` +
-                        `${error.message.substring(0, 150)}\n> Retrying in ${(delayMs / 1000).toFixed(1)}s...\n\n`
+                            `${error.message.substring(0, 150)}\n> Retrying in ${(delayMs / 1000).toFixed(1)}s...\n\n`,
                     );
                 }
-            }
+            },
         );
 
         if (stream) {
@@ -218,7 +216,7 @@ export class TaskDecomposer {
     private buildDecompositionPrompt(
         request: string,
         workspaceContext: string,
-        memoryContext: string
+        memoryContext: string,
     ): string {
         const parts: string[] = [];
 
@@ -282,7 +280,9 @@ export class TaskDecomposer {
                 taskType: this.validateTaskType(raw.taskType),
                 complexity: this.validateComplexity(raw.complexity),
                 dependsOn: Array.isArray(raw.dependsOn) ? raw.dependsOn.map(String) : [],
-                successCriteria: Array.isArray(raw.successCriteria) ? raw.successCriteria.map(String) : [],
+                successCriteria: Array.isArray(raw.successCriteria)
+                    ? raw.successCriteria.map(String)
+                    : [],
                 status: 'pending',
                 attempts: 0,
                 maxAttempts: 3,
@@ -349,8 +349,15 @@ export class TaskDecomposer {
 
     private validateTaskType(value: unknown): TaskType | undefined {
         const valid: TaskType[] = [
-            'generate', 'refactor', 'test', 'debug', 'review',
-            'spec', 'edit', 'design', 'complex-refactor',
+            'generate',
+            'refactor',
+            'test',
+            'debug',
+            'review',
+            'spec',
+            'edit',
+            'design',
+            'complex-refactor',
         ];
         if (typeof value === 'string' && valid.includes(value as TaskType)) {
             return value as TaskType;

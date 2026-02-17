@@ -25,7 +25,10 @@ NOTES: Uses UUID for primary key
 
             const summary = extractSummary(output);
             assert.strictEqual(summary.completed, 'Created user model and routes');
-            assert.deepStrictEqual(summary.filesModified, ['src/models/user.ts', 'src/routes/users.ts']);
+            assert.deepStrictEqual(summary.filesModified, [
+                'src/models/user.ts',
+                'src/routes/users.ts',
+            ]);
             assert.deepStrictEqual(summary.keyExports, ['User', 'UserRouter']);
             assert.deepStrictEqual(summary.dependenciesInstalled, ['express', 'better-sqlite3']);
             assert.deepStrictEqual(summary.commandsRun, ['npm install express']);
@@ -53,7 +56,8 @@ NOTES: none
         });
 
         test('falls back gracefully when no summary block', () => {
-            const output = 'I created the file src/app.ts and modified src/index.ts. Everything works.';
+            const output =
+                'I created the file src/app.ts and modified src/index.ts. Everything works.';
             const summary = extractSummary(output);
             assert.ok(summary.completed.length > 0);
             // Fallback should extract file paths heuristically
@@ -176,13 +180,15 @@ NOTES: none
         });
 
         test('includes distilled context from completed dependency', () => {
-            const plan = makePlan([
-                makeSubtask('a'),
-                makeSubtask('b', ['a']),
-            ]);
+            const plan = makePlan([makeSubtask('a'), makeSubtask('b', ['a'])]);
 
             const results = new Map<string, SubtaskResult>();
-            results.set('a', makeResult('Created files.\n\n```summary\nCOMPLETED: Built DB layer\nFILES_MODIFIED: db.ts\nKEY_EXPORTS: Database\nDEPENDENCIES_INSTALLED: none\nCOMMANDS_RUN: none\nNOTES: Uses SQLite\n```'));
+            results.set(
+                'a',
+                makeResult(
+                    'Created files.\n\n```summary\nCOMPLETED: Built DB layer\nFILES_MODIFIED: db.ts\nKEY_EXPORTS: Database\nDEPENDENCIES_INSTALLED: none\nCOMMANDS_RUN: none\nNOTES: Uses SQLite\n```',
+                ),
+            );
 
             const ctx = gatherDependencyContext('b', plan, results);
             assert.ok(ctx.includes('DEPENDENCY CONTEXT'));
@@ -191,10 +197,7 @@ NOTES: none
         });
 
         test('skips failed dependencies', () => {
-            const plan = makePlan([
-                makeSubtask('a'),
-                makeSubtask('b', ['a']),
-            ]);
+            const plan = makePlan([makeSubtask('a'), makeSubtask('b', ['a'])]);
 
             const results = new Map<string, SubtaskResult>();
             results.set('a', makeResult('error', false));

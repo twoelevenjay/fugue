@@ -68,7 +68,7 @@ suite('messageBus', () => {
         test('ignores malformed signals', () => {
             const text = [
                 '<!--HIVE_SIGNAL:unknown:bad type-->',
-                '<!--HIVE_SIGNAL:broadcast:-->',  // empty content
+                '<!--HIVE_SIGNAL:broadcast:-->', // empty content
                 '<!-- HIVE_SIGNAL:broadcast:wrong format -->',
                 '<!--HIVE_SIGNAL:broadcast:valid one-->',
             ].join('\n');
@@ -76,7 +76,7 @@ suite('messageBus', () => {
             const signals = parseHiveSignals(text);
             // Only the valid one should parse — "unknown" type won't match the enum
             // Empty content won't match because content needs .+
-            assert.ok(signals.some(s => s.content === 'valid one'));
+            assert.ok(signals.some((s) => s.content === 'valid one'));
         });
 
         test('trims whitespace from content', () => {

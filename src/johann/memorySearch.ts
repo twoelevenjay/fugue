@@ -55,23 +55,25 @@ const DEFAULT_OPTIONS: Required<MemorySearchOptions> = {
  */
 export async function searchMemory(
     query: string,
-    options: MemorySearchOptions = {}
+    options: MemorySearchOptions = {},
 ): Promise<MemorySearchResult[]> {
     const opts = { ...DEFAULT_OPTIONS, ...options };
     const base = getJohannWorkspaceUri();
-    if (!base) return [];
+    if (!base) {
+        return [];
+    }
 
     // Extract keywords from query
     const keywords = extractKeywords(query);
-    if (keywords.length === 0) return [];
+    if (keywords.length === 0) {
+        return [];
+    }
 
     const results: MemorySearchResult[] = [];
 
     // Search each configured directory
     for (const dir of opts.searchDirs) {
-        const dirUri = dir === '.'
-            ? base
-            : vscode.Uri.joinPath(base, dir);
+        const dirUri = dir === '.' ? base : vscode.Uri.joinPath(base, dir);
 
         const dirResults = await searchDirectory(dirUri, dir, keywords, opts);
         results.push(...dirResults);
@@ -91,7 +93,7 @@ async function searchDirectory(
     dirUri: vscode.Uri,
     dirLabel: string,
     keywords: string[],
-    opts: Required<MemorySearchOptions>
+    opts: Required<MemorySearchOptions>,
 ): Promise<MemorySearchResult[]> {
     const results: MemorySearchResult[] = [];
 
@@ -99,11 +101,15 @@ async function searchDirectory(
         const entries = await vscode.workspace.fs.readDirectory(dirUri);
 
         for (const [name, type] of entries) {
-            if (type !== vscode.FileType.File || !name.endsWith('.md')) continue;
+            if (type !== vscode.FileType.File || !name.endsWith('.md')) {
+                continue;
+            }
 
             const fileUri = vscode.Uri.joinPath(dirUri, name);
             const content = await readFileContent(fileUri);
-            if (!content) continue;
+            if (!content) {
+                continue;
+            }
 
             const source = dirLabel === '.' ? name : `${dirLabel}/${name}`;
             const fileResults = searchFileContent(source, content, keywords, opts);
@@ -123,7 +129,7 @@ function searchFileContent(
     source: string,
     content: string,
     keywords: string[],
-    opts: Required<MemorySearchOptions>
+    opts: Required<MemorySearchOptions>,
 ): MemorySearchResult[] {
     const lines = content.split('\n');
     const matchingLineNums: Map<number, Set<string>> = new Map();
@@ -141,12 +147,14 @@ function searchFileContent(
         }
     }
 
-    if (matchingLineNums.size === 0) return [];
+    if (matchingLineNums.size === 0) {
+        return [];
+    }
 
     // Group adjacent matches into snippets
     const snippets = groupAdjacentMatches(
         Array.from(matchingLineNums.keys()).sort((a, b) => a - b),
-        opts.contextLines
+        opts.contextLines,
     );
 
     const results: MemorySearchResult[] = [];
@@ -165,7 +173,7 @@ function searchFileContent(
         for (const lineNum of group) {
             const kws = matchingLineNums.get(lineNum);
             if (kws) {
-                kws.forEach(kw => uniqueKeywords.add(kw));
+                kws.forEach((kw) => uniqueKeywords.add(kw));
                 totalMatches += kws.size;
             }
         }
@@ -177,7 +185,7 @@ function searchFileContent(
                 source,
                 snippet,
                 score,
-                matchLines: group.map(n => n + 1), // Convert to 1-based
+                matchLines: group.map((n) => n + 1), // Convert to 1-based
             });
         }
     }
@@ -190,7 +198,9 @@ function searchFileContent(
  * Lines within `contextSize` of each other are grouped together.
  */
 function groupAdjacentMatches(lineNums: number[], contextSize: number): number[][] {
-    if (lineNums.length === 0) return [];
+    if (lineNums.length === 0) {
+        return [];
+    }
 
     const groups: number[][] = [[lineNums[0]]];
 
@@ -216,24 +226,106 @@ function groupAdjacentMatches(lineNums: number[], contextSize: number): number[]
  */
 function extractKeywords(query: string): string[] {
     const stopWords = new Set([
-        'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-        'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could',
-        'should', 'may', 'might', 'shall', 'can', 'to', 'of', 'in', 'for',
-        'on', 'with', 'at', 'by', 'from', 'as', 'into', 'through', 'during',
-        'before', 'after', 'above', 'below', 'between', 'and', 'but', 'or',
-        'not', 'no', 'nor', 'so', 'yet', 'both', 'either', 'neither',
-        'each', 'every', 'all', 'any', 'few', 'more', 'most', 'some',
-        'such', 'than', 'too', 'very', 'just', 'about', 'what', 'which',
-        'who', 'whom', 'this', 'that', 'these', 'those', 'it', 'its',
-        'i', 'me', 'my', 'we', 'us', 'our', 'you', 'your', 'he', 'him',
-        'his', 'she', 'her', 'they', 'them', 'their',
+        'a',
+        'an',
+        'the',
+        'is',
+        'are',
+        'was',
+        'were',
+        'be',
+        'been',
+        'being',
+        'have',
+        'has',
+        'had',
+        'do',
+        'does',
+        'did',
+        'will',
+        'would',
+        'could',
+        'should',
+        'may',
+        'might',
+        'shall',
+        'can',
+        'to',
+        'of',
+        'in',
+        'for',
+        'on',
+        'with',
+        'at',
+        'by',
+        'from',
+        'as',
+        'into',
+        'through',
+        'during',
+        'before',
+        'after',
+        'above',
+        'below',
+        'between',
+        'and',
+        'but',
+        'or',
+        'not',
+        'no',
+        'nor',
+        'so',
+        'yet',
+        'both',
+        'either',
+        'neither',
+        'each',
+        'every',
+        'all',
+        'any',
+        'few',
+        'more',
+        'most',
+        'some',
+        'such',
+        'than',
+        'too',
+        'very',
+        'just',
+        'about',
+        'what',
+        'which',
+        'who',
+        'whom',
+        'this',
+        'that',
+        'these',
+        'those',
+        'it',
+        'its',
+        'i',
+        'me',
+        'my',
+        'we',
+        'us',
+        'our',
+        'you',
+        'your',
+        'he',
+        'him',
+        'his',
+        'she',
+        'her',
+        'they',
+        'them',
+        'their',
     ]);
 
     const words = query
         .toLowerCase()
         .replace(/[^a-z0-9\s-_./]/g, ' ')
         .split(/\s+/)
-        .filter(w => w.length > 1 && !stopWords.has(w));
+        .filter((w) => w.length > 1 && !stopWords.has(w));
 
     return [...new Set(words)];
 }
@@ -242,7 +334,9 @@ function extractKeywords(query: string): string[] {
  * Format search results as a readable string for prompt injection.
  */
 export function formatSearchResults(results: MemorySearchResult[]): string {
-    if (results.length === 0) return 'No memory matches found.';
+    if (results.length === 0) {
+        return 'No memory matches found.';
+    }
 
     const lines: string[] = ['=== Memory Search Results ===', ''];
 

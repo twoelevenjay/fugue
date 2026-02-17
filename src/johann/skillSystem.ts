@@ -125,10 +125,10 @@ export class SkillSystem {
 
         this.logger.info(
             `Skill system initialized: ` +
-            `${this.allSkills.length} total skills ` +
-            `(${SHIPPED_SKILLS.length} shipped, ` +
-            `${(await this.globalStore.listSkills()).length} global, ` +
-            `${(await this.localStore.listSkills()).length} local)`
+                `${this.allSkills.length} total skills ` +
+                `(${SHIPPED_SKILLS.length} shipped, ` +
+                `${(await this.globalStore.listSkills()).length} global, ` +
+                `${(await this.localStore.listSkills()).length} local)`,
         );
     }
 
@@ -199,7 +199,10 @@ export class SkillSystem {
         const result = await this.selector.select(context, this.allSkills);
 
         // Flatten if selected skill is global or shipped (ensure local copy exists)
-        if (result.skill && (result.skill.metadata.scope === 'global' || result.skill.metadata.scope === 'shipped')) {
+        if (
+            result.skill &&
+            (result.skill.metadata.scope === 'global' || result.skill.metadata.scope === 'shipped')
+        ) {
             try {
                 const flattened = await this.flattener.flatten(result.skill, this.localStore);
                 if (flattened) {
@@ -223,7 +226,7 @@ export class SkillSystem {
 
             this.logger.info(
                 `Skill selected: "${result.skill.metadata.slug}@${result.skill.metadata.version}" ` +
-                `(score: ${result.candidates[0]?.score.toFixed(1)}, ${result.logMessage})`
+                    `(score: ${result.candidates[0]?.score.toFixed(1)}, ${result.logMessage})`,
             );
         }
 
@@ -292,7 +295,7 @@ export class SkillSystem {
                 }
             } catch (err) {
                 this.logger.warn(
-                    `Autonomous skill creation failed for pattern "${pattern.description}": ${err}`
+                    `Autonomous skill creation failed for pattern "${pattern.description}": ${err}`,
                 );
             }
         }
@@ -300,7 +303,7 @@ export class SkillSystem {
         if (created.length > 0) {
             this.logger.info(
                 `Autonomously created ${created.length} skill(s): ` +
-                created.map(s => s.metadata.slug).join(', ')
+                    created.map((s) => s.metadata.slug).join(', '),
             );
         }
 
@@ -358,7 +361,7 @@ export class SkillSystem {
                 const kw = skill.applies_to.keywords.slice(0, 5).join(', ');
                 lines.push(
                     `- **${skill.metadata.slug}** v${skill.metadata.version}: ` +
-                    `${skill.metadata.description} [types: ${types}] [keywords: ${kw}]`
+                        `${skill.metadata.description} [types: ${types}] [keywords: ${kw}]`,
                 );
             }
             lines.push('');

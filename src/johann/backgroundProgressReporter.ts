@@ -63,7 +63,7 @@ export class BackgroundProgressReporter {
     get stream(): vscode.ChatResponseStream {
         throw new Error(
             'ChatResponseStream not available in background mode. ' +
-            'Use ChatProgressReporter for synchronous execution.'
+                'Use ChatProgressReporter for synchronous execution.',
         );
     }
 
@@ -136,7 +136,7 @@ export class BackgroundProgressReporter {
     /**
      * Show models — collect for summary.
      */
-    showModels(modelSummary: string): void {
+    showModels(_modelSummary: string): void {
         // Store model summary for debugging if needed
         // No UI display in background mode
     }
@@ -168,9 +168,7 @@ export class BackgroundProgressReporter {
      * Phase → update current phase and progress.
      */
     private onPhase(event: PhaseEvent): void {
-        this._currentPhase = event.detail
-            ? `${event.label} — ${event.detail}`
-            : event.label;
+        this._currentPhase = event.detail ? `${event.label} — ${event.detail}` : event.label;
         this.updateProgress();
     }
 
@@ -252,10 +250,18 @@ export class BackgroundProgressReporter {
     private onDelegationPanel(event: DelegationPanelEvent): void {
         const total = event.queued + event.running + event.done + event.failed;
         const parts: string[] = [];
-        if (event.running > 0) { parts.push(`${event.running} running`); }
-        if (event.done > 0) { parts.push(`${event.done} done`); }
-        if (event.failed > 0) { parts.push(`${event.failed} failed`); }
-        if (event.queued > 0) { parts.push(`${event.queued} queued`); }
+        if (event.running > 0) {
+            parts.push(`${event.running} running`);
+        }
+        if (event.done > 0) {
+            parts.push(`${event.done} done`);
+        }
+        if (event.failed > 0) {
+            parts.push(`${event.failed} failed`);
+        }
+        if (event.queued > 0) {
+            parts.push(`${event.queued} queued`);
+        }
         this.notes.push(`🤖 Delegation: ${parts.join(' · ')} (${total} total)`);
     }
 
@@ -284,9 +290,10 @@ export class BackgroundProgressReporter {
      */
     private updateProgress(currentTask?: string): void {
         const manager = BackgroundTaskManager.getInstance();
-        const percentage = this._totalSubtasks > 0
-            ? Math.round((this._completedSubtasks / this._totalSubtasks) * 100)
-            : 0;
+        const percentage =
+            this._totalSubtasks > 0
+                ? Math.round((this._completedSubtasks / this._totalSubtasks) * 100)
+                : 0;
 
         // Map current phase to standardized phase name
         let phase: 'planning' | 'executing' | 'reviewing' | 'merging' | 'finalizing' = 'executing';

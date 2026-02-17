@@ -14,12 +14,12 @@ import * as vscode from 'vscode';
  * Error categories for classification-based handling.
  */
 export type ErrorCategory =
-    | 'network'       // Transient network errors — retry immediately
-    | 'rate-limit'    // API quota / request limit — retry with longer backoff
-    | 'api-compat'    // API compatibility error (unsupported parameter) — skip model, try another
-    | 'cancelled'     // User cancelled — do not retry
-    | 'auth'          // Authentication / permission — do not retry
-    | 'unknown';      // Unclassified — retry cautiously
+    | 'network' // Transient network errors — retry immediately
+    | 'rate-limit' // API quota / request limit — retry with longer backoff
+    | 'api-compat' // API compatibility error (unsupported parameter) — skip model, try another
+    | 'cancelled' // User cancelled — do not retry
+    | 'auth' // Authentication / permission — do not retry
+    | 'unknown'; // Unclassified — retry cautiously
 
 /**
  * Result of classifying an error.
@@ -69,11 +69,7 @@ const RATE_LIMIT_PATTERNS = [
 ];
 
 // Patterns for cancellation
-const CANCEL_PATTERNS = [
-    'cancel',
-    'abort',
-    'user abort',
-];
+const CANCEL_PATTERNS = ['cancel', 'abort', 'user abort'];
 
 // Patterns for API compatibility errors (unsupported parameters, etc.)
 // These are NOT retryable with the same model — need a different model
@@ -159,7 +155,7 @@ export function classifyError(err: unknown): ClassifiedError {
     const lower = message.toLowerCase();
 
     // Check cancellation first (highest priority)
-    if (err instanceof vscode.CancellationError || CANCEL_PATTERNS.some(p => lower.includes(p))) {
+    if (err instanceof vscode.CancellationError || CANCEL_PATTERNS.some((p) => lower.includes(p))) {
         return {
             category: 'cancelled',
             message,
@@ -169,7 +165,7 @@ export function classifyError(err: unknown): ClassifiedError {
     }
 
     // Check network errors
-    if (NETWORK_PATTERNS.some(p => lower.includes(p))) {
+    if (NETWORK_PATTERNS.some((p) => lower.includes(p))) {
         return {
             category: 'network',
             message,
@@ -181,7 +177,7 @@ export function classifyError(err: unknown): ClassifiedError {
     }
 
     // Check rate limiting
-    if (RATE_LIMIT_PATTERNS.some(p => lower.includes(p))) {
+    if (RATE_LIMIT_PATTERNS.some((p) => lower.includes(p))) {
         return {
             category: 'rate-limit',
             message,
@@ -193,7 +189,7 @@ export function classifyError(err: unknown): ClassifiedError {
     }
 
     // Check auth
-    if (AUTH_PATTERNS.some(p => lower.includes(p))) {
+    if (AUTH_PATTERNS.some((p) => lower.includes(p))) {
         return {
             category: 'auth',
             message,
@@ -205,7 +201,7 @@ export function classifyError(err: unknown): ClassifiedError {
 
     // Check API compatibility errors (e.g., GPT models rejecting context_management parameter)
     // These should NOT be retried with the same model — need escalation to a different model
-    if (API_COMPAT_PATTERNS.some(p => lower.includes(p))) {
+    if (API_COMPAT_PATTERNS.some((p) => lower.includes(p))) {
         return {
             category: 'api-compat',
             message,
@@ -282,7 +278,7 @@ function calculateDelay(attempt: number, policy: RetryPolicy): number {
     if (policy.jitter) {
         // Add ±25% jitter
         const jitterRange = delay * 0.25;
-        delay += (Math.random() * jitterRange * 2) - jitterRange;
+        delay += Math.random() * jitterRange * 2 - jitterRange;
     }
 
     return Math.round(delay);
@@ -292,11 +288,8 @@ function calculateDelay(attempt: number, policy: RetryPolicy): number {
  * Sleep for a given number of milliseconds, respecting cancellation.
  * Returns true if sleep completed, false if cancelled.
  */
-async function cancellableSleep(
-    ms: number,
-    token?: vscode.CancellationToken
-): Promise<boolean> {
-    return new Promise(resolve => {
+async function cancellableSleep(ms: number, token?: vscode.CancellationToken): Promise<boolean> {
+    return new Promise((resolve) => {
         const timeout = setTimeout(() => resolve(true), ms);
 
         if (token) {
@@ -322,7 +315,12 @@ export async function withRetry<T>(
     fn: () => Promise<T>,
     policy: RetryPolicy,
     token?: vscode.CancellationToken,
-    onRetry?: (attempt: number, maxRetries: number, error: ClassifiedError, delayMs: number) => void
+    onRetry?: (
+        attempt: number,
+        maxRetries: number,
+        error: ClassifiedError,
+        delayMs: number,
+    ) => void,
 ): Promise<T> {
     let lastError: unknown;
 
@@ -344,7 +342,10 @@ export async function withRetry<T>(
             const classified = classifyError(err);
 
             // Don't retry if not retryable or not in allowed categories
-            if (!classified.retryable || !policy.retryableCategories.includes(classified.category)) {
+            if (
+                !classified.retryable ||
+                !policy.retryableCategories.includes(classified.category)
+            ) {
                 break;
             }
 

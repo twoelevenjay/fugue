@@ -3,7 +3,7 @@
 ## Supported Versions
 
 | Version | Supported          |
-|---------|--------------------|
+| ------- | ------------------ |
 | 0.x     | :white_check_mark: |
 
 ## Reporting a Vulnerability
@@ -15,10 +15,10 @@ Instead, report it privately:
 1. **Email:** [leon@211j.com](mailto:leon@211j.com)
 2. **Subject line:** `[SECURITY] Fugue — <brief description>`
 3. **Include:**
-   - Description of the vulnerability
-   - Steps to reproduce
-   - Impact assessment (what an attacker could do)
-   - Affected version(s)
+    - Description of the vulnerability
+    - Steps to reproduce
+    - Impact assessment (what an attacker could do)
+    - Affected version(s)
 
 You will receive an acknowledgment within **48 hours** and a resolution timeline within **7 days**.
 
@@ -28,23 +28,23 @@ Fugue is a VS Code extension that runs inside the Extension Host process. It ope
 
 ### What Fugue CAN do
 
-| Capability | Justification | Files |
-|------------|---------------|-------|
-| Read/write files via `vscode.workspace.fs` | Persistent memory, session state, ledger, skill files | `memory.ts`, `safeIO.ts`, `executionLedger.ts`, `skillStore.ts` |
-| Call GitHub Copilot LLM via `vscode.lm` | Core functionality — prompt compilation, task decomposition, subagent execution | `orchestrator.ts`, `subagentManager.ts`, `extension.ts` |
-| Execute `git` commands via `child_process.execFile` | Git worktree creation/cleanup for parallel subtask isolation | `worktreeManager.ts` |
-| Verify external tool availability via `child_process.execFile` | Pre-flight check: `which <tool>` (no shell) | `toolVerifier.ts` |
+| Capability                                                     | Justification                                                                   | Files                                                           |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Read/write files via `vscode.workspace.fs`                     | Persistent memory, session state, ledger, skill files                           | `memory.ts`, `safeIO.ts`, `executionLedger.ts`, `skillStore.ts` |
+| Call GitHub Copilot LLM via `vscode.lm`                        | Core functionality — prompt compilation, task decomposition, subagent execution | `orchestrator.ts`, `subagentManager.ts`, `extension.ts`         |
+| Execute `git` commands via `child_process.execFile`            | Git worktree creation/cleanup for parallel subtask isolation                    | `worktreeManager.ts`                                            |
+| Verify external tool availability via `child_process.execFile` | Pre-flight check: `which <tool>` (no shell)                                     | `toolVerifier.ts`                                               |
 
 ### What Fugue CANNOT do
 
-| Excluded Capability | Enforcement |
-|---------------------|-------------|
-| Network requests (HTTP, fetch, WebSocket) | ESLint `no-restricted-imports` blocks `http`, `https`, `axios`, `node-fetch`. No network calls exist in codebase. |
-| Dynamic code execution (`eval`, `Function()`) | ESLint `no-eval`, `no-implied-eval`, `no-new-func` rules. |
-| Shell command execution | `execFile` used instead of `exec`/`spawn(shell:true)`. Only `git` and `which` are invoked. |
-| Environment variable reading | No `process.env` access for secrets. |
-| Telemetry or data exfiltration | No outbound network capability. |
-| Arbitrary file deletion | `assertSafePath()` validates all `fs.rm()` targets against `$TMPDIR/johann-worktrees/` prefix. |
+| Excluded Capability                           | Enforcement                                                                                                       |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Network requests (HTTP, fetch, WebSocket)     | ESLint `no-restricted-imports` blocks `http`, `https`, `axios`, `node-fetch`. No network calls exist in codebase. |
+| Dynamic code execution (`eval`, `Function()`) | ESLint `no-eval`, `no-implied-eval`, `no-new-func` rules.                                                         |
+| Shell command execution                       | `execFile` used instead of `exec`/`spawn(shell:true)`. Only `git` and `which` are invoked.                        |
+| Environment variable reading                  | No `process.env` access for secrets.                                                                              |
+| Telemetry or data exfiltration                | No outbound network capability.                                                                                   |
+| Arbitrary file deletion                       | `assertSafePath()` validates all `fs.rm()` targets against `$TMPDIR/johann-worktrees/` prefix.                    |
 
 ### Workspace Trust
 
@@ -74,9 +74,9 @@ Johann's subagent execution loop includes:
 
 ## Disclosure Timeline
 
-| Step | Target |
-|------|--------|
-| Acknowledgment | 48 hours |
-| Assessment | 7 days |
-| Fix release | 30 days (critical: 7 days) |
-| Public disclosure | After fix is published |
+| Step              | Target                     |
+| ----------------- | -------------------------- |
+| Acknowledgment    | 48 hours                   |
+| Assessment        | 7 days                     |
+| Fix release       | 30 days (critical: 7 days) |
+| Public disclosure | After fix is published     |

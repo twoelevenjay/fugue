@@ -47,7 +47,9 @@ export class SkillLedger {
             try {
                 await safeAppend(fileUri, line, '', false);
             } catch (err) {
-                this.logger.warn(`Failed to log skill invocation: ${err instanceof Error ? err.message : String(err)}`);
+                this.logger.warn(
+                    `Failed to log skill invocation: ${err instanceof Error ? err.message : String(err)}`,
+                );
             }
         }
     }
@@ -90,14 +92,14 @@ export class SkillLedger {
      * Get the set of skill slugs used in this run.
      */
     getUsedSlugs(): Set<string> {
-        return new Set(this.invocations.map(i => i.skill_id));
+        return new Set(this.invocations.map((i) => i.skill_id));
     }
 
     /**
      * Get usage count for a specific skill in this run.
      */
     getUsageCount(slug: string): number {
-        return this.invocations.filter(i => i.skill_id === slug).length;
+        return this.invocations.filter((i) => i.skill_id === slug).length;
     }
 
     /**
@@ -110,8 +112,8 @@ export class SkillLedger {
             const content = new TextDecoder().decode(bytes);
             return content
                 .split('\n')
-                .filter(line => line.trim().length > 0)
-                .map(line => {
+                .filter((line) => line.trim().length > 0)
+                .map((line) => {
                     try {
                         return JSON.parse(line) as SkillInvocation;
                     } catch {

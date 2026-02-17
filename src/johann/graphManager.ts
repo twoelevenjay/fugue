@@ -152,10 +152,8 @@ export function getExecutionWaves(plan: OrchestrationPlan): Wave[] {
 
     // If not all nodes were processed, there's a cycle
     if (processed.size < graph.allIds.size) {
-        const stuck = [...graph.allIds].filter(id => !processed.has(id));
-        throw new Error(
-            `Cycle detected in task graph. Tasks involved: ${stuck.join(', ')}`
-        );
+        const stuck = [...graph.allIds].filter((id) => !processed.has(id));
+        throw new Error(`Cycle detected in task graph. Tasks involved: ${stuck.join(', ')}`);
     }
 
     return waves;
@@ -214,7 +212,7 @@ export function validateGraph(plan: OrchestrationPlan): GraphValidationResult {
         return result;
     }
 
-    const taskIds = new Set(subtasks.map(st => st.id));
+    const taskIds = new Set(subtasks.map((st) => st.id));
 
     // 1. Missing dependency check
     for (const st of subtasks) {
@@ -227,7 +225,9 @@ export function validateGraph(plan: OrchestrationPlan): GraphValidationResult {
     }
 
     // 2. Cycle detection via DFS with coloring
-    const WHITE = 0, GRAY = 1, BLACK = 2;
+    const WHITE = 0,
+        GRAY = 1,
+        BLACK = 2;
     const color = new Map<string, number>();
     for (const id of taskIds) {
         color.set(id, WHITE);
@@ -270,7 +270,7 @@ export function validateGraph(plan: OrchestrationPlan): GraphValidationResult {
     }
 
     // 3. Orphan detection — BFS from root tasks (in-degree 0)
-    const roots = subtasks.filter(st => st.dependsOn.length === 0).map(st => st.id);
+    const roots = subtasks.filter((st) => st.dependsOn.length === 0).map((st) => st.id);
     if (roots.length === 0 && subtasks.length > 0) {
         // No roots at all — everything is either cyclic or depends on something
         result.orphans = [...taskIds];

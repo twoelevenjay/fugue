@@ -67,8 +67,12 @@ export function generateSnapshot(state: RunStateData): StatusSnapshot {
     // Assemble full markdown
     const parts: string[] = [];
     parts.push(header);
-    if (activeItems) { parts.push(activeItems); }
-    if (queueInfo) { parts.push(queueInfo); }
+    if (activeItems) {
+        parts.push(activeItems);
+    }
+    if (queueInfo) {
+        parts.push(queueInfo);
+    }
     parts.push('\n### Workflow Status\n');
     parts.push('```mermaid');
     parts.push(mermaidCompact);
@@ -76,7 +80,9 @@ export function generateSnapshot(state: RunStateData): StatusSnapshot {
     parts.push('<details><summary>Text fallback</summary>\n');
     parts.push(textTable);
     parts.push('\n</details>\n');
-    if (actions) { parts.push(actions); }
+    if (actions) {
+        parts.push(actions);
+    }
 
     return {
         timestamp,
@@ -108,7 +114,7 @@ export function generateDetailedSnapshot(state: RunStateData): StatusSnapshot {
 
         snapshot.markdown = snapshot.markdown.replace(
             '<details><summary>Text fallback</summary>',
-            detailedSection + '\n<details><summary>Text fallback</summary>'
+            detailedSection + '\n<details><summary>Text fallback</summary>',
         );
     }
 
@@ -146,8 +152,8 @@ function buildHeader(state: RunStateData, now: Date): string {
 }
 
 function buildActiveItems(state: RunStateData): string {
-    const running = state.tasks.filter(t => t.status === 'running').slice(0, 10);
-    const queued = state.tasks.filter(t => t.status === 'queued').slice(0, 5);
+    const running = state.tasks.filter((t) => t.status === 'running').slice(0, 10);
+    const queued = state.tasks.filter((t) => t.status === 'queued').slice(0, 5);
 
     if (running.length === 0 && queued.length === 0) {
         return '';
@@ -182,13 +188,17 @@ function buildActiveItems(state: RunStateData): string {
 }
 
 function buildQueueInfo(state: RunStateData): string {
-    const pending = state.userQueue.filter(q => !q.integrated);
-    if (pending.length === 0) { return ''; }
+    const pending = state.userQueue.filter((q) => !q.integrated);
+    if (pending.length === 0) {
+        return '';
+    }
 
     const lines: string[] = [];
     lines.push('### Queued User Requests\n');
     for (const q of pending) {
-        lines.push(`${q.position}. "${q.message.substring(0, 80)}${q.message.length > 80 ? '…' : ''}" *(queued ${formatTimeAgo(Date.now() - new Date(q.enqueuedAt).getTime())} ago)*`);
+        lines.push(
+            `${q.position}. "${q.message.substring(0, 80)}${q.message.length > 80 ? '…' : ''}" *(queued ${formatTimeAgo(Date.now() - new Date(q.enqueuedAt).getTime())} ago)*`,
+        );
     }
     lines.push('');
     return lines.join('\n');
@@ -208,7 +218,12 @@ function buildCompactMermaid(state: RunStateData): string {
 
     // Determine phase order
     const phaseOrder: RunPhase[] = [
-        'discovery', 'planning', 'delegation', 'implementation', 'verification', 'packaging',
+        'discovery',
+        'planning',
+        'delegation',
+        'implementation',
+        'verification',
+        'packaging',
     ];
 
     // Build phase summaries
@@ -216,7 +231,9 @@ function buildCompactMermaid(state: RunStateData): string {
 
     for (const phase of phaseOrder) {
         const phaseTasks = phaseMap.get(phase);
-        if (!phaseTasks || phaseTasks.length === 0) { continue; }
+        if (!phaseTasks || phaseTasks.length === 0) {
+            continue;
+        }
 
         const counts = countStatuses(phaseTasks);
         const phaseStat = getPhaseStatus(counts, phaseTasks.length);
@@ -260,7 +277,7 @@ function buildFlatMermaid(state: RunStateData): string {
 
     // Show planning and overall status
     const planDone = state.planSummary ? true : false;
-    const planEmoji = planDone ? '✅' : (state.status === 'running' ? '🔄' : '⏳');
+    const planEmoji = planDone ? '✅' : state.status === 'running' ? '🔄' : '⏳';
     lines.push(`    PLAN["${planEmoji} Planning"]`);
 
     if (state.tasks.length > 0) {
@@ -304,7 +321,9 @@ function buildFlatMermaid(state: RunStateData): string {
  * Capped at 30 nodes to prevent overwhelming diagrams.
  */
 function buildDetailedMermaid(state: RunStateData): string {
-    if (state.tasks.length === 0) { return ''; }
+    if (state.tasks.length === 0) {
+        return '';
+    }
     if (state.tasks.length > 30) {
         // Too many tasks — return compact instead
         return '';
@@ -403,7 +422,12 @@ function assignPhases(tasks: RunTask[]): Map<RunPhase, RunTask[]> {
 function inferPhase(task: RunTask): RunPhase {
     const title = task.title.toLowerCase();
 
-    if (title.includes('scan') || title.includes('discover') || title.includes('analyze') || title.includes('explore')) {
+    if (
+        title.includes('scan') ||
+        title.includes('discover') ||
+        title.includes('analyze') ||
+        title.includes('explore')
+    ) {
         return 'discovery';
     }
     if (title.includes('plan') || title.includes('design') || title.includes('architect')) {
@@ -412,10 +436,22 @@ function inferPhase(task: RunTask): RunPhase {
     if (title.includes('delegate') || title.includes('assign') || title.includes('dispatch')) {
         return 'delegation';
     }
-    if (title.includes('test') || title.includes('verify') || title.includes('validate') || title.includes('check') || title.includes('lint')) {
+    if (
+        title.includes('test') ||
+        title.includes('verify') ||
+        title.includes('validate') ||
+        title.includes('check') ||
+        title.includes('lint')
+    ) {
         return 'verification';
     }
-    if (title.includes('package') || title.includes('deploy') || title.includes('publish') || title.includes('report') || title.includes('document')) {
+    if (
+        title.includes('package') ||
+        title.includes('deploy') ||
+        title.includes('publish') ||
+        title.includes('report') ||
+        title.includes('document')
+    ) {
         return 'packaging';
     }
 
@@ -429,27 +465,42 @@ function inferPhase(task: RunTask): RunPhase {
 
 function getStatusEmoji(status: string): string {
     switch (status) {
-        case 'idle': return '⏸️';
-        case 'running': return '🔄';
-        case 'cancelling': return '⏹️';
-        case 'completed': return '✅';
-        case 'failed': return '❌';
-        default: return '❓';
+        case 'idle':
+            return '⏸️';
+        case 'running':
+            return '🔄';
+        case 'cancelling':
+            return '⏹️';
+        case 'completed':
+            return '✅';
+        case 'failed':
+            return '❌';
+        default:
+            return '❓';
     }
 }
 
 function getTaskEmoji(status: TaskStatus): string {
     switch (status) {
-        case 'queued': return '⏳';
-        case 'running': return '🔄';
-        case 'done': return '✅';
-        case 'failed': return '❌';
-        case 'cancelled': return '⏹️';
-        default: return '❓';
+        case 'queued':
+            return '⏳';
+        case 'running':
+            return '🔄';
+        case 'done':
+            return '✅';
+        case 'failed':
+            return '❌';
+        case 'cancelled':
+            return '⏹️';
+        default:
+            return '❓';
     }
 }
 
-function getPhaseStatus(counts: { queued: number; running: number; done: number; failed: number }, total: number): { label: string; emoji: string } {
+function getPhaseStatus(
+    counts: { queued: number; running: number; done: number; failed: number },
+    total: number,
+): { label: string; emoji: string } {
     if (counts.done === total) {
         return { label: `${total} done`, emoji: '✅' };
     }
@@ -467,24 +518,39 @@ function getPhaseStatus(counts: { queued: number; running: number; done: number;
 
 function getNodeStyle(status: string): string {
     // Mermaid class styling is complex — use shape hints instead
-    if (status.startsWith('✅')) { return ''; }
-    if (status.startsWith('🔄')) { return ''; }
-    if (status.startsWith('❌')) { return ''; }
+    if (status.startsWith('✅')) {
+        return '';
+    }
+    if (status.startsWith('🔄')) {
+        return '';
+    }
+    if (status.startsWith('❌')) {
+        return '';
+    }
     return '';
 }
 
-function countStatuses(tasks: RunTask[]): { queued: number; running: number; done: number; failed: number } {
+function countStatuses(tasks: RunTask[]): {
+    queued: number;
+    running: number;
+    done: number;
+    failed: number;
+} {
     return {
-        queued: tasks.filter(t => t.status === 'queued').length,
-        running: tasks.filter(t => t.status === 'running').length,
-        done: tasks.filter(t => t.status === 'done').length,
-        failed: tasks.filter(t => t.status === 'failed').length,
+        queued: tasks.filter((t) => t.status === 'queued').length,
+        running: tasks.filter((t) => t.status === 'running').length,
+        done: tasks.filter((t) => t.status === 'done').length,
+        failed: tasks.filter((t) => t.status === 'failed').length,
     };
 }
 
 function formatElapsed(ms: number): string {
-    if (ms < 1000) { return '<1s'; }
-    if (ms < 60_000) { return `${Math.round(ms / 1000)}s`; }
+    if (ms < 1000) {
+        return '<1s';
+    }
+    if (ms < 60_000) {
+        return `${Math.round(ms / 1000)}s`;
+    }
     const mins = Math.floor(ms / 60_000);
     const secs = Math.round((ms % 60_000) / 1000);
     if (mins < 60) {
@@ -496,10 +562,16 @@ function formatElapsed(ms: number): string {
 }
 
 function formatTimeAgo(ms: number): string {
-    if (ms < 1000) { return '<1s'; }
-    if (ms < 60_000) { return `${Math.round(ms / 1000)}s`; }
+    if (ms < 1000) {
+        return '<1s';
+    }
+    if (ms < 60_000) {
+        return `${Math.round(ms / 1000)}s`;
+    }
     const mins = Math.floor(ms / 60_000);
-    if (mins < 60) { return `${mins}m`; }
+    if (mins < 60) {
+        return `${mins}m`;
+    }
     const hours = Math.floor(mins / 60);
     return `${hours}h`;
 }

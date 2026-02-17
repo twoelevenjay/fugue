@@ -213,7 +213,11 @@ export class RunStateManager {
         const folders = vscode.workspace.workspaceFolders;
         if (folders && folders.length > 0) {
             this.persistDir = vscode.Uri.joinPath(
-                folders[0].uri, '.vscode', 'johann', 'sessions', runId
+                folders[0].uri,
+                '.vscode',
+                'johann',
+                'sessions',
+                runId,
             );
         }
 
@@ -244,7 +248,9 @@ export class RunStateManager {
      * Mark the run as cancelling (user hit Stop).
      */
     async cancelRun(): Promise<void> {
-        if (!this.state) { return; }
+        if (!this.state) {
+            return;
+        }
         this.state.status = 'cancelling';
         this.touch();
         await this.persist();
@@ -255,7 +261,9 @@ export class RunStateManager {
      * Mark the run as completed.
      */
     async completeRun(): Promise<void> {
-        if (!this.state) { return; }
+        if (!this.state) {
+            return;
+        }
         this.state.status = 'completed';
         this.touch();
         await this.persist();
@@ -266,7 +274,9 @@ export class RunStateManager {
      * Mark the run as failed.
      */
     async failRun(_error?: string): Promise<void> {
-        if (!this.state) { return; }
+        if (!this.state) {
+            return;
+        }
         this.state.status = 'failed';
         this.touch();
         await this.persist();
@@ -277,7 +287,9 @@ export class RunStateManager {
      * Set the plan summary (after planning phase).
      */
     async setPlanSummary(summary: string): Promise<void> {
-        if (!this.state) { return; }
+        if (!this.state) {
+            return;
+        }
         this.state.planSummary = summary;
         this.touch();
         await this.persist();
@@ -297,15 +309,19 @@ export class RunStateManager {
     /**
      * Register tasks from an orchestration plan.
      */
-    async registerTasks(tasks: Array<{
-        id: string;
-        title: string;
-        phase?: RunPhase;
-    }>): Promise<void> {
-        if (!this.state) { return; }
+    async registerTasks(
+        tasks: Array<{
+            id: string;
+            title: string;
+            phase?: RunPhase;
+        }>,
+    ): Promise<void> {
+        if (!this.state) {
+            return;
+        }
 
         for (const t of tasks) {
-            if (!this.state.tasks.find(rt => rt.id === t.id)) {
+            if (!this.state.tasks.find((rt) => rt.id === t.id)) {
                 this.state.tasks.push({
                     id: t.id,
                     title: t.title,
@@ -328,25 +344,43 @@ export class RunStateManager {
      */
     async updateTask(
         taskId: string,
-        update: Partial<Pick<RunTask, 'status' | 'progressMessage' | 'model' | 'phase' | 'artifacts'>>
+        update: Partial<
+            Pick<RunTask, 'status' | 'progressMessage' | 'model' | 'phase' | 'artifacts'>
+        >,
     ): Promise<void> {
-        if (!this.state) { return; }
-        const task = this.state.tasks.find(t => t.id === taskId);
-        if (!task) { return; }
+        if (!this.state) {
+            return;
+        }
+        const task = this.state.tasks.find((t) => t.id === taskId);
+        if (!task) {
+            return;
+        }
 
         if (update.status !== undefined) {
             task.status = update.status;
             if (update.status === 'running' && !task.startedAt) {
                 task.startedAt = new Date().toISOString();
             }
-            if (update.status === 'done' || update.status === 'failed' || update.status === 'cancelled') {
+            if (
+                update.status === 'done' ||
+                update.status === 'failed' ||
+                update.status === 'cancelled'
+            ) {
                 task.completedAt = new Date().toISOString();
             }
         }
-        if (update.progressMessage !== undefined) { task.progressMessage = update.progressMessage; }
-        if (update.model !== undefined) { task.model = update.model; }
-        if (update.phase !== undefined) { task.phase = update.phase; }
-        if (update.artifacts !== undefined) { task.artifacts = update.artifacts; }
+        if (update.progressMessage !== undefined) {
+            task.progressMessage = update.progressMessage;
+        }
+        if (update.model !== undefined) {
+            task.model = update.model;
+        }
+        if (update.phase !== undefined) {
+            task.phase = update.phase;
+        }
+        if (update.artifacts !== undefined) {
+            task.artifacts = update.artifacts;
+        }
 
         this.recomputeCounters();
         this.touch();
@@ -362,7 +396,9 @@ export class RunStateManager {
      * Register a subagent invocation.
      */
     async registerSubagent(subagent: Omit<RunSubagent, 'createdAt'>): Promise<void> {
-        if (!this.state) { return; }
+        if (!this.state) {
+            return;
+        }
 
         this.state.subagents.push({
             ...subagent,
@@ -379,11 +415,15 @@ export class RunStateManager {
      */
     async updateSubagent(
         subagentId: string,
-        update: Partial<Pick<RunSubagent, 'status' | 'summary' | 'result'>>
+        update: Partial<Pick<RunSubagent, 'status' | 'summary' | 'result'>>,
     ): Promise<void> {
-        if (!this.state) { return; }
-        const sa = this.state.subagents.find(s => s.id === subagentId);
-        if (!sa) { return; }
+        if (!this.state) {
+            return;
+        }
+        const sa = this.state.subagents.find((s) => s.id === subagentId);
+        if (!sa) {
+            return;
+        }
 
         if (update.status !== undefined) {
             sa.status = update.status;
@@ -391,8 +431,12 @@ export class RunStateManager {
                 sa.completedAt = new Date().toISOString();
             }
         }
-        if (update.summary !== undefined) { sa.summary = update.summary; }
-        if (update.result !== undefined) { sa.result = update.result; }
+        if (update.summary !== undefined) {
+            sa.summary = update.summary;
+        }
+        if (update.result !== undefined) {
+            sa.result = update.result;
+        }
 
         this.touch();
         await this.persist();
@@ -412,7 +456,7 @@ export class RunStateManager {
             throw new Error('No active run to enqueue into');
         }
 
-        const position = this.state.userQueue.filter(q => !q.integrated).length + 1;
+        const position = this.state.userQueue.filter((q) => !q.integrated).length + 1;
 
         this.state.userQueue.push({
             id: `uq-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -432,16 +476,20 @@ export class RunStateManager {
      * Get pending (un-integrated) user messages.
      */
     getPendingUserMessages(): QueuedUserMessage[] {
-        if (!this.state) { return []; }
-        return this.state.userQueue.filter(q => !q.integrated);
+        if (!this.state) {
+            return [];
+        }
+        return this.state.userQueue.filter((q) => !q.integrated);
     }
 
     /**
      * Mark a user message as integrated into the task graph.
      */
     async markUserMessageIntegrated(messageId: string): Promise<void> {
-        if (!this.state) { return; }
-        const msg = this.state.userQueue.find(q => q.id === messageId);
+        if (!this.state) {
+            return;
+        }
+        const msg = this.state.userQueue.find((q) => q.id === messageId);
         if (msg) {
             msg.integrated = true;
         }
@@ -457,7 +505,9 @@ export class RunStateManager {
      * Record that a snapshot was just generated.
      */
     async recordSnapshot(): Promise<void> {
-        if (!this.state) { return; }
+        if (!this.state) {
+            return;
+        }
         this.state.lastSnapshotAt = new Date().toISOString();
         await this.persist();
     }
@@ -467,8 +517,12 @@ export class RunStateManager {
      * @param minIntervalMs Minimum interval between snapshots (default: 2 minutes).
      */
     canSnapshot(minIntervalMs: number = 120_000): boolean {
-        if (!this.state) { return false; }
-        if (!this.state.lastSnapshotAt) { return true; }
+        if (!this.state) {
+            return false;
+        }
+        if (!this.state.lastSnapshotAt) {
+            return true;
+        }
         const elapsed = Date.now() - new Date(this.state.lastSnapshotAt).getTime();
         return elapsed >= minIntervalMs;
     }
@@ -484,12 +538,14 @@ export class RunStateManager {
     }
 
     private recomputeCounters(): void {
-        if (!this.state) { return; }
+        if (!this.state) {
+            return;
+        }
         this.state.counters = {
-            queued: this.state.tasks.filter(t => t.status === 'queued').length,
-            running: this.state.tasks.filter(t => t.status === 'running').length,
-            done: this.state.tasks.filter(t => t.status === 'done').length,
-            failed: this.state.tasks.filter(t => t.status === 'failed').length,
+            queued: this.state.tasks.filter((t) => t.status === 'queued').length,
+            running: this.state.tasks.filter((t) => t.status === 'running').length,
+            done: this.state.tasks.filter((t) => t.status === 'done').length,
+            failed: this.state.tasks.filter((t) => t.status === 'failed').length,
         };
     }
 
@@ -497,7 +553,9 @@ export class RunStateManager {
      * Persist RunState to disk alongside the session.
      */
     private async persist(): Promise<void> {
-        if (!this.state || !this.persistDir) { return; }
+        if (!this.state || !this.persistDir) {
+            return;
+        }
         try {
             const uri = vscode.Uri.joinPath(this.persistDir, 'run-state.json');
             const content = JSON.stringify(this.state, null, 2);

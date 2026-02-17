@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { BackgroundTask, BackgroundTaskStatus, BackgroundTaskProgress } from './types';
 import { safeWrite } from './safeIO';
 
@@ -42,13 +41,10 @@ export class BackgroundTaskManager {
 
     private constructor() {
         // Create status bar item for showing active tasks
-        this.statusBarItem = vscode.window.createStatusBarItem(
-            vscode.StatusBarAlignment.Left,
-            100
-        );
+        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
         this.statusBarItem.command = 'johann.showBackgroundTasks';
         this.disposables.push(this.statusBarItem);
-        
+
         // Initialize task directory
         this.initializeTaskDir();
     }
@@ -73,7 +69,7 @@ export class BackgroundTaskManager {
         }
 
         this.taskDir = vscode.Uri.joinPath(folders[0].uri, '.vscode', 'johann', 'tasks');
-        
+
         try {
             await vscode.workspace.fs.createDirectory(this.taskDir);
         } catch {
@@ -88,10 +84,10 @@ export class BackgroundTaskManager {
         sessionId: string,
         request: string,
         summary: string,
-        totalSubtasks: number
+        totalSubtasks: number,
     ): Promise<BackgroundTask> {
         const id = `task-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-        
+
         const task: BackgroundTask = {
             id,
             sessionId,
@@ -134,27 +130,24 @@ export class BackgroundTaskManager {
      * Get all running tasks.
      */
     getRunningTasks(): BackgroundTask[] {
-        return Array.from(this.tasks.values()).filter(t => t.status === 'running');
+        return Array.from(this.tasks.values()).filter((t) => t.status === 'running');
     }
 
     /**
      * Update task progress.
      */
-    async updateProgress(
-        id: string,
-        progress: Partial<BackgroundTaskProgress>
-    ): Promise<void> {
+    async updateProgress(id: string, progress: Partial<BackgroundTaskProgress>): Promise<void> {
         const task = this.tasks.get(id);
         if (!task) {
             return;
         }
 
         task.progress = { ...task.progress, ...progress };
-        
+
         // Recalculate percentage
         if (task.progress.totalSubtasks > 0) {
             task.progress.percentage = Math.round(
-                (task.progress.completedSubtasks / task.progress.totalSubtasks) * 100
+                (task.progress.completedSubtasks / task.progress.totalSubtasks) * 100,
             );
         }
 
@@ -165,11 +158,7 @@ export class BackgroundTaskManager {
     /**
      * Update task status.
      */
-    async updateStatus(
-        id: string,
-        status: BackgroundTaskStatus,
-        error?: string
-    ): Promise<void> {
+    async updateStatus(id: string, status: BackgroundTaskStatus, error?: string): Promise<void> {
         const task = this.tasks.get(id);
         if (!task) {
             return;
@@ -179,35 +168,39 @@ export class BackgroundTaskManager {
         if (error) {
             task.error = error;
         }
-        
+
         if (status === 'completed' || status === 'failed' || status === 'cancelled') {
             task.completedAt = new Date().toISOString();
-            
+
             // Show notification
             if (status === 'completed') {
-                vscode.window.showInformationMessage(
-                    `✅ Johann completed: "${task.summary}"`,
-                    'View Results',
-                    'Show Memory'
-                ).then(choice => {
-                    if (choice === 'View Results') {
-                        vscode.commands.executeCommand('johann.showTaskStatus', id);
-                    } else if (choice === 'Show Memory') {
-                        vscode.commands.executeCommand('johann.showMemory');
-                    }
-                });
+                vscode.window
+                    .showInformationMessage(
+                        `✅ Johann completed: "${task.summary}"`,
+                        'View Results',
+                        'Show Memory',
+                    )
+                    .then((choice) => {
+                        if (choice === 'View Results') {
+                            vscode.commands.executeCommand('johann.showTaskStatus', id);
+                        } else if (choice === 'Show Memory') {
+                            vscode.commands.executeCommand('johann.showMemory');
+                        }
+                    });
             } else if (status === 'failed') {
-                vscode.window.showErrorMessage(
-                    `❌ Johann task failed: "${error || 'Unknown error'}"`,
-                    'View Logs',
-                    'Retry'
-                ).then(choice => {
-                    if (choice === 'View Logs') {
-                        vscode.commands.executeCommand('johann.showDebugLog');
-                    } else if (choice === 'Retry') {
-                        // TODO: Implement retry logic
-                    }
-                });
+                vscode.window
+                    .showErrorMessage(
+                        `❌ Johann task failed: "${error || 'Unknown error'}"`,
+                        'View Logs',
+                        'Retry',
+                    )
+                    .then((choice) => {
+                        if (choice === 'View Logs') {
+                            vscode.commands.executeCommand('johann.showDebugLog');
+                        } else if (choice === 'Retry') {
+                            // TODO: Implement retry logic
+                        }
+                    });
             }
         }
 
@@ -239,9 +232,13 @@ export class BackgroundTaskManager {
      */
     async clearCompletedTasks(): Promise<void> {
         const toRemove: string[] = [];
-        
+
         for (const [id, task] of this.tasks.entries()) {
-            if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+            if (
+                task.status === 'completed' ||
+                task.status === 'failed' ||
+                task.status === 'cancelled'
+            ) {
                 toRemove.push(id);
             }
         }
@@ -266,14 +263,14 @@ export class BackgroundTaskManager {
 
         try {
             const entries = await vscode.workspace.fs.readDirectory(this.taskDir);
-            
+
             for (const [name, type] of entries) {
                 if (type === vscode.FileType.File && name.endsWith('.json')) {
                     const taskUri = vscode.Uri.joinPath(this.taskDir, name);
                     try {
                         const content = await vscode.workspace.fs.readFile(taskUri);
                         const metadata: TaskMetadata = JSON.parse(content.toString());
-                        
+
                         // Only include incomplete tasks
                         if (metadata.status === 'running' || metadata.status === 'paused') {
                             incomplete.push(metadata);
@@ -307,10 +304,11 @@ export class BackgroundTaskManager {
         lines.push(`**Type:** ${task.type}`);
         lines.push(`**Status:** ${task.status}`);
         lines.push(`**Started:** ${new Date(task.startedAt).toLocaleString()}`);
-        
+
         if (task.completedAt) {
             lines.push(`**Completed:** ${new Date(task.completedAt).toLocaleString()}`);
-            const duration = new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime();
+            const duration =
+                new Date(task.completedAt).getTime() - new Date(task.startedAt).getTime();
             lines.push(`**Duration:** ${this.formatDuration(duration)}`);
         }
 
@@ -324,7 +322,9 @@ export class BackgroundTaskManager {
             lines.push(`## Progress`);
             lines.push('');
             lines.push(`**Phase:** ${task.progress.phase}`);
-            lines.push(`**Subtasks:** ${task.progress.completedSubtasks}/${task.progress.totalSubtasks} (${task.progress.percentage}%)`);
+            lines.push(
+                `**Subtasks:** ${task.progress.completedSubtasks}/${task.progress.totalSubtasks} (${task.progress.percentage}%)`,
+            );
             lines.push('');
         }
 
@@ -385,7 +385,7 @@ export class BackgroundTaskManager {
 
         const taskUri = vscode.Uri.joinPath(this.taskDir, `${task.id}.json`);
         const content = JSON.stringify(metadata, null, 2);
-        
+
         try {
             await safeWrite(taskUri, content);
         } catch {
@@ -402,7 +402,7 @@ export class BackgroundTaskManager {
         }
 
         const taskUri = vscode.Uri.joinPath(this.taskDir, `${id}.json`);
-        
+
         try {
             await vscode.workspace.fs.delete(taskUri);
         } catch {
@@ -415,7 +415,7 @@ export class BackgroundTaskManager {
      */
     private updateStatusBar(): void {
         const runningTasks = this.getRunningTasks();
-        
+
         if (runningTasks.length === 0) {
             this.statusBarItem.hide();
             return;
@@ -427,7 +427,7 @@ export class BackgroundTaskManager {
             this.statusBarItem.tooltip = `${task.summary}\n${task.progress.completedSubtasks}/${task.progress.totalSubtasks} subtasks`;
         } else {
             this.statusBarItem.text = `$(sync~spin) Johann: ${runningTasks.length} tasks`;
-            this.statusBarItem.tooltip = runningTasks.map(t => t.summary).join('\n');
+            this.statusBarItem.tooltip = runningTasks.map((t) => t.summary).join('\n');
         }
 
         this.statusBarItem.show();
@@ -440,7 +440,7 @@ export class BackgroundTaskManager {
         for (const task of this.tasks.values()) {
             task.cancellationToken.dispose();
         }
-        
+
         for (const disposable of this.disposables) {
             disposable.dispose();
         }

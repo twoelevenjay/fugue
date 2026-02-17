@@ -15,15 +15,9 @@ import { SubagentManager } from './subagentManager';
 import { MemorySystem } from './memory';
 import { getCopilotAgentSettings, getConfig } from './config';
 import { getLogger } from './logger';
-import {
-    classifyError,
-    extractErrorMessage,
-    withRetry,
-    REVIEW_RETRY_POLICY,
-    ClassifiedError,
-} from './retry';
+import { classifyError, withRetry, REVIEW_RETRY_POLICY, ClassifiedError } from './retry';
 import { DebugConversationLog } from './debugConversationLog';
-import { WorktreeManager, WorktreeMergeResult } from './worktreeManager';
+import { WorktreeManager } from './worktreeManager';
 import { ExecutionLedger } from './executionLedger';
 import { ChatProgressReporter } from './chatProgressReporter';
 import { BackgroundProgressReporter } from './backgroundProgressReporter';
@@ -32,14 +26,13 @@ import { ProgressReporter } from './progressEvents';
 import { RateLimitGuard } from './rateLimitGuard';
 import { SessionPersistence, ResumableSession } from './sessionPersistence';
 import { MultiPassExecutor } from './multiPassExecutor';
-import { getMultiPassStrategy } from './multiPassStrategies';
 import { ToolVerifier } from './toolVerifier';
 import { getExecutionWaves, getDownstreamTasks, validateGraph } from './graphManager';
 import { HookRunner, createDefaultHookRunner } from './hooks';
 import { FlowCorrectionManager } from './flowCorrection';
-import { DelegationGuard, getDelegationPolicy, buildDelegationConstraintBlock, DelegationPolicy } from './delegationPolicy';
-import { SelfHealingDetector, DetectedFailure } from './selfHealing';
-import { LocalSkillStore, GlobalSkillStore } from './skillStore';
+import { DelegationGuard } from './delegationPolicy';
+import { SelfHealingDetector } from './selfHealing';
+import { LocalSkillStore } from './skillStore';
 import { SkillValidator } from './skillValidator';
 import { SkillDoc } from './skillTypes';
 import { RunStateManager, RunPhase } from './runState';
@@ -179,7 +172,7 @@ export class Orchestrator {
         resumable: ResumableSession,
         userModel: vscode.LanguageModelChat,
         response: vscode.ChatResponseStream,
-        token: vscode.CancellationToken
+        token: vscode.CancellationToken,
     ): Promise<boolean> {
         if (!resumable.plan || resumable.pendingSubtaskIds.length === 0) {
             return false;
@@ -208,7 +201,10 @@ export class Orchestrator {
 
         const completed = resumable.completedSubtaskIds.length;
         const total = plan.subtasks.length;
-        reporter.phase('Resuming', `${completed}/${total} subtasks done, ${resumable.pendingSubtaskIds.length} remaining`);
+        reporter.phase(
+            'Resuming',
+            `${completed}/${total} subtasks done, ${resumable.pendingSubtaskIds.length} remaining`,
+        );
 
         // If a resume message was provided, log it and prepend to workspace context
         // so subagents get the course-correction instruction
@@ -222,7 +218,10 @@ export class Orchestrator {
         await debugLog.initialize();
         reporter.setDebugLogUri(debugLog.getLogUri());
 
-        await debugLog.logEvent('resume', `Resuming session with ${completed}/${total} subtasks completed${resumeMessage ? ` — message: ${resumeMessage}` : ''}`);
+        await debugLog.logEvent(
+            'resume',
+            `Resuming session with ${completed}/${total} subtasks completed${resumeMessage ? ` — message: ${resumeMessage}` : ''}`,
+        );
 
         // Pre-populate results from completed subtasks
         const results = new Map<string, SubtaskResult>(resumable.subtaskResults);
@@ -232,7 +231,8 @@ export class Orchestrator {
             reporter.phase('Executing', `${resumable.pendingSubtaskIds.length} remaining subtasks`);
 
             // Use workspace context from disk, plus any course-correction message
-            let workspaceContext = resumable.workspaceContext || await this.getMinimalWorkspaceContext();
+            let workspaceContext =
+                resumable.workspaceContext || (await this.getMinimalWorkspaceContext());
             if (resumeMessage) {
                 workspaceContext = `=== COURSE CORRECTION (from user on resume) ===\n${resumeMessage}\n\n---\n\n${workspaceContext}`;
             }
@@ -241,11 +241,13 @@ export class Orchestrator {
             const resumeLedger = new ExecutionLedger(
                 resumable.sessionId,
                 resumable.originalRequest,
-                plan.summary
+                plan.summary,
             );
             const resumeLedgerReady = await resumeLedger.initialize();
             if (resumeLedgerReady) {
-                resumeLedger.registerSubtasks(plan.subtasks.map(st => ({ id: st.id, title: st.title })));
+                resumeLedger.registerSubtasks(
+                    plan.subtasks.map((st) => ({ id: st.id, title: st.title })),
+                );
                 // Mark already-completed subtasks in the ledger
                 for (const completedId of resumable.completedSubtaskIds) {
                     const result = results.get(completedId);
@@ -265,10 +267,10 @@ export class Orchestrator {
                 debugLog,
                 undefined, // no worktree manager for resume (keep it simple)
                 persist,
-                results,   // pass prior results so dependencies are satisfied
+                results, // pass prior results so dependencies are satisfied
                 undefined, // no toolToken for resume
                 resumeLedgerReady ? resumeLedger : undefined,
-                this.hookRunner
+                this.hookRunner,
             );
 
             // Merge all results together
@@ -288,7 +290,7 @@ export class Orchestrator {
                 userModel,
                 token,
                 reporter.stream,
-                debugLog
+                debugLog,
             );
 
             reporter.showButtons();
@@ -298,18 +300,18 @@ export class Orchestrator {
             session.completedAt = new Date().toISOString();
             await persist.markCompleted(session);
 
-            const subtaskResultSummaries = plan.subtasks.map(st => ({
+            const subtaskResultSummaries = plan.subtasks.map((st) => ({
                 title: st.title,
                 model: st.result?.modelUsed || 'unknown',
                 success: st.result?.success ?? false,
                 notes: st.result?.reviewNotes || '',
             }));
-            const overallSuccess = plan.subtasks.every(st => st.result?.success);
+            const overallSuccess = plan.subtasks.every((st) => st.result?.success);
 
             await this.memory.recordTaskCompletion(
                 plan.summary,
                 subtaskResultSummaries,
-                overallSuccess
+                overallSuccess,
             );
 
             await debugLog.finalize('completed');
@@ -334,7 +336,9 @@ export class Orchestrator {
      */
     private async getMinimalWorkspaceContext(): Promise<string> {
         const folders = vscode.workspace.workspaceFolders;
-        if (!folders) return 'No workspace open.';
+        if (!folders) {
+            return 'No workspace open.';
+        }
         return `Workspace: ${folders[0].uri.fsPath}`;
     }
 
@@ -355,7 +359,7 @@ export class Orchestrator {
         fullContext: string,
         subagentContext: string,
         userModel: vscode.LanguageModelChat,
-        toolToken?: vscode.ChatParticipantToolToken
+        toolToken?: vscode.ChatParticipantToolToken,
     ): Promise<string> {
         const taskManager = BackgroundTaskManager.getInstance();
 
@@ -368,7 +372,7 @@ export class Orchestrator {
             sessionId,
             request,
             summary,
-            0 // Initial totalSubtasks - will be updated after planning
+            0, // Initial totalSubtasks - will be updated after planning
         );
 
         // Execute orchestration in background
@@ -380,7 +384,7 @@ export class Orchestrator {
             subagentContext,
             userModel,
             task.cancellationToken.token,
-            toolToken
+            toolToken,
         );
 
         return task.id;
@@ -398,7 +402,7 @@ export class Orchestrator {
         subagentContext: string,
         userModel: vscode.LanguageModelChat,
         token: vscode.CancellationToken,
-        toolToken?: vscode.ChatParticipantToolToken
+        toolToken?: vscode.ChatParticipantToolToken,
     ): Promise<void> {
         const taskManager = BackgroundTaskManager.getInstance();
         const task = taskManager.getTask(taskId);
@@ -453,8 +457,9 @@ export class Orchestrator {
                 if (capSummary) {
                     enrichedSubagentContext = capSummary + '\n\n' + subagentContext;
                 }
-                await debugLog.logEvent('other',
-                    `Bootstrap: ${bootstrapResult.capabilities.map(c => c.name).join(', ')} detected`
+                await debugLog.logEvent(
+                    'other',
+                    `Bootstrap: ${bootstrapResult.capabilities.map((c) => c.name).join(', ')} detected`,
                 );
             }
         } catch {
@@ -465,8 +470,14 @@ export class Orchestrator {
             // == PHASE 1: PLANNING ==
             reporter.phase('Planning', 'Analyzing request and creating plan');
 
-            await debugLog.logEvent('planning', `Starting planning for: ${request.substring(0, 200)}`);
-            await persist.appendExecutionLog('PLANNING', `Starting planning for: ${request.substring(0, 200)}`);
+            await debugLog.logEvent(
+                'planning',
+                `Starting planning for: ${request.substring(0, 200)}`,
+            );
+            await persist.appendExecutionLog(
+                'PLANNING',
+                `Starting planning for: ${request.substring(0, 200)}`,
+            );
 
             const plan = await this.taskDecomposer.decompose(
                 request,
@@ -476,7 +487,7 @@ export class Orchestrator {
                 token,
                 undefined, // No stream in background mode
                 debugLog,
-                persist
+                persist,
             );
 
             session.plan = plan;
@@ -485,7 +496,10 @@ export class Orchestrator {
             // Persist plan
             await persist.writePlan(plan);
             await persist.writeSession(session);
-            await persist.appendExecutionLog('PLAN SAVED', `${plan.subtasks.length} subtasks, strategy: ${plan.strategy}`);
+            await persist.appendExecutionLog(
+                'PLAN SAVED',
+                `${plan.subtasks.length} subtasks, strategy: ${plan.strategy}`,
+            );
 
             // Update progress reporter with plan
             reporter.showPlan(plan);
@@ -494,14 +508,22 @@ export class Orchestrator {
             // == PHASE 2: EXECUTION ==
             reporter.phase('Executing', `${plan.subtasks.length} subtasks`);
 
-            await debugLog.logEvent('subtask-execution', `Starting execution of ${plan.subtasks.length} subtasks`);
+            await debugLog.logEvent(
+                'subtask-execution',
+                `Starting execution of ${plan.subtasks.length} subtasks`,
+            );
 
             // Initialize the Execution Ledger for shared real-time context
             const ledger = new ExecutionLedger(session.sessionId, request, plan.summary);
             const ledgerReady = await ledger.initialize();
             if (ledgerReady) {
-                ledger.registerSubtasks(plan.subtasks.map(st => ({ id: st.id, title: st.title })));
-                await debugLog.logEvent('other', `Execution ledger initialized with ${plan.subtasks.length} subtasks`);
+                ledger.registerSubtasks(
+                    plan.subtasks.map((st) => ({ id: st.id, title: st.title })),
+                );
+                await debugLog.logEvent(
+                    'other',
+                    `Execution ledger initialized with ${plan.subtasks.length} subtasks`,
+                );
             }
 
             // Initialize worktree manager for parallel isolation
@@ -512,7 +534,10 @@ export class Orchestrator {
                     worktreeManager = new WorktreeManager(workspaceRoot, session.sessionId);
                     const wtInitialized = await worktreeManager.initialize();
                     if (wtInitialized) {
-                        await debugLog.logEvent('worktree', `Worktree manager initialized (base: ${worktreeManager.getBaseBranch()})`);
+                        await debugLog.logEvent(
+                            'worktree',
+                            `Worktree manager initialized (base: ${worktreeManager.getBaseBranch()})`,
+                        );
                     } else {
                         worktreeManager = undefined;
                         reporter.emit({
@@ -536,7 +561,7 @@ export class Orchestrator {
                     undefined,
                     toolToken,
                     ledgerReady ? ledger : undefined,
-                    this.hookRunner
+                    this.hookRunner,
                 );
 
                 // == PHASE 3: MERGE & RESPOND ==
@@ -546,23 +571,19 @@ export class Orchestrator {
 
                 await debugLog.logEvent('merge', 'Starting result synthesis');
 
-                const finalOutput = await this.mergeResults(
+                const _finalOutput = await this.mergeResults(
                     request,
                     plan,
                     results,
                     userModel,
                     token,
                     undefined, // No stream in background mode
-                    debugLog
+                    debugLog,
                 );
 
                 // Store final output in task summary
                 const summary = reporter.getSummary();
-                await taskManager.updateStatus(
-                    taskId,
-                    'completed',
-                    undefined
-                );
+                await taskManager.updateStatus(taskId, 'completed', undefined);
 
                 // Update task with completion summary
                 const completedTask = taskManager.getTask(taskId);
@@ -587,19 +608,19 @@ export class Orchestrator {
 
             await persist.markCompleted(session);
 
-            const subtaskResultSummaries = plan.subtasks.map(st => ({
+            const subtaskResultSummaries = plan.subtasks.map((st) => ({
                 title: st.title,
                 model: st.result?.modelUsed || 'unknown',
                 success: st.result?.success ?? false,
                 notes: st.result?.reviewNotes || '',
             }));
 
-            const overallSuccess = plan.subtasks.every(st => st.result?.success);
+            const overallSuccess = plan.subtasks.every((st) => st.result?.success);
 
             await this.memory.recordTaskCompletion(
                 plan.summary,
                 subtaskResultSummaries,
-                overallSuccess
+                overallSuccess,
             );
 
             // Record escalation learnings
@@ -607,14 +628,13 @@ export class Orchestrator {
                 if (escalation.attempts.length > 1) {
                     await this.memory.recordLearning(
                         `Escalation pattern for subtask ${escalation.subtaskId}`,
-                        `Tried ${escalation.attempts.length} models: ${escalation.attempts.map(a => `${a.modelId} (tier ${a.tier}): ${a.success ? 'OK' : a.reason}`).join(' → ')}`,
-                        ['escalation', 'model-selection']
+                        `Tried ${escalation.attempts.length} models: ${escalation.attempts.map((a) => `${a.modelId} (tier ${a.tier}): ${a.success ? 'OK' : a.reason}`).join(' → ')}`,
+                        ['escalation', 'model-selection'],
                     );
                 }
             }
 
             await debugLog.finalize('completed');
-
         } catch (err) {
             session.status = 'failed';
             const classified = classifyError(err);
@@ -630,7 +650,7 @@ export class Orchestrator {
 
             await this.memory.recordError(
                 classified.message,
-                `Session: ${session.sessionId}, Category: ${classified.category}, Request: ${request.substring(0, 200)}`
+                `Session: ${session.sessionId}, Category: ${classified.category}, Request: ${request.substring(0, 200)}`,
             );
 
             await debugLog.finalize('failed', classified.message);
@@ -659,7 +679,7 @@ export class Orchestrator {
         userModel: vscode.LanguageModelChat,
         response: vscode.ChatResponseStream,
         token: vscode.CancellationToken,
-        toolToken?: vscode.ChatParticipantToolToken
+        toolToken?: vscode.ChatParticipantToolToken,
     ): Promise<void> {
         const session: JohannSession = {
             sessionId: this.generateSessionId(),
@@ -670,9 +690,6 @@ export class Orchestrator {
             startedAt: new Date().toISOString(),
             workspaceContext: subagentContext,
         };
-
-        // Track total LLM requests for awareness
-        let totalLlmRequests = 0;
 
         // Create progress reporter for structured chat output
         const reporter = new ChatProgressReporter(response);
@@ -692,7 +709,7 @@ export class Orchestrator {
         if (!persistReady) {
             response.markdown(
                 '\n\n> **⚠️ Warning:** Session persistence failed to initialize. ' +
-                'The plan will only exist in memory and cannot be resumed if interrupted.\n\n'
+                    'The plan will only exist in memory and cannot be resumed if interrupted.\n\n',
             );
         }
         await persist.writeSession(session);
@@ -700,7 +717,11 @@ export class Orchestrator {
 
         // Check Copilot settings and warn if low limits
         const copilotSettings = getCopilotAgentSettings();
-        if (copilotSettings.readable && copilotSettings.maxRequests > 0 && copilotSettings.maxRequests < 50) {
+        if (
+            copilotSettings.readable &&
+            copilotSettings.maxRequests > 0 &&
+            copilotSettings.maxRequests < 50
+        ) {
             reporter.emit({
                 type: 'note',
                 message: `**Copilot request limit is set to ${copilotSettings.maxRequests}.** Complex orchestrations may be interrupted. Consider increasing \`github.copilot.chat.agent.maxRequests\` or type \`/yolo on\` for guidance.`,
@@ -729,14 +750,16 @@ export class Orchestrator {
         try {
             bootstrapResult = await scanBootstrapContext();
             if (bootstrapResult.hasContext) {
-                await debugLog.logEvent('other',
-                    `Bootstrap: ${bootstrapResult.capabilities.map(c => c.name).join(', ')} detected`
+                await debugLog.logEvent(
+                    'other',
+                    `Bootstrap: ${bootstrapResult.capabilities.map((c) => c.name).join(', ')} detected`,
                 );
             }
         } catch (bootstrapErr) {
             // Non-critical — proceed without bootstrap context
-            await debugLog.logEvent('other',
-                `Bootstrap scan failed: ${bootstrapErr instanceof Error ? bootstrapErr.message : String(bootstrapErr)}`
+            await debugLog.logEvent(
+                'other',
+                `Bootstrap scan failed: ${bootstrapErr instanceof Error ? bootstrapErr.message : String(bootstrapErr)}`,
             );
         }
 
@@ -758,8 +781,14 @@ export class Orchestrator {
             await this.hookRunner.run('on_session_start', { request, session });
             reporter.phase('Planning', 'Analyzing request and creating plan');
 
-            await debugLog.logEvent('planning', `Starting planning for: ${request.substring(0, 200)}`);
-            await persist.appendExecutionLog('PLANNING', `Starting planning for: ${request.substring(0, 200)}`);
+            await debugLog.logEvent(
+                'planning',
+                `Starting planning for: ${request.substring(0, 200)}`,
+            );
+            await persist.appendExecutionLog(
+                'PLANNING',
+                `Starting planning for: ${request.substring(0, 200)}`,
+            );
 
             await this.hookRunner.run('before_planning', { request, session });
 
@@ -771,7 +800,7 @@ export class Orchestrator {
                 token,
                 reporter.stream,
                 debugLog,
-                persist
+                persist,
             );
 
             session.plan = plan;
@@ -783,7 +812,10 @@ export class Orchestrator {
             // Planning LLM cost is paid once and never repeated on resume.
             await persist.writePlan(plan);
             await persist.writeSession(session);
-            await persist.appendExecutionLog('PLAN SAVED', `${plan.subtasks.length} subtasks, strategy: ${plan.strategy}`);
+            await persist.appendExecutionLog(
+                'PLAN SAVED',
+                `${plan.subtasks.length} subtasks, strategy: ${plan.strategy}`,
+            );
 
             // Show the plan
             reporter.showPlan(plan);
@@ -791,11 +823,11 @@ export class Orchestrator {
             // === RunState: register tasks from plan ===
             await runManager.setPlanSummary(plan.summary);
             await runManager.registerTasks(
-                plan.subtasks.map(st => ({
+                plan.subtasks.map((st) => ({
                     id: st.id,
                     title: st.title,
                     phase: this.inferRunPhase(st.title),
-                }))
+                })),
             );
 
             // Discover available models
@@ -805,14 +837,22 @@ export class Orchestrator {
             // == PHASE 2: EXECUTION ==
             reporter.phase('Executing', `${plan.subtasks.length} subtasks`);
 
-            await debugLog.logEvent('subtask-execution', `Starting execution of ${plan.subtasks.length} subtasks`);
+            await debugLog.logEvent(
+                'subtask-execution',
+                `Starting execution of ${plan.subtasks.length} subtasks`,
+            );
 
             // Initialize the Execution Ledger for shared real-time context
             const ledger2 = new ExecutionLedger(session.sessionId, request, plan.summary);
             const ledger2Ready = await ledger2.initialize();
             if (ledger2Ready) {
-                ledger2.registerSubtasks(plan.subtasks.map(st => ({ id: st.id, title: st.title })));
-                await debugLog.logEvent('other', `Execution ledger initialized with ${plan.subtasks.length} subtasks`);
+                ledger2.registerSubtasks(
+                    plan.subtasks.map((st) => ({ id: st.id, title: st.title })),
+                );
+                await debugLog.logEvent(
+                    'other',
+                    `Execution ledger initialized with ${plan.subtasks.length} subtasks`,
+                );
             }
 
             // Initialize worktree manager for parallel isolation
@@ -823,10 +863,17 @@ export class Orchestrator {
                     worktreeManager = new WorktreeManager(workspaceRoot, session.sessionId);
                     const wtInitialized = await worktreeManager.initialize();
                     if (wtInitialized) {
-                        await debugLog.logEvent('worktree', `Worktree manager initialized (base: ${worktreeManager.getBaseBranch()})`);
+                        await debugLog.logEvent(
+                            'worktree',
+                            `Worktree manager initialized (base: ${worktreeManager.getBaseBranch()})`,
+                        );
                     } else {
                         worktreeManager = undefined;
-                        reporter.emit({ type: 'note', message: 'Git worktree isolation unavailable (not a git repo or git not found). Parallel subtasks will share the workspace.' });
+                        reporter.emit({
+                            type: 'note',
+                            message:
+                                'Git worktree isolation unavailable (not a git repo or git not found). Parallel subtasks will share the workspace.',
+                        });
                     }
                 }
             }
@@ -834,7 +881,19 @@ export class Orchestrator {
             try {
                 // Pass enrichedSubagentContext (workspace context + environment capabilities,
                 // WITHOUT Johann's identity) so subagents know what tools are available
-                const results = await this.executePlan(plan, enrichedSubagentContext, reporter, token, debugLog, worktreeManager, persist, undefined, toolToken, ledger2Ready ? ledger2 : undefined, this.hookRunner);
+                const results = await this.executePlan(
+                    plan,
+                    enrichedSubagentContext,
+                    reporter,
+                    token,
+                    debugLog,
+                    worktreeManager,
+                    persist,
+                    undefined,
+                    toolToken,
+                    ledger2Ready ? ledger2 : undefined,
+                    this.hookRunner,
+                );
 
                 // == PHASE 3: MERGE & RESPOND ==
                 session.status = 'reviewing';
@@ -845,14 +904,14 @@ export class Orchestrator {
 
                 await this.hookRunner.run('before_merge', { request, session, plan });
 
-                const finalOutput = await this.mergeResults(
+                const _finalOutput = await this.mergeResults(
                     request,
                     plan,
                     results,
                     userModel,
                     token,
                     reporter.stream,
-                    debugLog
+                    debugLog,
                 );
 
                 await this.hookRunner.run('after_merge', { request, session, plan });
@@ -878,19 +937,19 @@ export class Orchestrator {
             // PERSIST — Mark session complete on disk
             await persist.markCompleted(session);
 
-            const subtaskResultSummaries = plan.subtasks.map(st => ({
+            const subtaskResultSummaries = plan.subtasks.map((st) => ({
                 title: st.title,
                 model: st.result?.modelUsed || 'unknown',
                 success: st.result?.success ?? false,
                 notes: st.result?.reviewNotes || '',
             }));
 
-            const overallSuccess = plan.subtasks.every(st => st.result?.success);
+            const overallSuccess = plan.subtasks.every((st) => st.result?.success);
 
             await this.memory.recordTaskCompletion(
                 plan.summary,
                 subtaskResultSummaries,
-                overallSuccess
+                overallSuccess,
             );
 
             // Record any learnings from escalations
@@ -898,8 +957,8 @@ export class Orchestrator {
                 if (escalation.attempts.length > 1) {
                     await this.memory.recordLearning(
                         `Escalation pattern for subtask ${escalation.subtaskId}`,
-                        `Tried ${escalation.attempts.length} models: ${escalation.attempts.map(a => `${a.modelId} (tier ${a.tier}): ${a.success ? 'OK' : a.reason}`).join(' → ')}`,
-                        ['escalation', 'model-selection']
+                        `Tried ${escalation.attempts.length} models: ${escalation.attempts.map((a) => `${a.modelId} (tier ${a.tier}): ${a.success ? 'OK' : a.reason}`).join(' → ')}`,
+                        ['escalation', 'model-selection'],
                     );
                 }
             }
@@ -913,21 +972,25 @@ export class Orchestrator {
 
             // Log delegation stats
             const delegationStats = this.delegationGuard.getStats();
-            await debugLog.logEvent('other',
+            await debugLog.logEvent(
+                'other',
                 `Delegation stats: spawned=${delegationStats.totalSpawned}, ` +
-                `blocked=${delegationStats.delegationsBlocked}, ` +
-                `maxDepth=${delegationStats.maxDepthReached}, ` +
-                `frozen=${delegationStats.frozen}, ` +
-                `runawaySignals=${delegationStats.runawaySignals}`
+                    `blocked=${delegationStats.delegationsBlocked}, ` +
+                    `maxDepth=${delegationStats.maxDepthReached}, ` +
+                    `frozen=${delegationStats.frozen}, ` +
+                    `runawaySignals=${delegationStats.runawaySignals}`,
             );
 
             await debugLog.finalize('completed');
-
         } catch (err) {
             session.status = 'failed';
             const classified = classifyError(err);
 
-            await this.hookRunner.run('on_error', { request, session, error: new Error(classified.message) });
+            await this.hookRunner.run('on_error', {
+                request,
+                session,
+                error: new Error(classified.message),
+            });
 
             // === RunState: mark failed ===
             await runManager.failRun(classified.message);
@@ -949,7 +1012,7 @@ export class Orchestrator {
 
             await this.memory.recordError(
                 classified.message,
-                `Session: ${session.sessionId}, Category: ${classified.category}, Request: ${request.substring(0, 200)}`
+                `Session: ${session.sessionId}, Category: ${classified.category}, Request: ${request.substring(0, 200)}`,
             );
 
             // Finalize debug log on failure
@@ -974,7 +1037,7 @@ export class Orchestrator {
         priorResults?: Map<string, SubtaskResult>,
         toolToken?: vscode.ChatParticipantToolToken,
         ledger?: ExecutionLedger,
-        hookRunner?: HookRunner
+        hookRunner?: HookRunner,
     ): Promise<Map<string, SubtaskResult>> {
         const results = new Map<string, SubtaskResult>(priorResults || []);
         const completed = new Set<string>(priorResults ? priorResults.keys() : []);
@@ -989,11 +1052,15 @@ export class Orchestrator {
                 type: 'note',
                 message: '🔒 Delegation mode: no-delegation — all subtasks run serially by Johann',
             });
-            await debugLog.logEvent('other', 'Delegation policy: no-delegation — forcing serial execution');
+            await debugLog.logEvent(
+                'other',
+                'Delegation policy: no-delegation — forcing serial execution',
+            );
         } else {
-            await debugLog.logEvent('other',
+            await debugLog.logEvent(
+                'other',
                 `Delegation policy: mode=${delegationPolicy.mode}, maxParallel=${delegationPolicy.maxParallel}, ` +
-                `maxDepth=${delegationPolicy.maxDepth}, runawayThreshold=${delegationPolicy.runawayThreshold}`
+                    `maxDepth=${delegationPolicy.maxDepth}, runawayThreshold=${delegationPolicy.runawayThreshold}`,
             );
         }
 
@@ -1006,10 +1073,12 @@ export class Orchestrator {
         if (!validation.valid) {
             const issues: string[] = [];
             if (validation.cycles.length > 0) {
-                issues.push(`Cycles: ${validation.cycles.map(c => c.join(' → ')).join('; ')}`);
+                issues.push(`Cycles: ${validation.cycles.map((c) => c.join(' → ')).join('; ')}`);
             }
             if (validation.missingDeps.length > 0) {
-                issues.push(`Missing deps: ${validation.missingDeps.map(m => `${m.taskId} → ${m.missingDep}`).join(', ')}`);
+                issues.push(
+                    `Missing deps: ${validation.missingDeps.map((m) => `${m.taskId} → ${m.missingDep}`).join(', ')}`,
+                );
             }
             if (validation.orphans.length > 0) {
                 issues.push(`Orphans: ${validation.orphans.join(', ')}`);
@@ -1023,344 +1092,408 @@ export class Orchestrator {
         let wavesNeedRecompute = true;
 
         while (wavesNeedRecompute && correctionCycle <= MAX_CORRECTION_CYCLES) {
-        wavesNeedRecompute = false; // Will be set to true if corrections trigger
+            wavesNeedRecompute = false; // Will be set to true if corrections trigger
 
-        const waves = getExecutionWaves(plan);
-        if (correctionCycle === 0) {
-            await debugLog.logEvent('other', `DAG: ${waves.length} waves, max parallelism: ${Math.max(...waves.map(w => w.taskIds.length))}`);
-        } else {
-            await debugLog.logEvent('other', `DAG (correction cycle ${correctionCycle}): re-computing ${waves.length} waves`);
-        }
-
-        for (const wave of waves) {
-            if (token.isCancellationRequested) {
-                throw new vscode.CancellationError();
+            const waves = getExecutionWaves(plan);
+            if (correctionCycle === 0) {
+                await debugLog.logEvent(
+                    'other',
+                    `DAG: ${waves.length} waves, max parallelism: ${Math.max(...waves.map((w) => w.taskIds.length))}`,
+                );
+            } else {
+                await debugLog.logEvent(
+                    'other',
+                    `DAG (correction cycle ${correctionCycle}): re-computing ${waves.length} waves`,
+                );
             }
 
-            // Filter out already-completed (resume case) and blocked tasks
-            const pendingIds = wave.taskIds.filter(
-                id => !completed.has(id) && !blocked.has(id)
-            );
-
-            if (pendingIds.length === 0) {
-                continue; // Entire wave already done or blocked
-            }
-
-            // === RunState: drain user queue at wave boundary (safe checkpoint) ===
-            const runMgr = RunStateManager.getInstance();
-            const pending = runMgr.getPendingUserMessages();
-            if (pending.length > 0) {
-                reporter.emit({
-                    type: 'note',
-                    message: `📨 ${pending.length} queued user message(s) detected at wave boundary. ` +
-                        `These will be integrated in a future orchestration cycle.`,
-                });
-                // Mark them as integrated (they'll be picked up on /resume or next run)
-                for (const msg of pending) {
-                    await runMgr.markUserMessageIntegrated(msg.id);
-                }
-            }
-
-            const pendingSubtasks = pendingIds
-                .map(id => plan.subtasks.find(st => st.id === id)!)
-                .filter(Boolean);
-
-            // ── Parallel execution when multiple tasks in a wave ───────────
-            if (this.config.allowParallelExecution && pendingSubtasks.length > 1 &&
-                (plan.strategy === 'parallel' || plan.strategy === 'mixed') &&
-                !this.delegationGuard.isNoDelegation) {
-
-                // ── Delegation policy: cap parallel batch size ──────────
-                const maxBatch = this.delegationGuard.maxParallel;
-                let batchSubtasks = pendingSubtasks;
-                if (maxBatch > 0 && pendingSubtasks.length > maxBatch) {
-                    reporter.emit({
-                        type: 'note',
-                        message: `🔒 Delegation cap: limiting parallel batch from ${pendingSubtasks.length} to ${maxBatch} (policy: ${delegationPolicy.mode})`,
-                    });
-                    batchSubtasks = pendingSubtasks.slice(0, maxBatch);
-                    // Remaining tasks will be picked up in subsequent wave iterations
+            for (const wave of waves) {
+                if (token.isCancellationRequested) {
+                    throw new vscode.CancellationError();
                 }
 
-                const useWorktrees = worktreeManager?.isReady() ?? false;
-                if (useWorktrees) {
+                // Filter out already-completed (resume case) and blocked tasks
+                const pendingIds = wave.taskIds.filter(
+                    (id) => !completed.has(id) && !blocked.has(id),
+                );
+
+                if (pendingIds.length === 0) {
+                    continue; // Entire wave already done or blocked
+                }
+
+                // === RunState: drain user queue at wave boundary (safe checkpoint) ===
+                const runMgr = RunStateManager.getInstance();
+                const pending = runMgr.getPendingUserMessages();
+                if (pending.length > 0) {
                     reporter.emit({
                         type: 'note',
-                        message: `⚡ Wave ${wave.level}: running ${batchSubtasks.length} subtasks in parallel (git worktree isolation)`,
+                        message:
+                            `📨 ${pending.length} queued user message(s) detected at wave boundary. ` +
+                            `These will be integrated in a future orchestration cycle.`,
                     });
+                    // Mark them as integrated (they'll be picked up on /resume or next run)
+                    for (const msg of pending) {
+                        await runMgr.markUserMessageIntegrated(msg.id);
+                    }
+                }
 
-                    for (const subtask of batchSubtasks) {
-                        try {
-                            const wt = await worktreeManager!.createWorktree(subtask.id);
-                            subtask.worktreePath = wt.worktreePath;
-                        } catch (err) {
-                            const msg = err instanceof Error ? err.message : String(err);
+                const pendingSubtasks = pendingIds
+                    .map((id) => plan.subtasks.find((st) => st.id === id)!)
+                    .filter(Boolean);
+
+                // ── Parallel execution when multiple tasks in a wave ───────────
+                if (
+                    this.config.allowParallelExecution &&
+                    pendingSubtasks.length > 1 &&
+                    (plan.strategy === 'parallel' || plan.strategy === 'mixed') &&
+                    !this.delegationGuard.isNoDelegation
+                ) {
+                    // ── Delegation policy: cap parallel batch size ──────────
+                    const maxBatch = this.delegationGuard.maxParallel;
+                    let batchSubtasks = pendingSubtasks;
+                    if (maxBatch > 0 && pendingSubtasks.length > maxBatch) {
+                        reporter.emit({
+                            type: 'note',
+                            message: `🔒 Delegation cap: limiting parallel batch from ${pendingSubtasks.length} to ${maxBatch} (policy: ${delegationPolicy.mode})`,
+                        });
+                        batchSubtasks = pendingSubtasks.slice(0, maxBatch);
+                        // Remaining tasks will be picked up in subsequent wave iterations
+                    }
+
+                    const useWorktrees = worktreeManager?.isReady() ?? false;
+                    if (useWorktrees) {
+                        reporter.emit({
+                            type: 'note',
+                            message: `⚡ Wave ${wave.level}: running ${batchSubtasks.length} subtasks in parallel (git worktree isolation)`,
+                        });
+
+                        for (const subtask of batchSubtasks) {
+                            try {
+                                const wt = await worktreeManager!.createWorktree(subtask.id);
+                                subtask.worktreePath = wt.worktreePath;
+                            } catch (err) {
+                                const msg = err instanceof Error ? err.message : String(err);
+                                reporter.emit({
+                                    type: 'note',
+                                    message: `Worktree creation failed for "${subtask.title}": ${msg.substring(0, 100)}. Running without isolation.`,
+                                    style: 'warning',
+                                });
+                            }
+                        }
+                    } else {
+                        reporter.emit({
+                            type: 'note',
+                            message: `⚡ Wave ${wave.level}: running ${batchSubtasks.length} subtasks in parallel`,
+                        });
+                    }
+
+                    const promises = batchSubtasks.map(async (subtask) => {
+                        if (token.isCancellationRequested) {
+                            return;
+                        }
+
+                        if (ledger && subtask.worktreePath) {
+                            await ledger.registerWorktree(subtask.id, subtask.worktreePath);
+                        }
+
+                        if (persist) {
+                            await persist.appendExecutionLog(
+                                'SUBTASK START',
+                                `${subtask.id}: ${subtask.title} (${subtask.complexity})`,
+                            );
+                            await persist.writeStatusMarkdown(plan, subtask.id);
+                        }
+
+                        const result = await this.executeSubtaskWithEscalation(
+                            subtask,
+                            results,
+                            workspaceContext,
+                            reporter,
+                            token,
+                            debugLog,
+                            persist,
+                            toolToken,
+                            ledger,
+                            hookRunner,
+                        );
+
+                        results.set(subtask.id, result);
+                        subtask.result = result;
+                        completed.add(subtask.id);
+
+                        if (ledger) {
+                            if (result.success) {
+                                await ledger.markCompleted(subtask.id, result.output);
+                            } else {
+                                await ledger.markFailed(
+                                    subtask.id,
+                                    result.reviewNotes || 'Unknown failure',
+                                );
+                            }
+                        }
+
+                        if (persist) {
+                            await persist.writeSubtaskResult(subtask.id, result, subtask);
+                            await persist.appendExecutionLog(
+                                result.success ? 'SUBTASK DONE' : 'SUBTASK FAILED',
+                                `${subtask.id}: ${subtask.title} — ${result.modelUsed} (${(result.durationMs / 1000).toFixed(1)}s)`,
+                            );
+                            await persist.writeStatusMarkdown(plan);
+                        }
+
+                        // ── Error propagation: block downstream tasks ──────────
+                        if (!result.success) {
+                            const downstream = getDownstreamTasks(plan, subtask.id);
+                            for (const dId of downstream) {
+                                if (!completed.has(dId)) {
+                                    blocked.add(dId);
+                                    const dSt = plan.subtasks.find((s) => s.id === dId);
+                                    if (dSt) {
+                                        dSt.status = 'failed';
+                                        dSt.result = {
+                                            success: false,
+                                            modelUsed: 'none',
+                                            output: '',
+                                            reviewNotes: `Blocked: upstream task "${subtask.title}" (${subtask.id}) failed`,
+                                            durationMs: 0,
+                                            timestamp: new Date().toISOString(),
+                                        };
+                                        results.set(dId, dSt.result);
+                                    }
+                                }
+                            }
                             reporter.emit({
                                 type: 'note',
-                                message: `Worktree creation failed for "${subtask.title}": ${msg.substring(0, 100)}. Running without isolation.`,
+                                message:
+                                    downstream.length > 0
+                                        ? `Task "${subtask.title}" failed — ${downstream.length} downstream task(s) blocked`
+                                        : `Task "${subtask.title}" failed (no downstream dependents)`,
                                 style: 'warning',
+                            });
+                        }
+
+                        // ── Flow correction: check review for upstream correction signals ──
+                        if (result.success && result.reviewNotes) {
+                            const corrections = FlowCorrectionManager.parseCorrectionSignals(
+                                result.reviewNotes,
+                                subtask.id,
+                            );
+                            for (const correction of corrections) {
+                                const corrResult = this.flowCorrection.requestCorrection(
+                                    correction,
+                                    plan,
+                                    results,
+                                    completed,
+                                );
+                                if (corrResult.accepted) {
+                                    // Remove invalidated tasks from blocked set too
+                                    for (const invId of corrResult.invalidatedTasks) {
+                                        blocked.delete(invId);
+                                    }
+                                    wavesNeedRecompute = true;
+                                    reporter.emit({
+                                        type: 'note',
+                                        message:
+                                            `🔄 Flow correction: "${subtask.title}" found issue in upstream "${correction.targetTaskId}". ` +
+                                            `Re-running ${corrResult.invalidatedTasks.length} task(s).`,
+                                        style: 'warning',
+                                    });
+                                } else {
+                                    reporter.emit({
+                                        type: 'note',
+                                        message: `⚠️ Correction rejected: ${corrResult.reason}`,
+                                        style: 'warning',
+                                    });
+                                }
+                            }
+                        }
+                    });
+
+                    await Promise.all(promises);
+
+                    // Merge worktree branches back sequentially
+                    if (useWorktrees) {
+                        const worktreeSubtasks = batchSubtasks.filter((st) => st.worktreePath);
+                        if (worktreeSubtasks.length > 0) {
+                            reporter.emit({
+                                type: 'task-started',
+                                id: `merge-wave-${wave.level}`,
+                                label: `Merging wave ${wave.level} results`,
+                            });
+
+                            const mergeResults = await worktreeManager!.mergeAllSequentially(
+                                worktreeSubtasks.map((st) => st.id),
+                            );
+
+                            for (const mr of mergeResults) {
+                                if (!mr.success) {
+                                    reporter.emit({
+                                        type: 'note',
+                                        message: `**Merge conflict** for "${mr.subtaskId}": ${mr.error}`,
+                                        style: 'warning',
+                                    });
+                                    if (mr.conflictFiles && mr.conflictFiles.length > 0) {
+                                        reporter.emit({
+                                            type: 'fileset-discovered',
+                                            label: 'Conflicting files',
+                                            files: mr.conflictFiles,
+                                        });
+                                    }
+                                    const subtask = pendingSubtasks.find(
+                                        (st) => st.id === mr.subtaskId,
+                                    );
+                                    if (subtask?.result) {
+                                        subtask.result.success = false;
+                                        subtask.result.reviewNotes += ` [MERGE CONFLICT: ${mr.error}]`;
+                                    }
+                                } else if (mr.hasChanges) {
+                                    reporter.emit({
+                                        type: 'note',
+                                        message: `Merged: ${mr.subtaskId}`,
+                                        style: 'success',
+                                    });
+                                }
+                            }
+
+                            for (const subtask of worktreeSubtasks) {
+                                await worktreeManager!.cleanupWorktree(subtask.id);
+                                subtask.worktreePath = undefined;
+                            }
+
+                            reporter.emit({
+                                type: 'task-completed',
+                                id: `merge-wave-${wave.level}`,
                             });
                         }
                     }
                 } else {
-                    reporter.emit({
-                        type: 'note',
-                        message: `⚡ Wave ${wave.level}: running ${batchSubtasks.length} subtasks in parallel`,
-                    });
-                }
-
-                const promises = batchSubtasks.map(async (subtask) => {
-                    if (token.isCancellationRequested) return;
-
-                    if (ledger && subtask.worktreePath) {
-                        await ledger.registerWorktree(subtask.id, subtask.worktreePath);
-                    }
-
-                    if (persist) {
-                        await persist.appendExecutionLog('SUBTASK START', `${subtask.id}: ${subtask.title} (${subtask.complexity})`);
-                        await persist.writeStatusMarkdown(plan, subtask.id);
-                    }
-
-                    const result = await this.executeSubtaskWithEscalation(
-                        subtask, results, workspaceContext, reporter, token,
-                        debugLog, persist, toolToken, ledger, hookRunner
-                    );
-
-                    results.set(subtask.id, result);
-                    subtask.result = result;
-                    completed.add(subtask.id);
-
-                    if (ledger) {
-                        if (result.success) {
-                            await ledger.markCompleted(subtask.id, result.output);
-                        } else {
-                            await ledger.markFailed(subtask.id, result.reviewNotes || 'Unknown failure');
+                    // ── Serial execution ───────────────────────────────────────
+                    for (const subtask of pendingSubtasks) {
+                        if (token.isCancellationRequested) {
+                            break;
                         }
-                    }
 
-                    if (persist) {
-                        await persist.writeSubtaskResult(subtask.id, result, subtask);
-                        await persist.appendExecutionLog(
-                            result.success ? 'SUBTASK DONE' : 'SUBTASK FAILED',
-                            `${subtask.id}: ${subtask.title} — ${result.modelUsed} (${(result.durationMs / 1000).toFixed(1)}s)`
-                        );
-                        await persist.writeStatusMarkdown(plan);
-                    }
-
-                    // ── Error propagation: block downstream tasks ──────────
-                    if (!result.success) {
-                        const downstream = getDownstreamTasks(plan, subtask.id);
-                        for (const dId of downstream) {
-                            if (!completed.has(dId)) {
-                                blocked.add(dId);
-                                const dSt = plan.subtasks.find(s => s.id === dId);
-                                if (dSt) {
-                                    dSt.status = 'failed';
-                                    dSt.result = {
-                                        success: false,
-                                        modelUsed: 'none',
-                                        output: '',
-                                        reviewNotes: `Blocked: upstream task "${subtask.title}" (${subtask.id}) failed`,
-                                        durationMs: 0,
-                                        timestamp: new Date().toISOString(),
-                                    };
-                                    results.set(dId, dSt.result);
-                                }
-                            }
-                        }
-                        reporter.emit({
-                            type: 'note',
-                            message: downstream.length > 0
-                                ? `Task "${subtask.title}" failed — ${downstream.length} downstream task(s) blocked`
-                                : `Task "${subtask.title}" failed (no downstream dependents)`,
-                            style: 'warning',
-                        });
-                    }
-
-                    // ── Flow correction: check review for upstream correction signals ──
-                    if (result.success && result.reviewNotes) {
-                        const corrections = FlowCorrectionManager.parseCorrectionSignals(
-                            result.reviewNotes, subtask.id
-                        );
-                        for (const correction of corrections) {
-                            const corrResult = this.flowCorrection.requestCorrection(
-                                correction, plan, results, completed
+                        if (persist) {
+                            await persist.appendExecutionLog(
+                                'SUBTASK START',
+                                `${subtask.id}: ${subtask.title} (${subtask.complexity})`,
                             );
-                            if (corrResult.accepted) {
-                                // Remove invalidated tasks from blocked set too
-                                for (const invId of corrResult.invalidatedTasks) {
-                                    blocked.delete(invId);
-                                }
-                                wavesNeedRecompute = true;
-                                reporter.emit({
-                                    type: 'note',
-                                    message: `🔄 Flow correction: "${subtask.title}" found issue in upstream "${correction.targetTaskId}". ` +
-                                        `Re-running ${corrResult.invalidatedTasks.length} task(s).`,
-                                    style: 'warning',
-                                });
+                            await persist.writeStatusMarkdown(plan, subtask.id);
+                        }
+
+                        const result = await this.executeSubtaskWithEscalation(
+                            subtask,
+                            results,
+                            workspaceContext,
+                            reporter,
+                            token,
+                            debugLog,
+                            persist,
+                            toolToken,
+                            ledger,
+                            hookRunner,
+                        );
+
+                        results.set(subtask.id, result);
+                        subtask.result = result;
+                        completed.add(subtask.id);
+
+                        if (ledger) {
+                            if (result.success) {
+                                await ledger.markCompleted(subtask.id, result.output);
                             } else {
+                                await ledger.markFailed(
+                                    subtask.id,
+                                    result.reviewNotes || 'Unknown failure',
+                                );
+                            }
+                        }
+
+                        if (persist) {
+                            await persist.writeSubtaskResult(subtask.id, result, subtask);
+                            await persist.appendExecutionLog(
+                                result.success ? 'SUBTASK DONE' : 'SUBTASK FAILED',
+                                `${subtask.id}: ${subtask.title} — ${result.modelUsed} (${(result.durationMs / 1000).toFixed(1)}s)`,
+                            );
+                            await persist.writeStatusMarkdown(plan);
+                        }
+
+                        // ── Error propagation: block downstream tasks ──────────
+                        if (!result.success) {
+                            const downstream = getDownstreamTasks(plan, subtask.id);
+                            for (const dId of downstream) {
+                                if (!completed.has(dId)) {
+                                    blocked.add(dId);
+                                    const dSt = plan.subtasks.find((s) => s.id === dId);
+                                    if (dSt) {
+                                        dSt.status = 'failed';
+                                        dSt.result = {
+                                            success: false,
+                                            modelUsed: 'none',
+                                            output: '',
+                                            reviewNotes: `Blocked: upstream task "${subtask.title}" (${subtask.id}) failed`,
+                                            durationMs: 0,
+                                            timestamp: new Date().toISOString(),
+                                        };
+                                        results.set(dId, dSt.result);
+                                    }
+                                }
+                            }
+                            if (downstream.length > 0) {
                                 reporter.emit({
                                     type: 'note',
-                                    message: `⚠️ Correction rejected: ${corrResult.reason}`,
+                                    message: `Task "${subtask.title}" failed — ${downstream.length} downstream task(s) blocked`,
                                     style: 'warning',
                                 });
                             }
                         }
-                    }
-                });
 
-                await Promise.all(promises);
-
-                // Merge worktree branches back sequentially
-                if (useWorktrees) {
-                    const worktreeSubtasks = batchSubtasks.filter(st => st.worktreePath);
-                    if (worktreeSubtasks.length > 0) {
-                        reporter.emit({ type: 'task-started', id: `merge-wave-${wave.level}`, label: `Merging wave ${wave.level} results` });
-
-                        const mergeResults = await worktreeManager!.mergeAllSequentially(
-                            worktreeSubtasks.map(st => st.id)
-                        );
-
-                        for (const mr of mergeResults) {
-                            if (!mr.success) {
-                                reporter.emit({
-                                    type: 'note',
-                                    message: `**Merge conflict** for "${mr.subtaskId}": ${mr.error}`,
-                                    style: 'warning',
-                                });
-                                if (mr.conflictFiles && mr.conflictFiles.length > 0) {
+                        // ── Flow correction: check review for upstream correction signals ──
+                        if (result.success && result.reviewNotes) {
+                            const corrections = FlowCorrectionManager.parseCorrectionSignals(
+                                result.reviewNotes,
+                                subtask.id,
+                            );
+                            for (const correction of corrections) {
+                                const corrResult = this.flowCorrection.requestCorrection(
+                                    correction,
+                                    plan,
+                                    results,
+                                    completed,
+                                );
+                                if (corrResult.accepted) {
+                                    for (const invId of corrResult.invalidatedTasks) {
+                                        blocked.delete(invId);
+                                    }
+                                    wavesNeedRecompute = true;
                                     reporter.emit({
-                                        type: 'fileset-discovered',
-                                        label: 'Conflicting files',
-                                        files: mr.conflictFiles,
+                                        type: 'note',
+                                        message:
+                                            `🔄 Flow correction: "${subtask.title}" found issue in upstream "${correction.targetTaskId}". ` +
+                                            `Re-running ${corrResult.invalidatedTasks.length} task(s).`,
+                                        style: 'warning',
+                                    });
+                                } else {
+                                    reporter.emit({
+                                        type: 'note',
+                                        message: `⚠️ Correction rejected: ${corrResult.reason}`,
+                                        style: 'warning',
                                     });
                                 }
-                                const subtask = pendingSubtasks.find(st => st.id === mr.subtaskId);
-                                if (subtask?.result) {
-                                    subtask.result.success = false;
-                                    subtask.result.reviewNotes += ` [MERGE CONFLICT: ${mr.error}]`;
-                                }
-                            } else if (mr.hasChanges) {
-                                reporter.emit({ type: 'note', message: `Merged: ${mr.subtaskId}`, style: 'success' });
-                            }
-                        }
-
-                        for (const subtask of worktreeSubtasks) {
-                            await worktreeManager!.cleanupWorktree(subtask.id);
-                            subtask.worktreePath = undefined;
-                        }
-
-                        reporter.emit({ type: 'task-completed', id: `merge-wave-${wave.level}` });
-                    }
-                }
-            } else {
-                // ── Serial execution ───────────────────────────────────────
-                for (const subtask of pendingSubtasks) {
-                    if (token.isCancellationRequested) break;
-
-                    if (persist) {
-                        await persist.appendExecutionLog('SUBTASK START', `${subtask.id}: ${subtask.title} (${subtask.complexity})`);
-                        await persist.writeStatusMarkdown(plan, subtask.id);
-                    }
-
-                    const result = await this.executeSubtaskWithEscalation(
-                        subtask, results, workspaceContext, reporter, token,
-                        debugLog, persist, toolToken, ledger, hookRunner
-                    );
-
-                    results.set(subtask.id, result);
-                    subtask.result = result;
-                    completed.add(subtask.id);
-
-                    if (ledger) {
-                        if (result.success) {
-                            await ledger.markCompleted(subtask.id, result.output);
-                        } else {
-                            await ledger.markFailed(subtask.id, result.reviewNotes || 'Unknown failure');
-                        }
-                    }
-
-                    if (persist) {
-                        await persist.writeSubtaskResult(subtask.id, result, subtask);
-                        await persist.appendExecutionLog(
-                            result.success ? 'SUBTASK DONE' : 'SUBTASK FAILED',
-                            `${subtask.id}: ${subtask.title} — ${result.modelUsed} (${(result.durationMs / 1000).toFixed(1)}s)`
-                        );
-                        await persist.writeStatusMarkdown(plan);
-                    }
-
-                    // ── Error propagation: block downstream tasks ──────────
-                    if (!result.success) {
-                        const downstream = getDownstreamTasks(plan, subtask.id);
-                        for (const dId of downstream) {
-                            if (!completed.has(dId)) {
-                                blocked.add(dId);
-                                const dSt = plan.subtasks.find(s => s.id === dId);
-                                if (dSt) {
-                                    dSt.status = 'failed';
-                                    dSt.result = {
-                                        success: false,
-                                        modelUsed: 'none',
-                                        output: '',
-                                        reviewNotes: `Blocked: upstream task "${subtask.title}" (${subtask.id}) failed`,
-                                        durationMs: 0,
-                                        timestamp: new Date().toISOString(),
-                                    };
-                                    results.set(dId, dSt.result);
-                                }
-                            }
-                        }
-                        if (downstream.length > 0) {
-                            reporter.emit({
-                                type: 'note',
-                                message: `Task "${subtask.title}" failed — ${downstream.length} downstream task(s) blocked`,
-                                style: 'warning',
-                            });
-                        }
-                    }
-
-                    // ── Flow correction: check review for upstream correction signals ──
-                    if (result.success && result.reviewNotes) {
-                        const corrections = FlowCorrectionManager.parseCorrectionSignals(
-                            result.reviewNotes, subtask.id
-                        );
-                        for (const correction of corrections) {
-                            const corrResult = this.flowCorrection.requestCorrection(
-                                correction, plan, results, completed
-                            );
-                            if (corrResult.accepted) {
-                                for (const invId of corrResult.invalidatedTasks) {
-                                    blocked.delete(invId);
-                                }
-                                wavesNeedRecompute = true;
-                                reporter.emit({
-                                    type: 'note',
-                                    message: `🔄 Flow correction: "${subtask.title}" found issue in upstream "${correction.targetTaskId}". ` +
-                                        `Re-running ${corrResult.invalidatedTasks.length} task(s).`,
-                                    style: 'warning',
-                                });
-                            } else {
-                                reporter.emit({
-                                    type: 'note',
-                                    message: `⚠️ Correction rejected: ${corrResult.reason}`,
-                                    style: 'warning',
-                                });
                             }
                         }
                     }
                 }
             }
-        }
 
-        if (wavesNeedRecompute) {
-            correctionCycle++;
+            if (wavesNeedRecompute) {
+                correctionCycle++;
 
-            // === RunState: emit delegation panel after correction-triggering wave ===
-            this.emitDelegationPanel(reporter);
+                // === RunState: emit delegation panel after correction-triggering wave ===
+                this.emitDelegationPanel(reporter);
 
-            continue; // Re-compute waves with corrected tasks back in pending
-        }
-
+                continue; // Re-compute waves with corrected tasks back in pending
+            }
         } // end correction-aware outer loop
 
         if (token.isCancellationRequested) {
@@ -1387,7 +1520,7 @@ export class Orchestrator {
         persist?: SessionPersistence,
         toolToken?: vscode.ChatParticipantToolToken,
         ledger?: ExecutionLedger,
-        hookRunner?: HookRunner
+        hookRunner?: HookRunner,
     ): Promise<SubtaskResult> {
         const escalation: EscalationRecord = {
             subtaskId: subtask.id,
@@ -1412,8 +1545,9 @@ export class Orchestrator {
                 message: `🔒 Delegation blocked for "${subtask.title}": ${delegationDecision.reason}`,
                 style: 'warning',
             });
-            await debugLog.logEvent('other',
-                `Delegation blocked for subtask ${subtask.id}: ${delegationDecision.reason}`
+            await debugLog.logEvent(
+                'other',
+                `Delegation blocked for subtask ${subtask.id}: ${delegationDecision.reason}`,
             );
             subtask.status = 'failed';
             return {
@@ -1453,11 +1587,13 @@ export class Orchestrator {
             }
 
             // Pick model — apply heuristics to refine taskType & complexity
-            const detectedType = subtask.taskType
-                ?? this.modelPicker.detectTaskType(subtask.description);
+            const detectedType =
+                subtask.taskType ?? this.modelPicker.detectTaskType(subtask.description);
             const { taskType: refinedType, complexity: refinedComplexity } =
                 this.modelPicker.refineSelection(
-                    subtask.description, detectedType, subtask.complexity
+                    subtask.description,
+                    detectedType,
+                    subtask.complexity,
                 );
             // Persist refined values back onto the subtask for downstream use
             subtask.taskType = refinedType;
@@ -1468,19 +1604,25 @@ export class Orchestrator {
                 modelInfo = await this.modelPicker.selectForTask(
                     refinedType,
                     refinedComplexity,
-                    triedModelIds
+                    triedModelIds,
                 );
             } else {
-                const lastReason = escalation.attempts[escalation.attempts.length - 1]?.reason || '';
+                const lastReason =
+                    escalation.attempts[escalation.attempts.length - 1]?.reason || '';
                 modelInfo = await this.modelPicker.escalate(
                     subtask.complexity,
                     triedModelIds,
-                    lastReason
+                    lastReason,
                 );
             }
 
             if (!modelInfo) {
-                reporter.emit({ type: 'task-failed', id: subtask.id, error: 'No more models available', label: subtask.title });
+                reporter.emit({
+                    type: 'task-failed',
+                    id: subtask.id,
+                    error: 'No more models available',
+                    label: subtask.title,
+                });
                 subtask.status = 'failed';
                 return {
                     success: false,
@@ -1535,7 +1677,7 @@ export class Orchestrator {
                 await ledger.markRunning(
                     subtask.id,
                     modelInfo.id,
-                    subtask.worktreePath || undefined
+                    subtask.worktreePath || undefined,
                 );
             }
 
@@ -1553,19 +1695,24 @@ export class Orchestrator {
                 undefined, // messageBus
                 undefined, // hookRunner
                 this.rateLimitGuard,
-                this.delegationGuard
+                this.delegationGuard,
             );
 
             if (!result.success) {
                 // Check if this is an API compatibility error (e.g., GPT model rejecting context_management).
                 // These should NOT count as a real attempt — the model never even started executing.
                 // Just skip to the next model immediately.
-                const isApiCompat = result.reviewNotes?.toLowerCase().includes('unsupported parameter')
-                    || result.reviewNotes?.toLowerCase().includes('context_management')
-                    || result.reviewNotes?.toLowerCase().includes('invalid_request_error');
+                const isApiCompat =
+                    result.reviewNotes?.toLowerCase().includes('unsupported parameter') ||
+                    result.reviewNotes?.toLowerCase().includes('context_management') ||
+                    result.reviewNotes?.toLowerCase().includes('invalid_request_error');
 
                 if (isApiCompat) {
-                    reporter.emit({ type: 'task-progress', id: subtask.id, message: `Model ${modelInfo.name} incompatible, switching…` });
+                    reporter.emit({
+                        type: 'task-progress',
+                        id: subtask.id,
+                        message: `Model ${modelInfo.name} incompatible, switching…`,
+                    });
                     // Don't increment attempts — this model never ran, just skip it
                     subtask.attempts--;
                     escalation.attempts.push({
@@ -1577,7 +1724,11 @@ export class Orchestrator {
                     continue;
                 }
 
-                reporter.emit({ type: 'task-progress', id: subtask.id, message: 'Execution failed, escalating…' });
+                reporter.emit({
+                    type: 'task-progress',
+                    id: subtask.id,
+                    message: 'Execution failed, escalating…',
+                });
                 escalation.attempts.push({
                     modelId: modelInfo.id,
                     tier: modelInfo.tier,
@@ -1602,7 +1753,7 @@ export class Orchestrator {
                 token,
                 reporter.stream,
                 debugLog,
-                this.selfHealing  // Pass self-healing detector
+                this.selfHealing, // Pass self-healing detector
             );
 
             result.success = review.success;
@@ -1625,7 +1776,11 @@ export class Orchestrator {
                 if (persist) {
                     await persist.writeSubtaskUpdate(subtask);
                 }
-                reporter.emit({ type: 'task-completed', id: subtask.id, durationMs: result.durationMs });
+                reporter.emit({
+                    type: 'task-completed',
+                    id: subtask.id,
+                    durationMs: result.durationMs,
+                });
                 if (hookRunner) {
                     await hookRunner.run('after_subtask', { subtask, subtaskResult: result });
                 }
@@ -1641,7 +1796,7 @@ export class Orchestrator {
                         const skill = await this.selfHealing.createSkillFromFailure(
                             failure,
                             this.skillStore,
-                            this.skillValidator
+                            this.skillValidator,
                         );
                         if (skill) {
                             reporter.emit({
@@ -1668,14 +1823,23 @@ export class Orchestrator {
             if (persist) {
                 await persist.writeSubtaskUpdate(subtask);
             }
-            reporter.emit({ type: 'task-progress', id: subtask.id, message: `Escalating: ${review.reason}` });
+            reporter.emit({
+                type: 'task-progress',
+                id: subtask.id,
+                message: `Escalating: ${review.reason}`,
+            });
         }
 
         // All attempts exhausted
         subtask.status = 'failed';
         // === RunState: mark task failed ===
         await runMgr2.updateTask(subtask.id, { status: 'failed' });
-        reporter.emit({ type: 'task-failed', id: subtask.id, error: `Failed after ${subtask.attempts} attempts`, label: subtask.title });
+        reporter.emit({
+            type: 'task-failed',
+            id: subtask.id,
+            error: `Failed after ${subtask.attempts} attempts`,
+            label: subtask.title,
+        });
         this.delegationGuard.releaseDelegation();
 
         // Preserve the best output from any attempt that produced real work,
@@ -1720,7 +1884,7 @@ export class Orchestrator {
         model: vscode.LanguageModelChat,
         token: vscode.CancellationToken,
         stream?: vscode.ChatResponseStream,
-        debugLog?: DebugConversationLog
+        debugLog?: DebugConversationLog,
     ): Promise<string> {
         // If only one subtask, just return its output (already streamed during execution)
         if (plan.subtasks.length === 1) {
@@ -1737,8 +1901,8 @@ export class Orchestrator {
         try {
             const messages = [
                 vscode.LanguageModelChatMessage.User(
-                    MERGE_SYSTEM_PROMPT + '\n\n---\n\n' + mergePrompt
-                )
+                    MERGE_SYSTEM_PROMPT + '\n\n---\n\n' + mergePrompt,
+                ),
             ];
 
             const output = await withRetry(
@@ -1766,7 +1930,7 @@ export class Orchestrator {
                     return text;
                 },
                 REVIEW_RETRY_POLICY,
-                token
+                token,
             );
 
             // Post-merge sanitization: strip forbidden phrases that the model
@@ -1780,8 +1944,9 @@ export class Orchestrator {
 
             // Log if sanitization made changes
             if (sanitized !== output && debugLog) {
-                await debugLog.logEvent('merge',
-                    `Post-merge sanitization removed ${output.length - sanitized.length} chars of forbidden content`
+                await debugLog.logEvent(
+                    'merge',
+                    `Post-merge sanitization removed ${output.length - sanitized.length} chars of forbidden content`,
                 );
             }
 
@@ -1806,29 +1971,29 @@ export class Orchestrator {
 
         // Remove entire "Next Steps" sections (header + content until next header or end)
         sanitized = sanitized.replace(
-            /^#{1,4}\s*(Next\s+Steps|Manual\s+Steps|Manual\s+Investigation|What\s+You\s+(Need|Should)\s+to\s+Do|Recommended\s+Next\s+Steps|Recommendations|Action\s+Items|Required\s+Actions)[^\n]*\n[\s\S]*?(?=^#{1,4}\s|\n$)/gmi,
-            ''
+            /^#{1,4}\s*(Next\s+Steps|Manual\s+Steps|Manual\s+Investigation|What\s+You\s+(Need|Should)\s+to\s+Do|Recommended\s+Next\s+Steps|Recommendations|Action\s+Items|Required\s+Actions)[^\n]*\n[\s\S]*?(?=^#{1,4}\s|\n$)/gim,
+            '',
         );
 
         // Remove individual forbidden phrases and their surrounding sentence/line
         const forbiddenPatterns = [
-            /^[^\n]*\bPlease run\b[^\n]*$/gmi,
-            /^[^\n]*\bYou should\b[^\n]*$/gmi,
-            /^[^\n]*\bYou need to\b[^\n]*$/gmi,
-            /^[^\n]*\bYou'll need to\b[^\n]*$/gmi,
-            /^[^\n]*\bYou'll want to\b[^\n]*$/gmi,
-            /^[^\n]*\bYou can then\b[^\n]*$/gmi,
-            /^[^\n]*\bMake sure to\b[^\n]*$/gmi,
-            /^[^\n]*\bDon't forget to\b[^\n]*$/gmi,
-            /^[^\n]*\bWould you like me to\b[^\n]*$/gmi,
-            /^[^\n]*\bPlease share\b[^\n]*$/gmi,
-            /^[^\n]*\bAsk the user\b[^\n]*$/gmi,
-            /^[^\n]*\bTell the user\b[^\n]*$/gmi,
-            /^[^\n]*\bThe user needs\b[^\n]*$/gmi,
-            /^[^\n]*\bThe user should\b[^\n]*$/gmi,
-            /^[^\n]*\bTo fix this,\s*run\b[^\n]*$/gmi,
-            /^[^\n]*\bTo resolve this\b[^\n]*$/gmi,
-            /^[^\n]*\bAfter that,\s*you can\b[^\n]*$/gmi,
+            /^[^\n]*\bPlease run\b[^\n]*$/gim,
+            /^[^\n]*\bYou should\b[^\n]*$/gim,
+            /^[^\n]*\bYou need to\b[^\n]*$/gim,
+            /^[^\n]*\bYou'll need to\b[^\n]*$/gim,
+            /^[^\n]*\bYou'll want to\b[^\n]*$/gim,
+            /^[^\n]*\bYou can then\b[^\n]*$/gim,
+            /^[^\n]*\bMake sure to\b[^\n]*$/gim,
+            /^[^\n]*\bDon't forget to\b[^\n]*$/gim,
+            /^[^\n]*\bWould you like me to\b[^\n]*$/gim,
+            /^[^\n]*\bPlease share\b[^\n]*$/gim,
+            /^[^\n]*\bAsk the user\b[^\n]*$/gim,
+            /^[^\n]*\bTell the user\b[^\n]*$/gim,
+            /^[^\n]*\bThe user needs\b[^\n]*$/gim,
+            /^[^\n]*\bThe user should\b[^\n]*$/gim,
+            /^[^\n]*\bTo fix this,\s*run\b[^\n]*$/gim,
+            /^[^\n]*\bTo resolve this\b[^\n]*$/gim,
+            /^[^\n]*\bAfter that,\s*you can\b[^\n]*$/gim,
         ];
 
         for (const pattern of forbiddenPatterns) {
@@ -1849,7 +2014,7 @@ export class Orchestrator {
     private buildMergePrompt(
         originalRequest: string,
         plan: OrchestrationPlan,
-        results: Map<string, SubtaskResult>
+        results: Map<string, SubtaskResult>,
     ): string {
         const parts: string[] = [];
         parts.push('=== ORIGINAL REQUEST ===');
@@ -1873,11 +2038,15 @@ export class Orchestrator {
                 if (result?.output && result.output.length > 100) {
                     // Show the LAST portion of the output where summary blocks live
                     const maxFailedOutput = 6000;
-                    const failedOutput = result.output.length > maxFailedOutput
-                        ? '...\n' + result.output.substring(result.output.length - maxFailedOutput)
-                        : result.output;
+                    const failedOutput =
+                        result.output.length > maxFailedOutput
+                            ? '...\n' +
+                              result.output.substring(result.output.length - maxFailedOutput)
+                            : result.output;
                     parts.push('');
-                    parts.push('PARTIAL OUTPUT (review may have been a false negative — judge for yourself):');
+                    parts.push(
+                        'PARTIAL OUTPUT (review may have been a false negative — judge for yourself):',
+                    );
                     parts.push(failedOutput);
                 }
             }
@@ -1889,10 +2058,7 @@ export class Orchestrator {
     /**
      * Fallback merge when the LLM merge fails.
      */
-    private fallbackMerge(
-        plan: OrchestrationPlan,
-        results: Map<string, SubtaskResult>
-    ): string {
+    private fallbackMerge(plan: OrchestrationPlan, results: Map<string, SubtaskResult>): string {
         const parts: string[] = [];
         parts.push(`## ${plan.summary}\n`);
 
@@ -1919,7 +2085,9 @@ export class Orchestrator {
     private formatPlanSummary(plan: OrchestrationPlan): string {
         const lines: string[] = [];
         lines.push(`**Plan:** ${plan.summary}`);
-        lines.push(`**Strategy:** ${plan.strategy} | **Complexity:** ${plan.overallComplexity} | **Subtasks:** ${plan.subtasks.length}`);
+        lines.push(
+            `**Strategy:** ${plan.strategy} | **Complexity:** ${plan.overallComplexity} | **Subtasks:** ${plan.subtasks.length}`,
+        );
         lines.push('');
 
         if (plan.subtasks.length > 1) {
@@ -1949,13 +2117,15 @@ export class Orchestrator {
      */
     private async savePlanForRecovery(
         session: JohannSession,
-        error: ClassifiedError
+        error: ClassifiedError,
     ): Promise<void> {
-        if (!session.plan) return;
+        if (!session.plan) {
+            return;
+        }
 
         const plan = session.plan;
-        const completedTasks = plan.subtasks.filter(st => st.status === 'completed');
-        const pendingTasks = plan.subtasks.filter(st => st.status !== 'completed');
+        const completedTasks = plan.subtasks.filter((st) => st.status === 'completed');
+        const pendingTasks = plan.subtasks.filter((st) => st.status !== 'completed');
 
         const recoveryContent = [
             `# Recovery Plan — ${plan.summary}`,
@@ -1973,13 +2143,14 @@ export class Orchestrator {
             session.originalRequest.substring(0, 2000),
             ``,
             `## Completed Subtasks`,
-            ...completedTasks.map(st =>
-                `- ✅ **${st.title}** (${st.assignedModel || 'unknown'})`
+            ...completedTasks.map(
+                (st) => `- ✅ **${st.title}** (${st.assignedModel || 'unknown'})`,
             ),
             ``,
             `## Remaining Subtasks`,
-            ...pendingTasks.map(st =>
-                `- ⏳ **${st.title}** (${st.complexity}) — ${st.description.substring(0, 200)}`
+            ...pendingTasks.map(
+                (st) =>
+                    `- ⏳ **${st.title}** (${st.complexity}) — ${st.description.substring(0, 200)}`,
             ),
         ].join('\n');
 
@@ -1987,7 +2158,7 @@ export class Orchestrator {
             await this.memory.recordLearning(
                 `Recovery plan: ${plan.summary.substring(0, 80)}`,
                 recoveryContent,
-                ['recovery', 'interrupted', error.category]
+                ['recovery', 'interrupted', error.category],
             );
         } catch {
             // Don't let memory failure compound the original error
@@ -2001,7 +2172,7 @@ export class Orchestrator {
     private renderErrorForUser(
         response: vscode.ChatResponseStream | undefined,
         classified: ClassifiedError,
-        session: JohannSession
+        session: JohannSession,
     ): void {
         if (!response) {
             // Background mode — error will be shown via notification
@@ -2009,64 +2180,66 @@ export class Orchestrator {
         }
         const planProgress = session.plan
             ? (() => {
-                const completed = session.plan.subtasks.filter(st => st.status === 'completed').length;
-                const total = session.plan.subtasks.length;
-                return completed > 0
-                    ? `\n\n> **Progress saved:** ${completed}/${total} subtasks completed before the error. ` +
-                      `Your plan has been saved to Johann's memory. You can re-run your request and Johann will have context from this attempt.\n`
-                    : '';
-            })()
+                  const completed = session.plan.subtasks.filter(
+                      (st) => st.status === 'completed',
+                  ).length;
+                  const total = session.plan.subtasks.length;
+                  return completed > 0
+                      ? `\n\n> **Progress saved:** ${completed}/${total} subtasks completed before the error. ` +
+                            `Your plan has been saved to Johann's memory. You can re-run your request and Johann will have context from this attempt.\n`
+                      : '';
+              })()
             : '';
 
         switch (classified.category) {
             case 'network':
                 response.markdown(
                     `\n\n**Network Error**\n\n` +
-                    `Johann's orchestration was interrupted by a transient network error ` +
-                    `after automatic retries were exhausted.\n\n` +
-                    `**What happened:** ${classified.message.substring(0, 200)}\n\n` +
-                    `**To resolve:**\n` +
-                    `1. Check your internet connection\n` +
-                    `2. If on WiFi, try switching networks or using a wired connection\n` +
-                    `3. Re-run your request — Johann will retry from where it left off\n` +
-                    planProgress
+                        `Johann's orchestration was interrupted by a transient network error ` +
+                        `after automatic retries were exhausted.\n\n` +
+                        `**What happened:** ${classified.message.substring(0, 200)}\n\n` +
+                        `**To resolve:**\n` +
+                        `1. Check your internet connection\n` +
+                        `2. If on WiFi, try switching networks or using a wired connection\n` +
+                        `3. Re-run your request — Johann will retry from where it left off\n` +
+                        planProgress,
                 );
                 break;
 
             case 'rate-limit':
                 response.markdown(
                     `\n\n**Copilot Request Limit Reached**\n\n` +
-                    `Johann's orchestration was interrupted because Copilot hit its request limit.\n\n` +
-                    `**To fix this:**\n` +
-                    `1. Increase \`github.copilot.chat.agent.maxRequests\` in VS Code settings\n` +
-                    `2. Type \`/yolo on\` for full setup guidance\n` +
-                    `3. Wait a moment, then re-run your request\n` +
-                    planProgress +
-                    `\n**Error:** ${classified.message.substring(0, 200)}\n`
+                        `Johann's orchestration was interrupted because Copilot hit its request limit.\n\n` +
+                        `**To fix this:**\n` +
+                        `1. Increase \`github.copilot.chat.agent.maxRequests\` in VS Code settings\n` +
+                        `2. Type \`/yolo on\` for full setup guidance\n` +
+                        `3. Wait a moment, then re-run your request\n` +
+                        planProgress +
+                        `\n**Error:** ${classified.message.substring(0, 200)}\n`,
                 );
                 break;
 
             case 'cancelled':
                 response.markdown(
                     `\n\n**Request Cancelled**\n\n` +
-                    `The orchestration was cancelled.` +
-                    planProgress
+                        `The orchestration was cancelled.` +
+                        planProgress,
                 );
                 break;
 
             case 'auth':
                 response.markdown(
                     `\n\n**Authentication Error**\n\n` +
-                    `${classified.userGuidance}\n\n` +
-                    `**Error:** ${classified.message.substring(0, 200)}\n`
+                        `${classified.userGuidance}\n\n` +
+                        `**Error:** ${classified.message.substring(0, 200)}\n`,
                 );
                 break;
 
             default:
                 response.markdown(
                     `\n\n**Orchestration Error**\n\n` +
-                    `${classified.message.substring(0, 300)}\n` +
-                    planProgress
+                        `${classified.message.substring(0, 300)}\n` +
+                        planProgress,
                 );
                 break;
         }
@@ -2095,14 +2268,14 @@ export class Orchestrator {
         const answer = await vscode.window.showInformationMessage(
             `🛠️ Self-healing created skill "${skill.metadata.slug}" to prevent ${skill.metadata.tags.join(', ')}. Promote to global to help all projects?`,
             'Promote to Global',
-            'Keep Local'
+            'Keep Local',
         );
 
         if (answer === 'Promote to Global') {
             // To promote, we'd need access to globalStorageUri which lives in the extension context
             // For now, just notify the user that they can promote manually
             vscode.window.showInformationMessage(
-                `To promote "${skill.metadata.slug}" to global, run the "Johann: Promote Skill to Global" command.`
+                `To promote "${skill.metadata.slug}" to global, run the "Johann: Promote Skill to Global" command.`,
             );
             getLogger().info(`User requested promotion for skill "${skill.metadata.slug}"`);
         }
@@ -2115,7 +2288,9 @@ export class Orchestrator {
     private emitDelegationPanel(reporter: ProgressReporter): void {
         const runMgr = RunStateManager.getInstance();
         const state = runMgr.getState();
-        if (!state || state.tasks.length === 0) { return; }
+        if (!state || state.tasks.length === 0) {
+            return;
+        }
 
         reporter.emit({
             type: 'delegation-panel',
@@ -2123,10 +2298,13 @@ export class Orchestrator {
             running: state.counters.running,
             done: state.counters.done,
             failed: state.counters.failed,
-            entries: state.tasks.map(t => ({
+            entries: state.tasks.map((t) => ({
                 id: t.id,
                 title: t.title,
-                status: t.status === 'cancelled' ? 'failed' : t.status as 'queued' | 'running' | 'done' | 'failed',
+                status:
+                    t.status === 'cancelled'
+                        ? 'failed'
+                        : (t.status as 'queued' | 'running' | 'done' | 'failed'),
                 summary: t.progressMessage || t.status,
             })),
         });
@@ -2137,7 +2315,12 @@ export class Orchestrator {
      */
     private inferRunPhase(title: string): RunPhase {
         const lower = title.toLowerCase();
-        if (lower.includes('scan') || lower.includes('discover') || lower.includes('analyze') || lower.includes('explore')) {
+        if (
+            lower.includes('scan') ||
+            lower.includes('discover') ||
+            lower.includes('analyze') ||
+            lower.includes('explore')
+        ) {
             return 'discovery';
         }
         if (lower.includes('plan') || lower.includes('design') || lower.includes('architect')) {
@@ -2146,10 +2329,22 @@ export class Orchestrator {
         if (lower.includes('delegate') || lower.includes('assign') || lower.includes('dispatch')) {
             return 'delegation';
         }
-        if (lower.includes('test') || lower.includes('verify') || lower.includes('validate') || lower.includes('check') || lower.includes('lint')) {
+        if (
+            lower.includes('test') ||
+            lower.includes('verify') ||
+            lower.includes('validate') ||
+            lower.includes('check') ||
+            lower.includes('lint')
+        ) {
             return 'verification';
         }
-        if (lower.includes('package') || lower.includes('deploy') || lower.includes('publish') || lower.includes('report') || lower.includes('document')) {
+        if (
+            lower.includes('package') ||
+            lower.includes('deploy') ||
+            lower.includes('publish') ||
+            lower.includes('report') ||
+            lower.includes('document')
+        ) {
             return 'packaging';
         }
         return 'implementation';

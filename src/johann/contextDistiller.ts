@@ -75,7 +75,7 @@ This summary will be used by other tasks that depend on your work.
  * If not, a best-effort fallback is produced from the raw text.
  */
 export function extractSummary(rawOutput: string): StructuredSummary {
-    const fallback: StructuredSummary = {
+    const _fallback: StructuredSummary = {
         completed: '',
         filesModified: [],
         keyExports: [],
@@ -106,8 +106,8 @@ export function extractSummary(rawOutput: string): StructuredSummary {
         }
         return value
             .split(',')
-            .map(s => s.trim())
-            .filter(s => s.length > 0);
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0);
     }
 
     return {
@@ -118,7 +118,7 @@ export function extractSummary(rawOutput: string): StructuredSummary {
         commandsRun: splitList(extractField('COMMANDS_RUN')),
         notes: (() => {
             const n = extractField('NOTES');
-            return (n && n.toLowerCase() !== 'none') ? n : '';
+            return n && n.toLowerCase() !== 'none' ? n : '';
         })(),
         raw: rawOutput,
     };
@@ -130,7 +130,8 @@ export function extractSummary(rawOutput: string): StructuredSummary {
  */
 function buildFallbackSummary(raw: string): StructuredSummary {
     // Extract file paths mentioned in tool calls or markdown
-    const filePathRegex = /(?:creating|editing|modified|created|wrote|reading|read)\s+(?:file\s+)?[`"]?([a-zA-Z0-9_/.\-]+\.[a-zA-Z]{1,6})[`"]?/gi;
+    const filePathRegex =
+        /(?:creating|editing|modified|created|wrote|reading|read)\s+(?:file\s+)?[`"]?([a-zA-Z0-9_/.\-]+\.[a-zA-Z]{1,6})[`"]?/gi;
     const files: string[] = [];
     let m: RegExpExecArray | null;
     while ((m = filePathRegex.exec(raw)) !== null) {
@@ -142,8 +143,8 @@ function buildFallbackSummary(raw: string): StructuredSummary {
     // First non-empty paragraph as summary
     const firstParagraph = raw
         .split('\n\n')
-        .map(p => p.trim())
-        .find(p => p.length > 10 && !p.startsWith('```') && !p.startsWith('>'));
+        .map((p) => p.trim())
+        .find((p) => p.length > 10 && !p.startsWith('```') && !p.startsWith('>'));
 
     return {
         completed: firstParagraph
@@ -218,7 +219,7 @@ export function gatherDependencyContext(
     results: Map<string, SubtaskResult>,
     maxCharsPerDep: number = 400,
 ): string {
-    const subtask = plan.subtasks.find(st => st.id === taskId);
+    const subtask = plan.subtasks.find((st) => st.id === taskId);
     if (!subtask || subtask.dependsOn.length === 0) {
         return '';
     }
@@ -231,7 +232,7 @@ export function gatherDependencyContext(
             continue;
         }
 
-        const depSubtask = plan.subtasks.find(st => st.id === depId);
+        const depSubtask = plan.subtasks.find((st) => st.id === depId);
         const label = depSubtask?.title ?? depId;
 
         const summary = extractSummary(depResult.output);

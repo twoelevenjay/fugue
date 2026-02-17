@@ -183,16 +183,14 @@ export class MessageBus {
         const messages: AgentMessage[] = [];
 
         // Read broadcasts
-        messages.push(...await this.readJsonl(this.broadcastUri));
+        messages.push(...(await this.readJsonl(this.broadcastUri)));
 
         // Read direct messages
         const directUri = vscode.Uri.joinPath(this.messagesDir, `${subtaskId}.jsonl`);
-        messages.push(...await this.readJsonl(directUri));
+        messages.push(...(await this.readJsonl(directUri)));
 
         // Filter to unread only (excluding messages from the subtask itself)
-        return messages.filter(
-            m => !this.readSet.has(m.id) && m.from !== subtaskId
-        );
+        return messages.filter((m) => !this.readSet.has(m.id) && m.from !== subtaskId);
     }
 
     /**
@@ -211,15 +209,19 @@ export class MessageBus {
         const messages: AgentMessage[] = [];
 
         // Read broadcasts
-        messages.push(...await this.readJsonl(this.broadcastUri));
+        messages.push(...(await this.readJsonl(this.broadcastUri)));
 
         // Read all direct message files
         try {
             const entries = await vscode.workspace.fs.readDirectory(this.messagesDir);
             for (const [name, type] of entries) {
-                if (type === vscode.FileType.File && name.endsWith('.jsonl') && name !== 'broadcast.jsonl') {
+                if (
+                    type === vscode.FileType.File &&
+                    name.endsWith('.jsonl') &&
+                    name !== 'broadcast.jsonl'
+                ) {
                     const uri = vscode.Uri.joinPath(this.messagesDir, name);
-                    messages.push(...await this.readJsonl(uri));
+                    messages.push(...(await this.readJsonl(uri)));
                 }
             }
         } catch {
@@ -234,7 +236,7 @@ export class MessageBus {
      */
     async getPendingRequests(): Promise<AgentMessage[]> {
         const all = await this.getAll();
-        return all.filter(m => m.type === 'request' && !this.readSet.has(m.id));
+        return all.filter((m) => m.type === 'request' && !this.readSet.has(m.id));
     }
 
     /**
@@ -247,10 +249,14 @@ export class MessageBus {
 
         const lines: string[] = ['**Messages from other agents:**'];
         for (const msg of messages) {
-            const icon = msg.type === 'broadcast' ? '📢'
-                : msg.type === 'conflict' ? '⚠️'
-                : msg.type === 'request' ? '❓'
-                : 'ℹ️';
+            const icon =
+                msg.type === 'broadcast'
+                    ? '📢'
+                    : msg.type === 'conflict'
+                      ? '⚠️'
+                      : msg.type === 'request'
+                        ? '❓'
+                        : 'ℹ️';
             lines.push(`  ${icon} [${msg.from}] ${msg.type.toUpperCase()}: "${msg.subject}"`);
         }
         return lines.join('\n');
@@ -266,8 +272,8 @@ export class MessageBus {
             const text = new TextDecoder().decode(bytes);
             return text
                 .split('\n')
-                .filter(line => line.trim().length > 0)
-                .map(line => {
+                .filter((line) => line.trim().length > 0)
+                .map((line) => {
                     try {
                         return JSON.parse(line) as AgentMessage;
                     } catch {

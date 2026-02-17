@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { getConfig } from './config';
-import { extractErrorMessage } from './retry';
 
 // ============================================================================
 // DEBUG CONVERSATION LOG — Full LLM conversation capture
@@ -116,7 +115,8 @@ export class DebugConversationLog {
         }
 
         const datePrefix = new Date().toISOString().split('T')[0];
-        const timeSlug = new Date().toISOString().split('T')[1]?.replace(/[:.]/g, '-').substring(0, 8) || '';
+        const timeSlug =
+            new Date().toISOString().split('T')[1]?.replace(/[:.]/g, '-').substring(0, 8) || '';
         const filename = `${datePrefix}_${timeSlug}_${this.sessionId}.md`;
         this.logUri = vscode.Uri.joinPath(debugDir, filename);
 
@@ -151,7 +151,9 @@ export class DebugConversationLog {
         section.push(`| **Timestamp** | ${entry.timestamp} |`);
         section.push(`| **Phase** | ${entry.phase} |`);
         section.push(`| **Model** | \`${entry.model}\` |`);
-        section.push(`| **Duration** | ${entry.durationMs}ms (${(entry.durationMs / 1000).toFixed(1)}s) |`);
+        section.push(
+            `| **Duration** | ${entry.durationMs}ms (${(entry.durationMs / 1000).toFixed(1)}s) |`,
+        );
         if (entry.retryAttempt !== undefined) {
             section.push(`| **Retry** | Attempt #${entry.retryAttempt} |`);
         }
@@ -163,13 +165,17 @@ export class DebugConversationLog {
         // Prompt
         section.push(`### Prompt Sent\n`);
         for (let i = 0; i < entry.promptMessages.length; i++) {
-            section.push(`<details><summary>Message ${i + 1} (${entry.promptMessages[i].length.toLocaleString()} chars)</summary>\n`);
+            section.push(
+                `<details><summary>Message ${i + 1} (${entry.promptMessages[i].length.toLocaleString()} chars)</summary>\n`,
+            );
             section.push('```');
             // Truncate extremely long prompts but keep enough to be useful
             const prompt = entry.promptMessages[i];
             if (prompt.length > 20000) {
                 section.push(prompt.substring(0, 10000));
-                section.push(`\n... [TRUNCATED: ${(prompt.length - 20000).toLocaleString()} chars omitted] ...\n`);
+                section.push(
+                    `\n... [TRUNCATED: ${(prompt.length - 20000).toLocaleString()} chars omitted] ...\n`,
+                );
                 section.push(prompt.substring(prompt.length - 10000));
             } else {
                 section.push(prompt);
@@ -179,14 +185,18 @@ export class DebugConversationLog {
         }
 
         // Response
-        section.push(`### Response Received (${entry.responseText.length.toLocaleString()} chars)\n`);
+        section.push(
+            `### Response Received (${entry.responseText.length.toLocaleString()} chars)\n`,
+        );
         if (entry.responseText.length > 0) {
             section.push(`<details><summary>Full response</summary>\n`);
             section.push('```');
             const resp = entry.responseText;
             if (resp.length > 30000) {
                 section.push(resp.substring(0, 15000));
-                section.push(`\n... [TRUNCATED: ${(resp.length - 30000).toLocaleString()} chars omitted] ...\n`);
+                section.push(
+                    `\n... [TRUNCATED: ${(resp.length - 30000).toLocaleString()} chars omitted] ...\n`,
+                );
                 section.push(resp.substring(resp.length - 15000));
             } else {
                 section.push(resp);
@@ -220,7 +230,10 @@ export class DebugConversationLog {
     /**
      * Finalize the log with session summary.
      */
-    async finalize(outcome: 'completed' | 'failed' | 'cancelled', errorMessage?: string): Promise<void> {
+    async finalize(
+        outcome: 'completed' | 'failed' | 'cancelled',
+        errorMessage?: string,
+    ): Promise<void> {
         if (!this.enabled || !this.initialized) {
             return;
         }
@@ -238,8 +251,8 @@ export class DebugConversationLog {
         summary.push(`| **Total Duration** | ${(totalDuration / 1000).toFixed(1)}s |`);
         summary.push(`| **Total LLM Calls** | ${this.entries.length} |`);
 
-        const successful = this.entries.filter(e => !e.error).length;
-        const failed = this.entries.filter(e => e.error).length;
+        const successful = this.entries.filter((e) => !e.error).length;
+        const failed = this.entries.filter((e) => e.error).length;
         summary.push(`| **Successful** | ${successful} |`);
         summary.push(`| **Failed** | ${failed} |`);
 
@@ -274,7 +287,7 @@ export class DebugConversationLog {
             const timeOffset = new Date(e.timestamp).getTime() - new Date(this.startTime).getTime();
             const status = e.error ? `⚠️ ${e.error.substring(0, 40)}` : '✅';
             summary.push(
-                `| ${i + 1} | +${(timeOffset / 1000).toFixed(1)}s | ${e.phase} | ${e.label.substring(0, 40)} | \`${e.model}\` | ${(e.durationMs / 1000).toFixed(1)}s | ${status} |`
+                `| ${i + 1} | +${(timeOffset / 1000).toFixed(1)}s | ${e.phase} | ${e.label.substring(0, 40)} | \`${e.model}\` | ${(e.durationMs / 1000).toFixed(1)}s | ${status} |`,
             );
         }
 
@@ -324,10 +337,7 @@ export class DebugConversationLog {
             }
 
             const updated = existing + newContent;
-            await vscode.workspace.fs.writeFile(
-                this.logUri,
-                new TextEncoder().encode(updated)
-            );
+            await vscode.workspace.fs.writeFile(this.logUri, new TextEncoder().encode(updated));
         } catch {
             // Silently fail — debug logging is non-critical
         }

@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as os from 'os';
-import * as fs from 'fs/promises'; // eslint-disable-line no-restricted-imports -- Required: worktrees live in os.tmpdir(), outside workspace (vscode.workspace.fs cannot reach)
-import { execFile } from 'child_process'; // eslint-disable-line no-restricted-imports -- Required: no VS Code API for git worktree operations
+import * as fs from 'fs/promises';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
@@ -82,9 +82,7 @@ export class WorktreeManager {
         const expectedPrefix = path.join(os.tmpdir(), 'johann-worktrees');
         const resolved = path.resolve(targetPath);
         if (!resolved.startsWith(expectedPrefix)) {
-            throw new Error(
-                `SECURITY: Refusing to delete path outside worktree base: ${resolved}`
-            );
+            throw new Error(`SECURITY: Refusing to delete path outside worktree base: ${resolved}`);
         }
     }
 
@@ -110,15 +108,15 @@ export class WorktreeManager {
 
             // Record the current branch (we'll merge worktree branches back to this)
             const branchOutput = await this.execGit(this.repoRoot, [
-                'rev-parse', '--abbrev-ref', 'HEAD'
+                'rev-parse',
+                '--abbrev-ref',
+                'HEAD',
             ]);
             this.baseBranch = branchOutput.trim();
 
             // Handle detached HEAD — use short commit hash as reference
             if (this.baseBranch === 'HEAD') {
-                const hash = await this.execGit(this.repoRoot, [
-                    'rev-parse', '--short', 'HEAD'
-                ]);
+                const hash = await this.execGit(this.repoRoot, ['rev-parse', '--short', 'HEAD']);
                 this.baseBranch = hash.trim();
             }
 
@@ -150,16 +148,16 @@ export class WorktreeManager {
         await fs.mkdir(path.dirname(worktreePath), { recursive: true });
 
         // Create worktree with a new branch forked from HEAD
-        await this.execGit(this.repoRoot, [
-            'worktree', 'add', '-b', branch, worktreePath
-        ]);
+        await this.execGit(this.repoRoot, ['worktree', 'add', '-b', branch, worktreePath]);
 
         // Configure git identity in the worktree so commits don't fail
         // even if the user hasn't set global git config
         try {
             await this.execGit(worktreePath, ['config', 'user.name', 'Johann']);
             await this.execGit(worktreePath, ['config', 'user.email', 'johann@orchestrator.local']);
-        } catch { /* non-fatal — global config may suffice */ }
+        } catch {
+            /* non-fatal — global config may suffice */
+        }
 
         const info: WorktreeInfo = { subtaskId, branch, worktreePath };
         this.worktrees.set(subtaskId, info);
@@ -178,7 +176,9 @@ export class WorktreeManager {
      */
     async commitWorktreeChanges(subtaskId: string): Promise<boolean> {
         const info = this.worktrees.get(subtaskId);
-        if (!info) { return false; }
+        if (!info) {
+            return false;
+        }
 
         try {
             // Check for any changes (staged, unstaged, or untracked)
@@ -193,8 +193,10 @@ export class WorktreeManager {
             // Commit with a descriptive message
             await this.execGit(info.worktreePath, [
                 'commit',
-                '-m', `Johann subtask: ${subtaskId}`,
-                '--author', 'Johann <johann@orchestrator.local>',
+                '-m',
+                `Johann subtask: ${subtaskId}`,
+                '--author',
+                'Johann <johann@orchestrator.local>',
                 '--allow-empty-message',
             ]);
 
@@ -222,7 +224,9 @@ export class WorktreeManager {
 
             // Check if the branch has any commits beyond the base
             const log = await this.execGit(this.repoRoot, [
-                'log', `${this.baseBranch}..${info.branch}`, '--oneline'
+                'log',
+                `${this.baseBranch}..${info.branch}`,
+                '--oneline',
             ]);
 
             if (!log.trim()) {
@@ -232,8 +236,11 @@ export class WorktreeManager {
             // Attempt the merge
             try {
                 await this.execGit(this.repoRoot, [
-                    'merge', info.branch, '--no-ff',
-                    '-m', `Johann: merge subtask "${subtaskId}"`,
+                    'merge',
+                    info.branch,
+                    '--no-ff',
+                    '-m',
+                    `Johann: merge subtask "${subtaskId}"`,
                 ]);
                 return { subtaskId, success: true, hasChanges: true };
             } catch {
@@ -267,11 +274,16 @@ export class WorktreeManager {
             const status = await this.execGit(this.repoRoot, ['status', '--porcelain']);
             if (status.trim()) {
                 await this.execGit(this.repoRoot, [
-                    'stash', 'push', '-m', 'Johann: auto-stash before worktree merge'
+                    'stash',
+                    'push',
+                    '-m',
+                    'Johann: auto-stash before worktree merge',
                 ]);
                 stashed = true;
             }
-        } catch { /* proceed without stashing */ }
+        } catch {
+            /* proceed without stashing */
+        }
 
         try {
             for (const id of subtaskIds) {
@@ -283,7 +295,9 @@ export class WorktreeManager {
             if (stashed) {
                 try {
                     await this.execGit(this.repoRoot, ['stash', 'pop']);
-                } catch { /* stash pop may conflict — leave in stash list */ }
+                } catch {
+                    /* stash pop may conflict — leave in stash list */
+                }
             }
         }
 
@@ -299,22 +313,29 @@ export class WorktreeManager {
      */
     async cleanupWorktree(subtaskId: string): Promise<void> {
         const info = this.worktrees.get(subtaskId);
-        if (!info) { return; }
+        if (!info) {
+            return;
+        }
 
         // Remove the git worktree
         try {
-            await this.execGit(this.repoRoot, [
-                'worktree', 'remove', info.worktreePath, '--force'
-            ]);
+            await this.execGit(this.repoRoot, ['worktree', 'remove', info.worktreePath, '--force']);
         } catch {
             // Force-remove the directory if git worktree remove fails
-            try { this.assertSafePath(info.worktreePath); await fs.rm(info.worktreePath, { recursive: true, force: true }); } catch { /* */ }
+            try {
+                this.assertSafePath(info.worktreePath);
+                await fs.rm(info.worktreePath, { recursive: true, force: true });
+            } catch {
+                /* */
+            }
         }
 
         // Delete the tracking branch
         try {
             await this.execGit(this.repoRoot, ['branch', '-D', info.branch]);
-        } catch { /* branch may already be deleted or merged */ }
+        } catch {
+            /* branch may already be deleted or merged */
+        }
 
         this.worktrees.delete(subtaskId);
     }
@@ -333,12 +354,16 @@ export class WorktreeManager {
         try {
             this.assertSafePath(this.baseDir);
             await fs.rm(this.baseDir, { recursive: true, force: true });
-        } catch { /* may already be gone */ }
+        } catch {
+            /* may already be gone */
+        }
 
         // Prune any dangling worktree refs
         try {
             await this.execGit(this.repoRoot, ['worktree', 'prune']);
-        } catch { /* non-fatal */ }
+        } catch {
+            /* non-fatal */
+        }
     }
 
     // ========================================================================
@@ -391,30 +416,38 @@ export class WorktreeManager {
         // Step 1: Prune stale worktree refs from git
         try {
             await this.execGit(this.repoRoot, ['worktree', 'prune']);
-        } catch { /* non-fatal */ }
+        } catch {
+            /* non-fatal */
+        }
 
         // Step 2: Find and delete orphaned johann/* branches
         // Keep branches belonging to the CURRENT session (this.sessionId)
         try {
             const branchOutput = await this.execGit(this.repoRoot, [
-                'branch', '--list', 'johann/*'
+                'branch',
+                '--list',
+                'johann/*',
             ]);
             const branches = branchOutput
                 .split('\n')
-                .map(b => b.trim().replace(/^\*\s*/, ''))
-                .filter(b => b.length > 0);
+                .map((b) => b.trim().replace(/^\*\s*/, ''))
+                .filter((b) => b.length > 0);
 
             const shortSession = this.sessionId.substring(0, 16);
 
             for (const branch of branches) {
                 // Don't delete branches belonging to the current session
-                if (branch.includes(shortSession)) continue;
+                if (branch.includes(shortSession)) {
+                    continue;
+                }
 
                 try {
                     // Check if this branch has an active worktree
                     // If so, remove the worktree first
                     const worktreeList = await this.execGit(this.repoRoot, [
-                        'worktree', 'list', '--porcelain'
+                        'worktree',
+                        'list',
+                        '--porcelain',
                     ]);
                     const hasWorktree = worktreeList.includes(`branch refs/heads/${branch}`);
 
@@ -437,11 +470,19 @@ export class WorktreeManager {
                         if (worktreePath) {
                             try {
                                 await this.execGit(this.repoRoot, [
-                                    'worktree', 'remove', worktreePath, '--force'
+                                    'worktree',
+                                    'remove',
+                                    worktreePath,
+                                    '--force',
                                 ]);
                             } catch {
                                 // Force-remove the directory
-                                try { this.assertSafePath(worktreePath); await fs.rm(worktreePath, { recursive: true, force: true }); } catch { /* */ }
+                                try {
+                                    this.assertSafePath(worktreePath);
+                                    await fs.rm(worktreePath, { recursive: true, force: true });
+                                } catch {
+                                    /* */
+                                }
                             }
                         }
                     }
@@ -464,7 +505,9 @@ export class WorktreeManager {
 
             for (const entry of entries) {
                 // Don't delete the current session's temp dir
-                if (entry === this.sessionId) continue;
+                if (entry === this.sessionId) {
+                    continue;
+                }
 
                 const entryPath = path.join(worktreeBase, entry);
                 try {
@@ -499,14 +542,16 @@ export class WorktreeManager {
             const status = await this.execGit(this.repoRoot, ['status', '--porcelain']);
             const conflictFiles = status
                 .split('\n')
-                .filter(line => /^(UU|AA|DD|AU|UA|DU|UD)\s/.test(line))
-                .map(line => line.substring(3).trim());
+                .filter((line) => /^(UU|AA|DD|AU|UA|DU|UD)\s/.test(line))
+                .map((line) => line.substring(3).trim());
 
             if (conflictFiles.length > 0) {
                 // Abort merge to leave the repo in a clean state
                 try {
                     await this.execGit(this.repoRoot, ['merge', '--abort']);
-                } catch { /* already aborted or no merge in progress */ }
+                } catch {
+                    /* already aborted or no merge in progress */
+                }
 
                 return {
                     subtaskId,
@@ -520,7 +565,9 @@ export class WorktreeManager {
             // Non-conflict merge failure
             try {
                 await this.execGit(this.repoRoot, ['merge', '--abort']);
-            } catch { /* */ }
+            } catch {
+                /* */
+            }
 
             return {
                 subtaskId,

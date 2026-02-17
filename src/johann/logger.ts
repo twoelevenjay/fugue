@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { getConfig, JohannConfig } from './config';
+import { getConfig } from './config';
 
 // ============================================================================
 // LOGGER — Structured logging via VS Code OutputChannel
@@ -78,7 +78,9 @@ export class JohannLogger {
      * Log a message at a specific level.
      */
     private log(level: LogLevel, message: string, context?: Record<string, unknown>): void {
-        if (LOG_LEVELS[level] < LOG_LEVELS[this.level]) return;
+        if (LOG_LEVELS[level] < LOG_LEVELS[this.level]) {
+            return;
+        }
 
         const timestamp = new Date().toISOString();
         const prefix = `[${timestamp}] [${level.toUpperCase()}]`;

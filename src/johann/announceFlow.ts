@@ -28,7 +28,7 @@ import { SubtaskResult } from './types';
 export function buildAnnounceMessage(
     entry: SubagentEntry,
     result: SubtaskResult,
-    escalationHistory?: Array<{ modelId: string; tier: number; reason: string }>
+    escalationHistory?: Array<{ modelId: string; tier: number; reason: string }>,
 ): string {
     const lines: string[] = [];
 
@@ -43,13 +43,17 @@ export function buildAnnounceMessage(
     lines.push(`| **Status** | ${result.success ? 'Completed successfully' : 'Failed'} |`);
     lines.push(`| **Model** | ${result.modelUsed} (Tier ${entry.modelTier}) |`);
     lines.push(`| **Duration** | ${(result.durationMs / 1000).toFixed(1)}s |`);
-    lines.push(`| **Attempt** | ${entry.attemptNumber}${entry.isEscalation ? ' (escalation)' : ''} |`);
+    lines.push(
+        `| **Attempt** | ${entry.attemptNumber}${entry.isEscalation ? ' (escalation)' : ''} |`,
+    );
     lines.push('');
 
     // Task description (brief)
     lines.push('### Task');
     lines.push(entry.task.substring(0, 300));
-    if (entry.task.length > 300) lines.push('...');
+    if (entry.task.length > 300) {
+        lines.push('...');
+    }
     lines.push('');
 
     // Result
@@ -86,10 +90,7 @@ export function buildAnnounceMessage(
 /**
  * Build a compact announce message (for space-constrained contexts).
  */
-export function buildCompactAnnounce(
-    entry: SubagentEntry,
-    result: SubtaskResult
-): string {
+export function buildCompactAnnounce(entry: SubagentEntry, result: SubtaskResult): string {
     const status = result.success ? '✅' : '❌';
     const duration = `${(result.durationMs / 1000).toFixed(1)}s`;
     const model = `${entry.modelId} (T${entry.modelTier})`;
@@ -108,21 +109,23 @@ export function buildCompactAnnounce(
  */
 export function buildMergeAnnouncement(
     entries: SubagentEntry[],
-    results: Map<string, SubtaskResult>
+    results: Map<string, SubtaskResult>,
 ): string {
     const lines: string[] = [];
     lines.push('## Subagent Results Summary');
     lines.push('');
 
-    const completed = entries.filter(e => e.status === 'completed');
-    const failed = entries.filter(e => e.status === 'failed');
+    const completed = entries.filter((e) => e.status === 'completed');
+    const failed = entries.filter((e) => e.status === 'failed');
 
     lines.push(`**${completed.length}** completed, **${failed.length}** failed`);
     lines.push('');
 
     for (const entry of entries) {
         const result = results.get(entry.subtaskId);
-        if (!result) continue;
+        if (!result) {
+            continue;
+        }
 
         lines.push(buildCompactAnnounce(entry, result));
         lines.push('');
@@ -136,7 +139,7 @@ export function buildMergeAnnouncement(
  */
 export function buildProgressUpdate(
     entry: SubagentEntry,
-    phase: 'starting' | 'running' | 'reviewing' | 'done' | 'escalating'
+    phase: 'starting' | 'running' | 'reviewing' | 'done' | 'escalating',
 ): string {
     const phaseText: Record<string, string> = {
         starting: `🚀 Starting: **${entry.title}** → \`${entry.modelId}\` (Tier ${entry.modelTier})`,

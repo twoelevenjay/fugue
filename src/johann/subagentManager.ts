@@ -10,7 +10,11 @@ import { MessageBus, parseHiveSignals, HIVE_SIGNAL_INSTRUCTION } from './message
 import { HookRunner } from './hooks';
 import { RateLimitGuard } from './rateLimitGuard';
 import { FlowCorrectionManager } from './flowCorrection';
-import { DelegationGuard, buildDelegationConstraintBlock, getDelegationPolicy } from './delegationPolicy';
+import {
+    DelegationGuard,
+    buildDelegationConstraintBlock,
+    getDelegationPolicy,
+} from './delegationPolicy';
 import { SelfHealingDetector } from './selfHealing';
 
 // ============================================================================
@@ -50,9 +54,7 @@ const MAX_TOTAL_OUTPUT_CHARS = 200_000;
 const HIVE_MIND_REFRESH_INTERVAL = 5;
 
 /** Known problematic tools that can expose invalid schemas in some environments. */
-const TOOL_NAME_BLOCKLIST = new Set<string>([
-    'mcp_gitkraken_gitkraken_workspace_list',
-]);
+const TOOL_NAME_BLOCKLIST = new Set<string>(['mcp_gitkraken_gitkraken_workspace_list']);
 
 const LONG_RUNNING_COMMAND_PATTERNS: RegExp[] = [
     /\bnpm\s+run\s+(dev|start|watch)\b/i,
@@ -304,7 +306,7 @@ export class SubagentManager {
         if (!normalized) {
             return false;
         }
-        return LONG_RUNNING_COMMAND_PATTERNS.some(pattern => pattern.test(normalized));
+        return LONG_RUNNING_COMMAND_PATTERNS.some((pattern) => pattern.test(normalized));
     }
 
     /**
@@ -317,7 +319,9 @@ export class SubagentManager {
      *   3. Very long lines with no whitespace (binary/encoded data)
      */
     private detectOutputCorruption(text: string): string {
-        if (text.length < 100) return '';
+        if (text.length < 100) {
+            return '';
+        }
 
         // Check 1: High ratio of non-Latin/non-common characters
         // Normal code/docs should be mostly ASCII with some Unicode
@@ -393,14 +397,22 @@ export class SubagentManager {
         }
 
         // Short output (< 200 chars) without tool calls, containing refusal keywords
-        if (trimmed.length < 200 && /\b(can'?t|cannot|unable|not able|won'?t)\b.*\b(assist|help|complete|do this)\b/i.test(trimmed)) {
+        if (
+            trimmed.length < 200 &&
+            /\b(can'?t|cannot|unable|not able|won'?t)\b.*\b(assist|help|complete|do this)\b/i.test(
+                trimmed,
+            )
+        ) {
             return `Likely refusal: "${trimmed.substring(0, 80)}"`;
         }
 
         return '';
     }
 
-    private prepareToolInput(toolName: string, rawInput: unknown): { input: object; warnings: string[] } {
+    private prepareToolInput(
+        toolName: string,
+        rawInput: unknown,
+    ): { input: object; warnings: string[] } {
         const warnings: string[] = [];
         const input = this.isRecord(rawInput) ? { ...rawInput } : {};
 
@@ -415,7 +427,9 @@ export class SubagentManager {
                 this.looksLongRunningCommand(command)
             ) {
                 input.isBackground = true;
-                warnings.push(`Auto-switched \`run_in_terminal\` to background for likely long-running command: ${command.substring(0, 120)}`);
+                warnings.push(
+                    `Auto-switched \`run_in_terminal\` to background for likely long-running command: ${command.substring(0, 120)}`,
+                );
             }
 
             if (typeof input.timeout !== 'number' || timeout <= 0) {
@@ -438,19 +452,27 @@ export class SubagentManager {
         toolName: string,
         input: object,
         toolToken: vscode.ChatParticipantToolToken | undefined,
-        token: vscode.CancellationToken
+        token: vscode.CancellationToken,
     ): Promise<vscode.LanguageModelToolResult> {
         const timeoutMs = this.config.toolInvocationTimeoutMs;
         let timer: NodeJS.Timeout | undefined;
 
-        const toolPromise = vscode.lm.invokeTool(toolName, {
-            input,
-            toolInvocationToken: toolToken,
-        }, token);
+        const toolPromise = vscode.lm.invokeTool(
+            toolName,
+            {
+                input,
+                toolInvocationToken: toolToken,
+            },
+            token,
+        );
 
         const timeoutPromise = new Promise<never>((_, reject) => {
             timer = setTimeout(() => {
-                reject(new Error(`Tool \"${toolName}\" exceeded ${timeoutMs}ms and was treated as timed out.`));
+                reject(
+                    new Error(
+                        `Tool \"${toolName}\" exceeded ${timeoutMs}ms and was treated as timed out.`,
+                    ),
+                );
             }, timeoutMs);
         });
 
@@ -467,12 +489,15 @@ export class SubagentManager {
      * Convert tool result content to supported LM message parts.
      */
     private toSupportedToolContent(
-        content: readonly unknown[]
+        content: readonly unknown[],
     ): (vscode.LanguageModelTextPart | vscode.LanguageModelDataPart)[] {
         const supported: (vscode.LanguageModelTextPart | vscode.LanguageModelDataPart)[] = [];
 
         for (const item of content) {
-            if (item instanceof vscode.LanguageModelTextPart || item instanceof vscode.LanguageModelDataPart) {
+            if (
+                item instanceof vscode.LanguageModelTextPart ||
+                item instanceof vscode.LanguageModelDataPart
+            ) {
                 supported.push(item);
             } else if (typeof item === 'string') {
                 supported.push(new vscode.LanguageModelTextPart(item));
@@ -480,7 +505,9 @@ export class SubagentManager {
         }
 
         if (supported.length === 0) {
-            supported.push(new vscode.LanguageModelTextPart('Tool executed with no textual output.'));
+            supported.push(
+                new vscode.LanguageModelTextPart('Tool executed with no textual output.'),
+            );
         }
 
         return supported;
@@ -531,7 +558,7 @@ export class SubagentManager {
         messageBus?: MessageBus,
         hookRunner?: HookRunner,
         rateLimitGuard?: RateLimitGuard,
-        delegationGuard?: DelegationGuard
+        delegationGuard?: DelegationGuard,
     ): Promise<SubtaskResult> {
         const startTime = Date.now();
 
@@ -546,14 +573,19 @@ export class SubagentManager {
                 const ledgerContext = ledger.buildContextForSubagent(
                     subtask.id,
                     freshSnapshot,
-                    true
+                    true,
                 );
                 // Dynamic context = ledger context + original workspace metadata
                 dynamicContext = ledgerContext + '\n\n' + workspaceContext;
             }
 
             // Build the prompt with context from dependencies + dynamic ledger state
-            const prompt = this.buildSubagentPrompt(subtask, dependencyResults, dynamicContext, skills);
+            const prompt = this.buildSubagentPrompt(
+                subtask,
+                dependencyResults,
+                dynamicContext,
+                skills,
+            );
 
             // Discover available tools
             const tools = this.getAvailableTools();
@@ -565,12 +597,14 @@ export class SubagentManager {
 
             // Build the conversation messages — will grow as we loop
             const messages: vscode.LanguageModelChatMessage[] = [
-                vscode.LanguageModelChatMessage.User(prompt)
+                vscode.LanguageModelChatMessage.User(prompt),
             ];
 
             // Open a collapsible log section
             if (stream) {
-                stream.markdown(`\n<details><summary>📋 ${subtask.title} — <code>${modelInfo.name}</code> output</summary>\n\n`);
+                stream.markdown(
+                    `\n<details><summary>📋 ${subtask.title} — <code>${modelInfo.name}</code> output</summary>\n\n`,
+                );
             }
 
             let fullOutput = '';
@@ -587,9 +621,12 @@ export class SubagentManager {
                 // Guard: abort if total output is getting too large
                 if (fullOutput.length > MAX_TOTAL_OUTPUT_CHARS) {
                     if (stream) {
-                        stream.markdown(`\n> ⚠️ Output limit reached (${(fullOutput.length / 1000).toFixed(0)}KB). Stopping execution.\n`);
+                        stream.markdown(
+                            `\n> ⚠️ Output limit reached (${(fullOutput.length / 1000).toFixed(0)}KB). Stopping execution.\n`,
+                        );
                     }
-                    fullOutput += '\n[OUTPUT LIMIT REACHED — execution stopped to prevent runaway output]';
+                    fullOutput +=
+                        '\n[OUTPUT LIMIT REACHED — execution stopped to prevent runaway output]';
                     break;
                 }
 
@@ -605,7 +642,7 @@ export class SubagentManager {
                         messages,
                         options,
                         token,
-                        stream
+                        stream,
                     );
                     response = guarded.response;
                 } else {
@@ -630,18 +667,24 @@ export class SubagentManager {
 
                 // Debug log this round
                 if (debugLog) {
-                    const toolCallSummary = toolCalls.length > 0
-                        ? ` | Tool calls: ${toolCalls.map(tc => tc.name).join(', ')}`
-                        : '';
+                    const toolCallSummary =
+                        toolCalls.length > 0
+                            ? ` | Tool calls: ${toolCalls.map((tc) => tc.name).join(', ')}`
+                            : '';
                     await debugLog.logLLMCall({
                         timestamp: new Date(callStart).toISOString(),
                         phase: 'subtask-execution',
                         label: `${subtask.title} (round ${round}${toolCallSummary})`,
                         model: modelInfo.id || modelInfo.name || 'unknown',
-                        promptMessages: round === 1
-                            ? [prompt]
-                            : [`(continuation round ${round}, ${messages.length} messages in context)`],
-                        responseText: roundText + (toolCalls.length > 0 ? `\n[${toolCalls.length} tool call(s)]` : ''),
+                        promptMessages:
+                            round === 1
+                                ? [prompt]
+                                : [
+                                      `(continuation round ${round}, ${messages.length} messages in context)`,
+                                  ],
+                        responseText:
+                            roundText +
+                            (toolCalls.length > 0 ? `\n[${toolCalls.length} tool call(s)]` : ''),
                         durationMs: Date.now() - callStart,
                     });
                 }
@@ -662,12 +705,17 @@ export class SubagentManager {
                     const corruptionReason = this.detectOutputCorruption(roundText);
                     if (corruptionReason) {
                         if (stream) {
-                            stream.markdown(`\n> 🛑 **Output corruption detected:** ${corruptionReason}. Aborting subtask.\n`);
+                            stream.markdown(
+                                `\n> 🛑 **Output corruption detected:** ${corruptionReason}. Aborting subtask.\n`,
+                            );
                         }
                         fullOutput += `\n[ABORTED: ${corruptionReason}]`;
 
                         if (debugLog) {
-                            await debugLog.logEvent('other', `Corruption detected in subtask ${subtask.id}: ${corruptionReason}`);
+                            await debugLog.logEvent(
+                                'other',
+                                `Corruption detected in subtask ${subtask.id}: ${corruptionReason}`,
+                            );
                         }
 
                         // Close section and return failure
@@ -693,12 +741,18 @@ export class SubagentManager {
                         delegationGuard.checkForRunaway(roundText);
                         if (delegationGuard.isFrozen) {
                             if (stream) {
-                                stream.markdown('\n> 🛑 **Delegation runaway detected.** Model is attempting to self-delegate. Aborting subtask.\n');
+                                stream.markdown(
+                                    '\n> 🛑 **Delegation runaway detected.** Model is attempting to self-delegate. Aborting subtask.\n',
+                                );
                             }
-                            fullOutput += '\n[ABORTED: delegation runaway detected — model is attempting to self-delegate]';
+                            fullOutput +=
+                                '\n[ABORTED: delegation runaway detected — model is attempting to self-delegate]';
 
                             if (debugLog) {
-                                await debugLog.logEvent('other', `Delegation runaway in subtask ${subtask.id}: guard frozen`);
+                                await debugLog.logEvent(
+                                    'other',
+                                    `Delegation runaway in subtask ${subtask.id}: guard frozen`,
+                                );
                             }
 
                             if (stream) {
@@ -709,7 +763,8 @@ export class SubagentManager {
                                 success: false,
                                 modelUsed: modelInfo.id,
                                 output: fullOutput,
-                                reviewNotes: 'Aborted: delegation runaway detected — model attempted to self-delegate',
+                                reviewNotes:
+                                    'Aborted: delegation runaway detected — model attempted to self-delegate',
                                 durationMs: Date.now() - startTime,
                                 timestamp: new Date().toISOString(),
                             };
@@ -721,13 +776,19 @@ export class SubagentManager {
                 if (toolCalls.length === 0) {
                     // Track consecutive text-only rounds to detect rambling models
                     consecutiveTextRounds++;
-                    if (consecutiveTextRounds >= MAX_CONSECUTIVE_TEXT_ROUNDS && round < MAX_TOOL_ROUNDS) {
+                    if (
+                        consecutiveTextRounds >= MAX_CONSECUTIVE_TEXT_ROUNDS &&
+                        round < MAX_TOOL_ROUNDS
+                    ) {
                         // The model has produced text without tool calls multiple times
                         // in a row. It's probably rambling. Force exit.
                         if (stream) {
-                            stream.markdown(`\n> ⚠️ ${consecutiveTextRounds} consecutive text-only rounds with no tool usage. Stopping.\n`);
+                            stream.markdown(
+                                `\n> ⚠️ ${consecutiveTextRounds} consecutive text-only rounds with no tool usage. Stopping.\n`,
+                            );
                         }
-                        fullOutput += '\n[STOPPED: model produced only text without tool calls for multiple rounds]';
+                        fullOutput +=
+                            '\n[STOPPED: model produced only text without tool calls for multiple rounds]';
                     }
                     break;
                 }
@@ -738,7 +799,10 @@ export class SubagentManager {
                 totalToolCalls += toolCalls.length;
 
                 // Add the assistant's response (with tool calls) to the conversation
-                const assistantParts: (vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart)[] = [];
+                const assistantParts: (
+                    | vscode.LanguageModelTextPart
+                    | vscode.LanguageModelToolCallPart
+                )[] = [];
                 if (roundText) {
                     assistantParts.push(new vscode.LanguageModelTextPart(roundText));
                 }
@@ -770,7 +834,7 @@ export class SubagentManager {
                             tc.name,
                             prepared.input,
                             toolToken,
-                            token
+                            token,
                         );
 
                         // Extract text content from the tool result for logging
@@ -778,43 +842,52 @@ export class SubagentManager {
 
                         if (stream && resultText) {
                             // Show a short summary of the tool result
-                            const preview = resultText.length > 200
-                                ? resultText.substring(0, 200) + '…'
-                                : resultText;
+                            const preview =
+                                resultText.length > 200
+                                    ? resultText.substring(0, 200) + '…'
+                                    : resultText;
                             stream.markdown(`> ✅ Result: ${preview}\n\n`);
                         }
 
                         fullOutput += `\n[Tool: ${tc.name}] ${resultText}\n`;
 
                         if (!tc.callId) {
-                            missingCallIdWarnings.push(`Tool "${tc.name}" returned without a callId.`);
+                            missingCallIdWarnings.push(
+                                `Tool "${tc.name}" returned without a callId.`,
+                            );
                             continue;
                         }
 
                         toolResultParts.push(
                             new vscode.LanguageModelToolResultPart(
                                 tc.callId,
-                                this.toSupportedToolContent(toolResult.content)
-                            )
+                                this.toSupportedToolContent(toolResult.content),
+                            ),
                         );
                     } catch (toolErr) {
                         const errMsg = toolErr instanceof Error ? toolErr.message : String(toolErr);
 
                         if (stream) {
-                            stream.markdown(`\n> ❌ Tool \`${tc.name}\` failed: ${errMsg.substring(0, 150)}\n\n`);
+                            stream.markdown(
+                                `\n> ❌ Tool \`${tc.name}\` failed: ${errMsg.substring(0, 150)}\n\n`,
+                            );
                         }
 
                         fullOutput += `\n[Tool: ${tc.name}] ERROR: ${errMsg}\n`;
 
                         if (!tc.callId) {
-                            missingCallIdWarnings.push(`Tool "${tc.name}" failed and had no callId: ${errMsg}`);
+                            missingCallIdWarnings.push(
+                                `Tool "${tc.name}" failed and had no callId: ${errMsg}`,
+                            );
                             continue;
                         }
 
                         toolResultParts.push(
                             new vscode.LanguageModelToolResultPart(tc.callId, [
-                                new vscode.LanguageModelTextPart(`Error executing tool "${tc.name}": ${errMsg}`)
-                            ])
+                                new vscode.LanguageModelTextPart(
+                                    `Error executing tool "${tc.name}": ${errMsg}`,
+                                ),
+                            ]),
                         );
                     }
                 }
@@ -823,7 +896,9 @@ export class SubagentManager {
                     messages.push(vscode.LanguageModelChatMessage.User(toolResultParts));
                 }
                 if (missingCallIdWarnings.length > 0) {
-                    messages.push(vscode.LanguageModelChatMessage.User(missingCallIdWarnings.join('\n')));
+                    messages.push(
+                        vscode.LanguageModelChatMessage.User(missingCallIdWarnings.join('\n')),
+                    );
                 }
 
                 // ============================================================
@@ -831,8 +906,8 @@ export class SubagentManager {
                 // ============================================================
                 if (ledger?.isReady()) {
                     const journalEntries = ledger.buildToolRoundJournalEntry(
-                        toolCalls.map(tc => ({ name: tc.name, input: tc.input })),
-                        roundText
+                        toolCalls.map((tc) => ({ name: tc.name, input: tc.input })),
+                        roundText,
                     );
                     for (const entry of journalEntries) {
                         await ledger.appendJournal(subtask.id, entry);
@@ -857,15 +932,10 @@ export class SubagentManager {
 
                         // Build a compact update — much smaller than the full
                         // context to avoid bloating the conversation
-                        const hiveMindUpdate = ledger.buildMidRoundRefresh(
-                            subtask.id,
-                            round
-                        );
+                        const hiveMindUpdate = ledger.buildMidRoundRefresh(subtask.id, round);
 
                         // Inject as a user message so the model sees it
-                        messages.push(
-                            vscode.LanguageModelChatMessage.User(hiveMindUpdate)
-                        );
+                        messages.push(vscode.LanguageModelChatMessage.User(hiveMindUpdate));
 
                         if (stream) {
                             stream.markdown(`\n> 🐝 Hive mind refresh (round ${round})\n`);
@@ -898,7 +968,9 @@ export class SubagentManager {
             // Close the collapsible section
             if (stream) {
                 if (totalToolCalls > 0) {
-                    stream.markdown(`\n\n> **${totalToolCalls} tool call(s)** executed across **${round} round(s)**\n`);
+                    stream.markdown(
+                        `\n\n> **${totalToolCalls} tool call(s)** executed across **${round} round(s)**\n`,
+                    );
                 }
                 stream.markdown('\n\n</details>\n\n');
             }
@@ -943,8 +1015,7 @@ export class SubagentManager {
                     `Increase \`github.copilot.chat.agent.maxRequests\` in VS Code settings. ` +
                     `Original error: ${classified.message}`;
             } else if (classified.category === 'network') {
-                errorMsg =
-                    `Network error during subtask execution (retries exhausted): ${classified.message}`;
+                errorMsg = `Network error during subtask execution (retries exhausted): ${classified.message}`;
             } else {
                 errorMsg = `Execution error: ${classified.message}`;
             }
@@ -995,7 +1066,11 @@ export class SubagentManager {
      * Count tool call markers in execution output (e.g., "[Tool: run_in_terminal]").
      * Returns a map of tool names to call counts plus aggregate stats.
      */
-    private countToolUsage(output: string): { total: number; byTool: Map<string, number>; roundCount: number } {
+    private countToolUsage(output: string): {
+        total: number;
+        byTool: Map<string, number>;
+        roundCount: number;
+    } {
         const toolCallRegex = /\[Tool:\s*(\S+)\]/g;
         const byTool = new Map<string, number>();
         let total = 0;
@@ -1025,7 +1100,7 @@ export class SubagentManager {
         token: vscode.CancellationToken,
         stream?: vscode.ChatResponseStream,
         debugLog?: DebugConversationLog,
-        selfHealing?: SelfHealingDetector
+        selfHealing?: SelfHealingDetector,
     ): Promise<{ success: boolean; reason: string; suggestions: string[] }> {
         // If the execution itself failed, no need to review
         if (!result.success) {
@@ -1047,9 +1122,11 @@ export class SubagentManager {
 
         // Gather execution metadata BEFORE truncation so we count ALL tool calls
         const toolUsage = this.countToolUsage(result.output);
-        const hasSummaryBlock = /```summary/i.test(result.output) || /COMPLETED/i.test(result.output);
-        const hasFileCreation = /\[Tool:\s*(copilot_createFile|create_file)\]/i.test(result.output)
-            || /\[Tool:\s*run_in_terminal\].*?(cat|echo|tee|>>|>)\s/i.test(result.output);
+        const hasSummaryBlock =
+            /```summary/i.test(result.output) || /COMPLETED/i.test(result.output);
+        const hasFileCreation =
+            /\[Tool:\s*(copilot_createFile|create_file)\]/i.test(result.output) ||
+            /\[Tool:\s*run_in_terminal\].*?(cat|echo|tee|>>|>)\s/i.test(result.output);
 
         // == AUTO-PASS: strong success signals make review unnecessary ==
         // If the execution ran 8+ tool rounds AND produced a summary block,
@@ -1074,7 +1151,8 @@ export class SubagentManager {
             const startChars = 4000;
             const start = result.output.substring(0, startChars);
             const end = result.output.substring(result.output.length - endChars);
-            outputForReview = start +
+            outputForReview =
+                start +
                 `\n\n... [Output truncated: ${result.output.length - startChars - endChars} chars omitted] ...\n\n` +
                 end;
         }
@@ -1116,9 +1194,7 @@ ${outputForReview}
 
         try {
             const fullReviewPrompt = REVIEW_SYSTEM_PROMPT + '\n\n---\n\n' + reviewPrompt;
-            const messages = [
-                vscode.LanguageModelChatMessage.User(fullReviewPrompt)
-            ];
+            const messages = [vscode.LanguageModelChatMessage.User(fullReviewPrompt)];
 
             if (stream) {
                 stream.markdown(`<details><summary>🔍 Reviewing: ${subtask.title}</summary>\n\n`);
@@ -1152,7 +1228,7 @@ ${outputForReview}
                     return text;
                 },
                 REVIEW_RETRY_POLICY,
-                token
+                token,
                 // No onRetry callback — reviews are silent about retries
             );
 
@@ -1171,7 +1247,7 @@ ${outputForReview}
                         subtask.id,
                         subtask.description,
                         this.parseReviewJson(reviewOutput), // Parse just the JSON for checklist analysis
-                        result.output
+                        result.output,
                     );
                 } catch {
                     // Detection failed — non-critical, continue
@@ -1202,7 +1278,7 @@ ${outputForReview}
         subtask: Subtask,
         dependencyResults: Map<string, SubtaskResult>,
         workspaceContext: string,
-        skills?: Skill[]
+        skills?: Skill[],
     ): string {
         const parts: string[] = [];
 
@@ -1232,21 +1308,33 @@ ${outputForReview}
         if (subtask.worktreePath) {
             parts.push('=== ISOLATED WORKING DIRECTORY ===');
             parts.push(`You are operating in a dedicated git worktree at: ${subtask.worktreePath}`);
-            parts.push('This is an isolated copy of the codebase on its own branch, created to prevent');
+            parts.push(
+                'This is an isolated copy of the codebase on its own branch, created to prevent',
+            );
             parts.push('conflicts with other parallel subtasks.');
             parts.push('');
             parts.push('CRITICAL RULES FOR WORKTREE ISOLATION:');
-            parts.push(`1. ALL file operations (create, edit, delete) MUST target paths under: ${subtask.worktreePath}`);
-            parts.push(`2. When running terminal commands, ALWAYS cd to the worktree first: cd "${subtask.worktreePath}"`);
-            parts.push('3. Do NOT modify files in the main workspace directory — only use your worktree.');
-            parts.push('4. Your changes will be automatically committed and merged back to the main branch.');
-            parts.push('5. If installing dependencies, run install commands inside the worktree directory.');
+            parts.push(
+                `1. ALL file operations (create, edit, delete) MUST target paths under: ${subtask.worktreePath}`,
+            );
+            parts.push(
+                `2. When running terminal commands, ALWAYS cd to the worktree first: cd "${subtask.worktreePath}"`,
+            );
+            parts.push(
+                '3. Do NOT modify files in the main workspace directory — only use your worktree.',
+            );
+            parts.push(
+                '4. Your changes will be automatically committed and merged back to the main branch.',
+            );
+            parts.push(
+                '5. If installing dependencies, run install commands inside the worktree directory.',
+            );
             parts.push('');
         }
 
         // Include distilled results from dependencies (compact, structured)
         if (subtask.dependsOn.length > 0) {
-            const hasDeps = subtask.dependsOn.some(depId => {
+            const hasDeps = subtask.dependsOn.some((depId) => {
                 const r = dependencyResults.get(depId);
                 return r && r.success;
             });
@@ -1280,7 +1368,9 @@ ${outputForReview}
 
         // Final reminder about workspace awareness
         parts.push('');
-        parts.push('REMINDER: Check the CURRENT WORKSPACE STATE above before creating files or directories.');
+        parts.push(
+            'REMINDER: Check the CURRENT WORKSPACE STATE above before creating files or directories.',
+        );
         parts.push('If a path already exists, use it — do not create duplicates.');
 
         // Append summary block instruction so the model emits structured metadata
@@ -1296,7 +1386,11 @@ ${outputForReview}
      * Parse the review model's output into a structured result.
      * Handles both the legacy format and new checklist format.
      */
-    private parseReviewResult(rawOutput: string): { success: boolean; reason: string; suggestions: string[] } {
+    private parseReviewResult(rawOutput: string): {
+        success: boolean;
+        reason: string;
+        suggestions: string[];
+    } {
         const parsed = this.parseReviewJson(rawOutput);
         if (!parsed) {
             // Fallback to failure if parsing fails
@@ -1313,7 +1407,7 @@ ${outputForReview}
         const checklist = parsed.checklist as Record<string, boolean> | undefined;
         if (checklist && typeof checklist === 'object') {
             const checklistValues = Object.values(checklist);
-            const allPassed = checklistValues.every(v => v === true);
+            const allPassed = checklistValues.every((v) => v === true);
             if (!allPassed && success) {
                 // Override: if any checklist item failed, the review fails
                 success = false;
@@ -1338,9 +1432,7 @@ ${outputForReview}
         return {
             success,
             reason,
-            suggestions: Array.isArray(parsed.suggestions)
-                ? parsed.suggestions.map(String)
-                : [],
+            suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.map(String) : [],
         };
     }
 

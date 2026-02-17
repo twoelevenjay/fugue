@@ -12,10 +12,7 @@
  */
 
 import * as vscode from 'vscode';
-import {
-    SkillDoc,
-    PromotionCandidate,
-} from './skillTypes';
+import { SkillDoc, PromotionCandidate } from './skillTypes';
 import { LocalSkillStore, GlobalSkillStore } from './skillStore';
 import { SkillValidator } from './skillValidator';
 import { SkillLedger } from './skillLedger';
@@ -41,7 +38,7 @@ export class SkillPromotionManager {
         localStore: LocalSkillStore,
         globalStore: GlobalSkillStore,
         ledger: SkillLedger,
-        newSkillSlugs: Set<string>,
+        _newSkillSlugs: Set<string>,
     ): Promise<PromotionCandidate[]> {
         const candidates: PromotionCandidate[] = [];
         const allLocalSkills = await localStore.listSkills();
@@ -108,7 +105,7 @@ export class SkillPromotionManager {
             `Promote skill "${skill.metadata.title}" to global store?`,
             { modal: false, detail },
             'Promote to Global',
-            'Dismiss'
+            'Dismiss',
         );
 
         if (action === 'Promote to Global') {
@@ -153,10 +150,7 @@ export class SkillPromotionManager {
      * - Updates scope to "global", origin to "promoted"
      * - Sets content hash for immutability
      */
-    async promoteSkill(
-        skill: SkillDoc,
-        globalStore: GlobalSkillStore,
-    ): Promise<SkillDoc> {
+    async promoteSkill(skill: SkillDoc, globalStore: GlobalSkillStore): Promise<SkillDoc> {
         // Create the global copy
         const globalSkill: SkillDoc = {
             ...structuredClone(skill),
@@ -171,11 +165,11 @@ export class SkillPromotionManager {
         await globalStore.saveSkill(globalSkill);
 
         this.logger.info(
-            `Promoted skill "${skill.metadata.slug}@${skill.metadata.version}" to global store`
+            `Promoted skill "${skill.metadata.slug}@${skill.metadata.version}" to global store`,
         );
 
         vscode.window.showInformationMessage(
-            `Skill "${skill.metadata.title}" promoted to global store.`
+            `Skill "${skill.metadata.title}" promoted to global store.`,
         );
 
         return globalSkill;
@@ -218,23 +212,21 @@ export class SkillPromotionManager {
  * Show end-of-run stale skill suggestions.
  * Called alongside promotion UI.
  */
-export async function showStaleSuggestions(
-    staleSkills: SkillDoc[],
-): Promise<void> {
+export async function showStaleSuggestions(staleSkills: SkillDoc[]): Promise<void> {
     if (staleSkills.length === 0) {
         return;
     }
 
-    const slugList = staleSkills.map(s => s.metadata.slug).join(', ');
+    const slugList = staleSkills.map((s) => s.metadata.slug).join(', ');
     const action = await vscode.window.showWarningMessage(
         `${staleSkills.length} skill(s) haven't been used in 5+ runs: ${slugList}`,
         'Review',
-        'Dismiss'
+        'Dismiss',
     );
 
     if (action === 'Review') {
         // Open a quick pick to let the user see/delete stale skills
-        const items = staleSkills.map(s => ({
+        const items = staleSkills.map((s) => ({
             label: `${s.metadata.slug}@${s.metadata.version}`,
             description: s.metadata.description,
             detail: `Last used: ${s.metadata.last_used_at || 'never'} | Total uses: ${s.history.total_uses} | Unused streak: ${s.history.unused_run_streak} runs`,

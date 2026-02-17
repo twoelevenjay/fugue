@@ -133,8 +133,8 @@ export class ChatProgressReporter implements ProgressReporter {
         lines.push(`**${plan.summary}**\n`);
         lines.push(
             `${plan.strategy} · ` +
-            `${plan.overallComplexity} complexity · ` +
-            `${plan.subtasks.length} subtask${plan.subtasks.length !== 1 ? 's' : ''}\n`
+                `${plan.overallComplexity} complexity · ` +
+                `${plan.subtasks.length} subtask${plan.subtasks.length !== 1 ? 's' : ''}\n`,
         );
 
         if (plan.subtasks.length > 1) {
@@ -164,7 +164,7 @@ export class ChatProgressReporter implements ProgressReporter {
     showModels(modelSummary: string): void {
         this._stream.markdown(
             `<details><summary>Available models</summary>\n\n` +
-            `\`\`\`\n${modelSummary}\n\`\`\`\n\n</details>\n\n`
+                `\`\`\`\n${modelSummary}\n\`\`\`\n\n</details>\n\n`,
         );
     }
 
@@ -205,9 +205,7 @@ export class ChatProgressReporter implements ProgressReporter {
      * Phase → transient progress spinner. No permanent markdown.
      */
     private onPhase(event: PhaseEvent): void {
-        const msg = event.detail
-            ? `${event.label} — ${event.detail}`
-            : `${event.label}…`;
+        const msg = event.detail ? `${event.label} — ${event.detail}` : `${event.label}…`;
         this._stream.progress(msg);
     }
 
@@ -221,9 +219,10 @@ export class ChatProgressReporter implements ProgressReporter {
             startTime: Date.now(),
         });
 
-        const progressCtx = this._totalSubtasks > 0
-            ? ` (${this._completedSubtasks + this._failedSubtasks + 1}/${this._totalSubtasks})`
-            : '';
+        const progressCtx =
+            this._totalSubtasks > 0
+                ? ` (${this._completedSubtasks + this._failedSubtasks + 1}/${this._totalSubtasks})`
+                : '';
 
         this._stream.progress(`${this.formatProgressMessage(event)}${progressCtx}`);
     }
@@ -328,19 +327,33 @@ export class ChatProgressReporter implements ProgressReporter {
 
         // Compact summary header
         const parts: string[] = [];
-        if (event.running > 0) { parts.push(`${event.running} running`); }
-        if (event.done > 0) { parts.push(`${event.done} done`); }
-        if (event.failed > 0) { parts.push(`${event.failed} failed`); }
-        if (event.queued > 0) { parts.push(`${event.queued} queued`); }
+        if (event.running > 0) {
+            parts.push(`${event.running} running`);
+        }
+        if (event.done > 0) {
+            parts.push(`${event.done} done`);
+        }
+        if (event.failed > 0) {
+            parts.push(`${event.failed} failed`);
+        }
+        if (event.queued > 0) {
+            parts.push(`${event.queued} queued`);
+        }
 
-        lines.push(`<details><summary>🤖 **Delegation** — ${parts.join(' · ')} (${total} total)</summary>\n`);
+        lines.push(
+            `<details><summary>🤖 **Delegation** — ${parts.join(' · ')} (${total} total)</summary>\n`,
+        );
 
         // Per-subagent entries
         for (const entry of event.entries) {
-            const emoji = entry.status === 'running' ? '🔄'
-                : entry.status === 'done' ? '✅'
-                : entry.status === 'failed' ? '❌'
-                : '⏳';
+            const emoji =
+                entry.status === 'running'
+                    ? '🔄'
+                    : entry.status === 'done'
+                      ? '✅'
+                      : entry.status === 'failed'
+                        ? '❌'
+                        : '⏳';
             lines.push(`- ${emoji} **${entry.title}** — ${entry.summary}`);
         }
 
@@ -450,7 +463,7 @@ export function buildFileTree(files: string[]): vscode.ChatResponseFileTree[] {
             const name = parts[i];
             const isLast = i === parts.length - 1;
 
-            let found = current.find(n => n.name === name);
+            let found = current.find((n) => n.name === name);
             if (!found) {
                 found = { name };
                 if (!isLast) {

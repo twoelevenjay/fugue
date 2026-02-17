@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { HookRunner, HookName, HookContext, HookHandler } from '../../johann/hooks';
+import { HookRunner } from '../../johann/hooks';
 
 suite('hooks', () => {
     let runner: HookRunner;
@@ -17,7 +17,9 @@ suite('hooks', () => {
         runner.register('on_session_start', {
             name: 'test-hook',
             priority: 0,
-            handler: async () => { called = true; },
+            handler: async () => {
+                called = true;
+            },
         });
 
         await runner.run('on_session_start', {});
@@ -34,7 +36,9 @@ suite('hooks', () => {
         runner.register('before_planning', {
             name: 'ctx-test',
             priority: 0,
-            handler: async (ctx) => { receivedRequest = ctx.request; },
+            handler: async (ctx) => {
+                receivedRequest = ctx.request;
+            },
         });
 
         await runner.run('before_planning', { request: 'build an API' });
@@ -51,19 +55,25 @@ suite('hooks', () => {
         runner.register('before_subtask', {
             name: 'low',
             priority: 0,
-            handler: async () => { order.push('low'); },
+            handler: async () => {
+                order.push('low');
+            },
         });
 
         runner.register('before_subtask', {
             name: 'high',
             priority: 100,
-            handler: async () => { order.push('high'); },
+            handler: async () => {
+                order.push('high');
+            },
         });
 
         runner.register('before_subtask', {
             name: 'medium',
             priority: 50,
-            handler: async () => { order.push('medium'); },
+            handler: async () => {
+                order.push('medium');
+            },
         });
 
         await runner.run('before_subtask', {});
@@ -80,13 +90,17 @@ suite('hooks', () => {
         runner.register('on_error', {
             name: 'failing-handler',
             priority: 10,
-            handler: async () => { throw new Error('boom'); },
+            handler: async () => {
+                throw new Error('boom');
+            },
         });
 
         runner.register('on_error', {
             name: 'surviving-handler',
             priority: 0,
-            handler: async () => { secondCalled = true; },
+            handler: async () => {
+                secondCalled = true;
+            },
         });
 
         // Should not throw
@@ -103,7 +117,9 @@ suite('hooks', () => {
         runner.register('after_merge', {
             name: 'removable',
             priority: 0,
-            handler: async () => { called = true; },
+            handler: async () => {
+                called = true;
+            },
         });
 
         runner.unregister('after_merge', 'removable');
@@ -175,7 +191,9 @@ suite('hooks', () => {
             runner.register('after_subtask', {
                 name: `handler-${i}`,
                 priority: i,
-                handler: async () => { count++; },
+                handler: async () => {
+                    count++;
+                },
             });
         }
 
@@ -194,13 +212,17 @@ suite('hooks', () => {
         runner.register('before_planning', {
             name: 'before',
             priority: 0,
-            handler: async () => { beforeCalled = true; },
+            handler: async () => {
+                beforeCalled = true;
+            },
         });
 
         runner.register('after_planning', {
             name: 'after',
             priority: 0,
-            handler: async () => { afterCalled = true; },
+            handler: async () => {
+                afterCalled = true;
+            },
         });
 
         await runner.run('before_planning', {});

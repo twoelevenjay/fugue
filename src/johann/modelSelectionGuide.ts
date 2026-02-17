@@ -142,55 +142,55 @@ export const TASK_TO_MODEL_ROUTING = {
         primary: 'gpt-5-mini',
         preferredCost: 0,
         escalateTo: ['gpt-5.1-codex-mini', 'gpt-5.3-codex'],
-        description: 'Code generation, boilerplate, scaffolding'
+        description: 'Code generation, boilerplate, scaffolding',
     },
     refactor: {
         primary: 'gpt-5-mini',
         preferredCost: 0,
         escalateTo: ['gpt-5.1-codex-mini', 'gpt-5.3-codex'],
-        description: 'Mechanical refactors, renames, pattern changes'
+        description: 'Mechanical refactors, renames, pattern changes',
     },
     test: {
         primary: 'gpt-5-mini',
         preferredCost: 0,
         escalateTo: ['gpt-4.1', 'gpt-5.3-codex'],
-        description: 'Test generation and test writing'
+        description: 'Test generation and test writing',
     },
     debug: {
         primary: 'gpt-4.1',
         preferredCost: 0,
         escalateTo: ['gpt-5.1', 'claude-sonnet'],
-        description: 'Debugging, error analysis, fixing failures'
+        description: 'Debugging, error analysis, fixing failures',
     },
     review: {
         primary: 'gpt-4.1',
         preferredCost: 0,
         escalateTo: ['claude-sonnet', 'gpt-5.1'],
-        description: 'Code review, security, edge case analysis'
+        description: 'Code review, security, edge case analysis',
     },
     spec: {
         primary: 'gpt-4o',
         preferredCost: 0,
         escalateTo: ['claude-sonnet'],
-        description: 'Planning, specs, documentation, communication'
+        description: 'Planning, specs, documentation, communication',
     },
     edit: {
         primary: 'raptor-mini',
         preferredCost: 0,
         escalateTo: ['gpt-5-mini'],
-        description: 'Small edits, formatting, single functions'
+        description: 'Small edits, formatting, single functions',
     },
     design: {
         primary: 'gpt-4.1',
         preferredCost: 0,
         escalateTo: ['claude-sonnet', 'gpt-5.1', 'gemini-2.5-pro'],
-        description: 'Architecture decisions, system design'
+        description: 'Architecture decisions, system design',
     },
     'complex-refactor': {
         primary: 'gpt-5.1-codex-mini',
         preferredCost: 0.33,
         escalateTo: ['gpt-5.3-codex', 'claude-sonnet'],
-        description: 'Large-scale refactors with deep reasoning'
+        description: 'Large-scale refactors with deep reasoning',
     },
 } as const;
 
@@ -200,41 +200,98 @@ export const TASK_TO_MODEL_ROUTING = {
  */
 export const TASK_TYPE_PATTERNS = {
     generate: [
-        /generat/i, /creat.*file/i, /scaffold/i, /boilerplate/i,
-        /implement.*function/i, /write.*class/i, /add.*route/i,
-        /build.*component/i, /migration/i, /dto/i, /controller/i
+        /generat/i,
+        /creat.*file/i,
+        /scaffold/i,
+        /boilerplate/i,
+        /implement.*function/i,
+        /write.*class/i,
+        /add.*route/i,
+        /build.*component/i,
+        /migration/i,
+        /dto/i,
+        /controller/i,
     ],
     refactor: [
-        /refactor/i, /rename/i, /move.*file/i, /extract/i,
-        /reorganiz/i, /convert.*to/i, /change.*pattern/i,
-        /split/i, /merge/i, /consolidat/i
+        /refactor/i,
+        /rename/i,
+        /move.*file/i,
+        /extract/i,
+        /reorganiz/i,
+        /convert.*to/i,
+        /change.*pattern/i,
+        /split/i,
+        /merge/i,
+        /consolidat/i,
     ],
     test: [
-        /test/i, /spec/i, /assertion/i, /expect/i, /mock/i,
-        /fixture/i, /coverage/i, /unit.*test/i, /integration.*test/i
+        /test/i,
+        /spec/i,
+        /assertion/i,
+        /expect/i,
+        /mock/i,
+        /fixture/i,
+        /coverage/i,
+        /unit.*test/i,
+        /integration.*test/i,
     ],
     debug: [
-        /debug/i, /fix.*bug/i, /error/i, /fail/i, /crash/i,
-        /stack.*trace/i, /exception/i, /broken/i, /issue/i
+        /debug/i,
+        /fix.*bug/i,
+        /error/i,
+        /fail/i,
+        /crash/i,
+        /stack.*trace/i,
+        /exception/i,
+        /broken/i,
+        /issue/i,
     ],
     review: [
-        /review/i, /audit/i, /security/i, /vulnerability/i,
-        /edge.*case/i, /correctness/i, /validate/i, /check.*for/i
+        /review/i,
+        /audit/i,
+        /security/i,
+        /vulnerability/i,
+        /edge.*case/i,
+        /correctness/i,
+        /validate/i,
+        /check.*for/i,
     ],
     spec: [
-        /document/i, /doc/i, /readme/i, /explain/i, /describe/i,
-        /spec/i, /plan/i, /design.*doc/i, /pr.*desc/i, /comment/i
+        /document/i,
+        /doc/i,
+        /readme/i,
+        /explain/i,
+        /describe/i,
+        /spec/i,
+        /plan/i,
+        /design.*doc/i,
+        /pr.*desc/i,
+        /comment/i,
     ],
     edit: [
-        /small.*edit/i, /quick.*fix/i, /format/i, /finish.*function/i,
-        /complete.*line/i, /add.*import/i, /tweak/i
+        /small.*edit/i,
+        /quick.*fix/i,
+        /format/i,
+        /finish.*function/i,
+        /complete.*line/i,
+        /add.*import/i,
+        /tweak/i,
     ],
     design: [
-        /design/i, /architect/i, /structure/i, /organize/i,
-        /approach/i, /strategy/i, /pattern.*for/i
+        /design/i,
+        /architect/i,
+        /structure/i,
+        /organize/i,
+        /approach/i,
+        /strategy/i,
+        /pattern.*for/i,
     ],
     'complex-refactor': [
-        /large.*refactor/i, /major.*rewrite/i, /restructure/i,
-        /multi.?file.*chang/i, /cross.?file/i, /major.*chang/i
+        /large.*refactor/i,
+        /major.*rewrite/i,
+        /restructure/i,
+        /multi.?file.*chang/i,
+        /cross.?file/i,
+        /major.*chang/i,
     ],
 } as const;

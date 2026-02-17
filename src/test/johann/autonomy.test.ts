@@ -17,29 +17,29 @@ function sanitizeMergeOutput(output: string): string {
 
     // Remove entire "Next Steps" sections
     sanitized = sanitized.replace(
-        /^#{1,4}\s*(Next\s+Steps|Manual\s+Steps|Manual\s+Investigation|What\s+You\s+(Need|Should)\s+to\s+Do|Recommended\s+Next\s+Steps|Recommendations|Action\s+Items|Required\s+Actions)[^\n]*\n[\s\S]*?(?=^#{1,4}\s|\n$)/gmi,
-        ''
+        /^#{1,4}\s*(Next\s+Steps|Manual\s+Steps|Manual\s+Investigation|What\s+You\s+(Need|Should)\s+to\s+Do|Recommended\s+Next\s+Steps|Recommendations|Action\s+Items|Required\s+Actions)[^\n]*\n[\s\S]*?(?=^#{1,4}\s|\n$)/gim,
+        '',
     );
 
     // Remove individual forbidden phrases
     const forbiddenPatterns = [
-        /^[^\n]*\bPlease run\b[^\n]*$/gmi,
-        /^[^\n]*\bYou should\b[^\n]*$/gmi,
-        /^[^\n]*\bYou need to\b[^\n]*$/gmi,
-        /^[^\n]*\bYou'll need to\b[^\n]*$/gmi,
-        /^[^\n]*\bYou'll want to\b[^\n]*$/gmi,
-        /^[^\n]*\bYou can then\b[^\n]*$/gmi,
-        /^[^\n]*\bMake sure to\b[^\n]*$/gmi,
-        /^[^\n]*\bDon't forget to\b[^\n]*$/gmi,
-        /^[^\n]*\bWould you like me to\b[^\n]*$/gmi,
-        /^[^\n]*\bPlease share\b[^\n]*$/gmi,
-        /^[^\n]*\bAsk the user\b[^\n]*$/gmi,
-        /^[^\n]*\bTell the user\b[^\n]*$/gmi,
-        /^[^\n]*\bThe user needs\b[^\n]*$/gmi,
-        /^[^\n]*\bThe user should\b[^\n]*$/gmi,
-        /^[^\n]*\bTo fix this,\s*run\b[^\n]*$/gmi,
-        /^[^\n]*\bTo resolve this\b[^\n]*$/gmi,
-        /^[^\n]*\bAfter that,\s*you can\b[^\n]*$/gmi,
+        /^[^\n]*\bPlease run\b[^\n]*$/gim,
+        /^[^\n]*\bYou should\b[^\n]*$/gim,
+        /^[^\n]*\bYou need to\b[^\n]*$/gim,
+        /^[^\n]*\bYou'll need to\b[^\n]*$/gim,
+        /^[^\n]*\bYou'll want to\b[^\n]*$/gim,
+        /^[^\n]*\bYou can then\b[^\n]*$/gim,
+        /^[^\n]*\bMake sure to\b[^\n]*$/gim,
+        /^[^\n]*\bDon't forget to\b[^\n]*$/gim,
+        /^[^\n]*\bWould you like me to\b[^\n]*$/gim,
+        /^[^\n]*\bPlease share\b[^\n]*$/gim,
+        /^[^\n]*\bAsk the user\b[^\n]*$/gim,
+        /^[^\n]*\bTell the user\b[^\n]*$/gim,
+        /^[^\n]*\bThe user needs\b[^\n]*$/gim,
+        /^[^\n]*\bThe user should\b[^\n]*$/gim,
+        /^[^\n]*\bTo fix this,\s*run\b[^\n]*$/gim,
+        /^[^\n]*\bTo resolve this\b[^\n]*$/gim,
+        /^[^\n]*\bAfter that,\s*you can\b[^\n]*$/gim,
     ];
 
     for (const pattern of forbiddenPatterns) {
@@ -52,7 +52,9 @@ function sanitizeMergeOutput(output: string): string {
 
 // ── truncateFile (from bootstrapContext.ts) ─────────────────────────────
 function truncateFile(content: string, maxChars: number): string {
-    if (content.length <= maxChars) { return content; }
+    if (content.length <= maxChars) {
+        return content;
+    }
     const headSize = Math.floor(maxChars * 0.7);
     const tailSize = Math.floor(maxChars * 0.2);
     const head = content.substring(0, headSize);
@@ -63,12 +65,14 @@ function truncateFile(content: string, maxChars: number): string {
 
 suite('sanitizeMergeOutput', () => {
     test('passes clean output unchanged', () => {
-        const clean = '### What Was Done\n\nCreated 5 files and ran npm build.\n\n### What Was Created\n\n- src/App.tsx\n- src/index.ts';
+        const clean =
+            '### What Was Done\n\nCreated 5 files and ran npm build.\n\n### What Was Created\n\n- src/App.tsx\n- src/index.ts';
         assert.strictEqual(sanitizeMergeOutput(clean), clean);
     });
 
     test('removes "Next Steps" section', () => {
-        const dirty = '### What Was Done\n\nCreated files.\n\n### Next Steps\n\n1. Run npm test\n2. Deploy\n\n### Issues Found\n\nNone.';
+        const dirty =
+            '### What Was Done\n\nCreated files.\n\n### Next Steps\n\n1. Run npm test\n2. Deploy\n\n### Issues Found\n\nNone.';
         const result = sanitizeMergeOutput(dirty);
         assert.ok(!result.includes('Next Steps'), 'Next Steps section should be removed');
         assert.ok(result.includes('What Was Done'), 'What Was Done should remain');
@@ -76,14 +80,16 @@ suite('sanitizeMergeOutput', () => {
     });
 
     test('removes "Manual Investigation" section', () => {
-        const dirty = '### What Was Done\n\nDone.\n\n## Manual Investigation\n\nCheck the logs.\n\n## Issues Found\n\nNone.';
+        const dirty =
+            '### What Was Done\n\nDone.\n\n## Manual Investigation\n\nCheck the logs.\n\n## Issues Found\n\nNone.';
         const result = sanitizeMergeOutput(dirty);
         assert.ok(!result.includes('Manual Investigation'));
         assert.ok(result.includes('What Was Done'));
     });
 
     test('removes "What You Need to Do" section', () => {
-        const dirty = '### What Was Done\n\nDone.\n\n### What You Need to Do\n\n1. Run ddev start\n2. Check URLs';
+        const dirty =
+            '### What Was Done\n\nDone.\n\n### What You Need to Do\n\n1. Run ddev start\n2. Check URLs';
         const result = sanitizeMergeOutput(dirty);
         assert.ok(!result.includes('What You Need to Do'));
     });
@@ -97,7 +103,7 @@ suite('sanitizeMergeOutput', () => {
             'Please run `npm test` to verify.',
             'You should check the output.',
             'You need to restart the server.',
-            "Make sure to update .env.",
+            'Make sure to update .env.',
             'Would you like me to help with anything else?',
         ].join('\n');
 
@@ -106,7 +112,10 @@ suite('sanitizeMergeOutput', () => {
         assert.ok(!result.includes('You should'), '"You should" should be removed');
         assert.ok(!result.includes('You need to'), '"You need to" should be removed');
         assert.ok(!result.includes('Make sure to'), '"Make sure to" should be removed');
-        assert.ok(!result.includes('Would you like me to'), '"Would you like me to" should be removed');
+        assert.ok(
+            !result.includes('Would you like me to'),
+            '"Would you like me to" should be removed',
+        );
         assert.ok(result.includes('Created the app'), 'Clean content should remain');
     });
 
@@ -119,14 +128,16 @@ suite('sanitizeMergeOutput', () => {
     });
 
     test('removes "The user should/needs" phrases', () => {
-        const dirty = 'Task done.\nThe user should restart Docker.\nThe user needs to check permissions.';
+        const dirty =
+            'Task done.\nThe user should restart Docker.\nThe user needs to check permissions.';
         const result = sanitizeMergeOutput(dirty);
         assert.ok(!result.includes('The user should'));
         assert.ok(!result.includes('The user needs'));
     });
 
     test('removes "To fix this, run" and "To resolve this"', () => {
-        const dirty = 'Build failed.\nTo fix this, run npm install.\nTo resolve this, update the config.';
+        const dirty =
+            'Build failed.\nTo fix this, run npm install.\nTo resolve this, update the config.';
         const result = sanitizeMergeOutput(dirty);
         assert.ok(!result.includes('To fix this, run'));
         assert.ok(!result.includes('To resolve this'));

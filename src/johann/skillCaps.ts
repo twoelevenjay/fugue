@@ -10,11 +10,7 @@
  * - Stale detection after 5 unused runs
  */
 
-import {
-    SkillDoc,
-    SkillPerformanceCaps,
-    DEFAULT_SKILL_CAPS,
-} from './skillTypes';
+import { SkillDoc, SkillPerformanceCaps, DEFAULT_SKILL_CAPS } from './skillTypes';
 import { LocalSkillStore } from './skillStore';
 import { getLogger } from './logger';
 
@@ -73,10 +69,7 @@ export class SkillCapEnforcer {
     /**
      * Check whether a new skill can be created.
      */
-    async canCreateSkill(
-        slug: string,
-        store: LocalSkillStore
-    ): Promise<CapCheckResult> {
+    async canCreateSkill(slug: string, store: LocalSkillStore): Promise<CapCheckResult> {
         const totalSkills = await store.countSkills();
         const versionsForSlug = await store.countVersions(slug);
 
@@ -91,7 +84,8 @@ export class SkillCapEnforcer {
             return {
                 allowed: false,
                 reason: `Local skill limit reached (${totalSkills}/${this.caps.maxLocalSkills})`,
-                suggestion: 'Consider consolidating or deprecating unused skills before creating new ones.',
+                suggestion:
+                    'Consider consolidating or deprecating unused skills before creating new ones.',
                 diagnostics,
             };
         }
@@ -134,7 +128,8 @@ export class SkillCapEnforcer {
         // ── Soft warning: consolidation threshold ──────────────────────────
         let suggestion: string | undefined;
         if (totalSkills >= this.caps.consolidationThreshold) {
-            suggestion = `You have ${totalSkills} local skills (threshold: ${this.caps.consolidationThreshold}). ` +
+            suggestion =
+                `You have ${totalSkills} local skills (threshold: ${this.caps.consolidationThreshold}). ` +
                 'Consider consolidating related skills before creating new ones.';
         }
 
@@ -151,7 +146,9 @@ export class SkillCapEnforcer {
     recordSkillCreated(slug: string): void {
         this.newSkillsThisRun++;
         this.lastVersionTimes.set(slug, Date.now());
-        this.logger.info(`Skill created: ${slug} (${this.newSkillsThisRun}/${this.caps.maxNewSkillsPerRun} this run)`);
+        this.logger.info(
+            `Skill created: ${slug} (${this.newSkillsThisRun}/${this.caps.maxNewSkillsPerRun} this run)`,
+        );
     }
 
     /**
@@ -189,10 +186,7 @@ export class SkillCapEnforcer {
      * @param usedSlugs  Set of skill slugs used in the current run
      * @returns Skills that were updated (caller should persist them)
      */
-    updateUnusedStreaks(
-        allSkills: SkillDoc[],
-        usedSlugs: Set<string>
-    ): SkillDoc[] {
+    updateUnusedStreaks(allSkills: SkillDoc[], usedSlugs: Set<string>): SkillDoc[] {
         const updated: SkillDoc[] = [];
 
         for (const skill of allSkills) {

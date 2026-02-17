@@ -9,7 +9,14 @@
  * For writing: serializes SkillDoc to YAML
  */
 
-import { SkillDoc, SkillMetadata, SkillAppliesTo, SkillInstruction, SkillSecurity, SkillHistory } from './skillTypes';
+import {
+    SkillDoc,
+    SkillMetadata,
+    SkillAppliesTo,
+    SkillInstruction,
+    SkillSecurity,
+    SkillHistory,
+} from './skillTypes';
 
 // ============================================================================
 // YAML → SkillDoc Parser
@@ -75,9 +82,8 @@ function parseSecurityBlock(obj: Record<string, unknown>): SkillSecurity {
     return {
         allowed_tools: toStringArray(obj['allowed_tools']),
         allowed_file_patterns: toStringArray(obj['allowed_file_patterns']),
-        max_instruction_chars: typeof obj['max_instruction_chars'] === 'number'
-            ? obj['max_instruction_chars']
-            : 8000,
+        max_instruction_chars:
+            typeof obj['max_instruction_chars'] === 'number' ? obj['max_instruction_chars'] : 8000,
     };
 }
 
@@ -86,16 +92,20 @@ function parseHistoryBlock(obj: Record<string, unknown>): SkillHistory {
         total_uses: typeof obj['total_uses'] === 'number' ? obj['total_uses'] : 0,
         runs_used_in: typeof obj['runs_used_in'] === 'number' ? obj['runs_used_in'] : 0,
         recent_run_ids: toStringArray(obj['recent_run_ids']),
-        unused_run_streak: typeof obj['unused_run_streak'] === 'number' ? obj['unused_run_streak'] : 0,
+        unused_run_streak:
+            typeof obj['unused_run_streak'] === 'number' ? obj['unused_run_streak'] : 0,
     };
 }
 
 function toStringArray(value: unknown): string[] {
     if (Array.isArray(value)) {
-        return value.map(v => String(v));
+        return value.map((v) => String(v));
     }
     if (typeof value === 'string' && value.trim()) {
-        return value.split(',').map(s => s.trim()).filter(Boolean);
+        return value
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
     }
     return [];
 }
@@ -309,7 +319,7 @@ function parseSimpleYaml(yaml: string): Record<string, unknown> {
                 if (rawValue === '|' || rawValue === '>') {
                     // Block scalar — read indented lines
                     const blockIndent = indent + 2; // Expect at least +2 indent
-                    let blockLines: string[] = [];
+                    const blockLines: string[] = [];
                     let j = i + 1;
                     while (j < lines.length) {
                         const bl = lines[j];
@@ -327,7 +337,10 @@ function parseSimpleYaml(yaml: string): Record<string, unknown> {
                         }
                     }
                     // Trim trailing empty lines
-                    while (blockLines.length > 0 && blockLines[blockLines.length - 1].trim() === '') {
+                    while (
+                        blockLines.length > 0 &&
+                        blockLines[blockLines.length - 1].trim() === ''
+                    ) {
                         blockLines.pop();
                     }
                     parent[key] = blockLines.join(rawValue === '|' ? '\n' : ' ');
@@ -406,7 +419,11 @@ function parseYamlValue(raw: string): unknown {
 /**
  * Walk backwards from an array item to find which key "owns" it.
  */
-function findParentKeyForArray(lines: string[], idx: number, itemIndent: number): string | undefined {
+function findParentKeyForArray(
+    lines: string[],
+    idx: number,
+    itemIndent: number,
+): string | undefined {
     for (let j = idx - 1; j >= 0; j--) {
         const line = lines[j].replace(/#.*$/, '').trimEnd();
         if (line.trim() === '') {

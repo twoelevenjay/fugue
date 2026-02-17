@@ -21,10 +21,7 @@
  * - Single-file micro edits
  */
 
-import {
-    SkillDoc,
-    DetectedPattern,
-} from './skillTypes';
+import { SkillDoc, DetectedPattern } from './skillTypes';
 import { TaskType } from './types';
 import { SkillValidator } from './skillValidator';
 import { LocalSkillStore } from './skillStore';
@@ -134,17 +131,18 @@ export class PatternTracker {
         filePatterns: string[],
     ): string {
         // Normalize description to key structural words
-        const structuralWords = description.toLowerCase()
+        const structuralWords = description
+            .toLowerCase()
             .split(/\W+/)
-            .filter(w => w.length > 3)
-            .filter(w => !STOP_WORDS.has(w))
+            .filter((w) => w.length > 3)
+            .filter((w) => !STOP_WORDS.has(w))
             .sort()
             .slice(0, 5)
             .join('-');
 
         // Normalize file patterns to extensions
         const extensions = filePatterns
-            .map(fp => {
+            .map((fp) => {
                 const match = fp.match(/\.(\w+)$/);
                 return match ? match[1] : '';
             })
@@ -165,7 +163,7 @@ export class PatternTracker {
         }
 
         // Exclude exploratory tasks (very short descriptions)
-        if (obs.descriptions.every(d => d.length < 30)) {
+        if (obs.descriptions.every((d) => d.length < 30)) {
             return true;
         }
 
@@ -211,9 +209,10 @@ export class PatternTracker {
      */
     private synthesizeDescription(obs: PatternObservation): string {
         const typeLabel = TASK_TYPE_LABELS[obs.taskType] || obs.taskType;
-        const fileContext = obs.filePatterns.size > 0
-            ? ` across ${Array.from(obs.filePatterns).slice(0, 3).join(', ')}`
-            : '';
+        const fileContext =
+            obs.filePatterns.size > 0
+                ? ` across ${Array.from(obs.filePatterns).slice(0, 3).join(', ')}`
+                : '';
         const langContext = obs.language ? ` (${obs.language})` : '';
 
         return `${typeLabel}${fileContext}${langContext} — observed ${obs.occurrences} times`;
@@ -243,11 +242,42 @@ const TASK_TYPE_LABELS: Record<string, string> = {
 };
 
 const STOP_WORDS = new Set([
-    'the', 'and', 'for', 'that', 'this', 'with', 'from', 'have',
-    'will', 'been', 'into', 'each', 'make', 'like', 'then', 'than',
-    'just', 'also', 'should', 'would', 'could', 'about', 'which',
-    'their', 'when', 'what', 'some', 'other', 'were', 'there',
-    'file', 'code', 'function', 'class', 'method', 'variable',
+    'the',
+    'and',
+    'for',
+    'that',
+    'this',
+    'with',
+    'from',
+    'have',
+    'will',
+    'been',
+    'into',
+    'each',
+    'make',
+    'like',
+    'then',
+    'than',
+    'just',
+    'also',
+    'should',
+    'would',
+    'could',
+    'about',
+    'which',
+    'their',
+    'when',
+    'what',
+    'some',
+    'other',
+    'were',
+    'there',
+    'file',
+    'code',
+    'function',
+    'class',
+    'method',
+    'variable',
 ]);
 
 // ============================================================================
@@ -291,7 +321,7 @@ export class AutonomousSkillCreator {
         const equivalent = findEquivalentSkill(draft, existingSkills);
         if (equivalent) {
             this.logger.info(
-                `Equivalent skill found: "${equivalent.metadata.slug}@${equivalent.metadata.version}" — skipping creation`
+                `Equivalent skill found: "${equivalent.metadata.slug}@${equivalent.metadata.version}" — skipping creation`,
             );
             return equivalent;
         }
@@ -305,7 +335,9 @@ export class AutonomousSkillCreator {
             const revised = this.reviseSkill(draft, result.errors);
             result = validator.validate(revised);
             if (!result.valid) {
-                this.logger.warn(`Revised skill still invalid for "${slug}": ${result.errors.join('; ')}`);
+                this.logger.warn(
+                    `Revised skill still invalid for "${slug}": ${result.errors.join('; ')}`,
+                );
                 return undefined;
             }
 
@@ -321,7 +353,7 @@ export class AutonomousSkillCreator {
 
         this.logger.info(
             `Autonomously created skill "${slug}@${draft.metadata.version}" ` +
-            `(pattern: ${pattern.occurrences} occurrences, reuse prob: ${pattern.reuseProbability.toFixed(2)})`
+                `(pattern: ${pattern.occurrences} occurrences, reuse prob: ${pattern.reuseProbability.toFixed(2)})`,
         );
 
         return draft;
@@ -358,7 +390,7 @@ export class AutonomousSkillCreator {
             },
             security: {
                 allowed_tools: [],
-                allowed_file_patterns: pattern.filePatterns.map(fp => this.toGlobPattern(fp)),
+                allowed_file_patterns: pattern.filePatterns.map((fp) => this.toGlobPattern(fp)),
                 max_instruction_chars: 8000,
             },
             history: {
@@ -381,7 +413,7 @@ export class AutonomousSkillCreator {
             if (error.includes('contains URL')) {
                 revised.instruction.body = revised.instruction.body.replace(
                     /https?:\/\/[^\s'")\]]+/gi,
-                    '[URL-REMOVED]'
+                    '[URL-REMOVED]',
                 );
             }
 
@@ -396,7 +428,7 @@ export class AutonomousSkillCreator {
                 if (phraseMatch) {
                     revised.instruction.body = revised.instruction.body.replace(
                         new RegExp(phraseMatch[1], 'gi'),
-                        '[REDACTED]'
+                        '[REDACTED]',
                     );
                 }
             }
@@ -410,9 +442,10 @@ export class AutonomousSkillCreator {
      */
     private generateSlug(pattern: DetectedPattern): string {
         const typePrefix = pattern.taskTypes[0] || 'task';
-        const words = pattern.description.toLowerCase()
+        const words = pattern.description
+            .toLowerCase()
             .split(/\W+/)
-            .filter(w => w.length > 3 && !STOP_WORDS.has(w))
+            .filter((w) => w.length > 3 && !STOP_WORDS.has(w))
             .slice(0, 3);
 
         const slug = [typePrefix, ...words].join('.');
@@ -421,9 +454,7 @@ export class AutonomousSkillCreator {
 
     private generateTitle(pattern: DetectedPattern): string {
         const typeLabel = TASK_TYPE_LABELS[pattern.taskTypes[0]] || 'Task';
-        const lang = pattern.languageContext[0]
-            ? ` (${pattern.languageContext[0]})`
-            : '';
+        const lang = pattern.languageContext[0] ? ` (${pattern.languageContext[0]})` : '';
         return `${typeLabel}${lang}`.substring(0, 80);
     }
 
@@ -480,8 +511,7 @@ export class AutonomousSkillCreator {
 
     private extractKeywords(pattern: DetectedPattern): string[] {
         const allWords = pattern.exampleInputs.join(' ').toLowerCase();
-        const tokens = allWords.split(/\W+/)
-            .filter(w => w.length > 3 && !STOP_WORDS.has(w));
+        const tokens = allWords.split(/\W+/).filter((w) => w.length > 3 && !STOP_WORDS.has(w));
 
         // Count frequency and return top keywords
         const freq = new Map<string, number>();

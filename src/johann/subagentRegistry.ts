@@ -85,7 +85,9 @@ export class SubagentRegistry {
      */
     async initialize(): Promise<boolean> {
         const base = getJohannWorkspaceUri();
-        if (!base) return false;
+        if (!base) {
+            return false;
+        }
 
         const registryDir = vscode.Uri.joinPath(base, 'registry');
         try {
@@ -136,7 +138,7 @@ export class SubagentRegistry {
      * Mark a subagent as running.
      */
     markRunning(subagentId: string): void {
-        const entry = this.entries.find(e => e.id === subagentId);
+        const entry = this.entries.find((e) => e.id === subagentId);
         if (entry) {
             entry.status = 'running';
             this.scheduleSave();
@@ -150,13 +152,14 @@ export class SubagentRegistry {
         subagentId: string,
         success: boolean,
         outputSummary: string,
-        reviewNotes?: string
+        reviewNotes?: string,
     ): void {
-        const entry = this.entries.find(e => e.id === subagentId);
+        const entry = this.entries.find((e) => e.id === subagentId);
         if (entry) {
             entry.status = success ? 'completed' : 'failed';
             entry.completedAt = new Date().toISOString();
-            entry.durationMs = new Date(entry.completedAt).getTime() - new Date(entry.spawnedAt).getTime();
+            entry.durationMs =
+                new Date(entry.completedAt).getTime() - new Date(entry.spawnedAt).getTime();
             entry.success = success;
             entry.outputSummary = outputSummary.substring(0, 1000); // Truncate
             entry.reviewNotes = reviewNotes;
@@ -168,7 +171,7 @@ export class SubagentRegistry {
      * Mark a subagent as cancelled.
      */
     markCancelled(subagentId: string): void {
-        const entry = this.entries.find(e => e.id === subagentId);
+        const entry = this.entries.find((e) => e.id === subagentId);
         if (entry) {
             entry.status = 'cancelled';
             entry.completedAt = new Date().toISOString();
@@ -187,33 +190,38 @@ export class SubagentRegistry {
      * Get entries for a specific subtask.
      */
     getEntriesForSubtask(subtaskId: string): SubagentEntry[] {
-        return this.entries.filter(e => e.subtaskId === subtaskId);
+        return this.entries.filter((e) => e.subtaskId === subtaskId);
     }
 
     /**
      * Get a summary of the registry for prompt injection.
      */
     getSummary(): string {
-        if (this.entries.length === 0) return '';
+        if (this.entries.length === 0) {
+            return '';
+        }
 
         const lines: string[] = ['=== Subagent Registry ===', ''];
 
         for (const entry of this.entries) {
-            const statusIcon = entry.status === 'completed' ? '✅'
-                : entry.status === 'failed' ? '❌'
-                : entry.status === 'running' ? '🔄'
-                : entry.status === 'cancelled' ? '⛔'
-                : '⏳';
+            const statusIcon =
+                entry.status === 'completed'
+                    ? '✅'
+                    : entry.status === 'failed'
+                      ? '❌'
+                      : entry.status === 'running'
+                        ? '🔄'
+                        : entry.status === 'cancelled'
+                          ? '⛔'
+                          : '⏳';
 
-            const duration = entry.durationMs
-                ? ` (${(entry.durationMs / 1000).toFixed(1)}s)`
-                : '';
+            const duration = entry.durationMs ? ` (${(entry.durationMs / 1000).toFixed(1)}s)` : '';
 
             const escalation = entry.isEscalation ? ' [escalation]' : '';
 
             lines.push(
                 `${statusIcon} **${entry.title}** → ${entry.modelId} (Tier ${entry.modelTier})` +
-                `${duration}${escalation}`
+                    `${duration}${escalation}`,
             );
 
             if (entry.outputSummary && entry.status === 'completed') {
@@ -239,17 +247,16 @@ export class SubagentRegistry {
         avgDurationMs: number;
         modelsUsed: string[];
     } {
-        const completed = this.entries.filter(e => e.status === 'completed');
-        const failed = this.entries.filter(e => e.status === 'failed');
-        const cancelled = this.entries.filter(e => e.status === 'cancelled');
-        const escalations = this.entries.filter(e => e.isEscalation);
+        const completed = this.entries.filter((e) => e.status === 'completed');
+        const failed = this.entries.filter((e) => e.status === 'failed');
+        const cancelled = this.entries.filter((e) => e.status === 'cancelled');
+        const escalations = this.entries.filter((e) => e.isEscalation);
         const durations = this.entries
-            .filter(e => e.durationMs !== undefined)
-            .map(e => e.durationMs!);
-        const avgDuration = durations.length > 0
-            ? durations.reduce((a, b) => a + b, 0) / durations.length
-            : 0;
-        const modelsUsed = [...new Set(this.entries.map(e => e.modelId))];
+            .filter((e) => e.durationMs !== undefined)
+            .map((e) => e.durationMs!);
+        const avgDuration =
+            durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0;
+        const modelsUsed = [...new Set(this.entries.map((e) => e.modelId))];
 
         return {
             total: this.entries.length,
@@ -284,7 +291,9 @@ export class SubagentRegistry {
     }
 
     private async save(): Promise<void> {
-        if (!this.registryUri) return;
+        if (!this.registryUri) {
+            return;
+        }
 
         const snapshot: RegistrySnapshot = {
             sessionId: this.sessionId,
@@ -326,7 +335,9 @@ export async function loadRegistrySnapshot(uri: vscode.Uri): Promise<RegistrySna
  */
 export async function listRegistries(): Promise<string[]> {
     const base = getJohannWorkspaceUri();
-    if (!base) return [];
+    if (!base) {
+        return [];
+    }
 
     const registryDir = vscode.Uri.joinPath(base, 'registry');
 

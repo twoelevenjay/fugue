@@ -23,7 +23,8 @@ const scaffoldComponent: SkillDoc = {
         slug: 'scaffold.component',
         version: '1.0.0',
         title: 'Scaffold a UI Component',
-        description: 'Generate a new UI component with proper structure, types, styles, and test file following project conventions.',
+        description:
+            'Generate a new UI component with proper structure, types, styles, and test file following project conventions.',
         tags: ['scaffold', 'component', 'ui', 'generate'],
         scope: 'shipped',
         origin: 'shipped',
@@ -33,7 +34,14 @@ const scaffoldComponent: SkillDoc = {
         task_types: ['generate'],
         languages: ['typescript', 'javascript', 'tsx', 'jsx'],
         frameworks: ['react', 'vue', 'svelte', 'angular', 'solid'],
-        keywords: ['component', 'scaffold', 'create component', 'new component', 'ui component', 'widget'],
+        keywords: [
+            'component',
+            'scaffold',
+            'create component',
+            'new component',
+            'ui component',
+            'widget',
+        ],
     },
     instruction: {
         body: `When scaffolding a UI component, follow these rules:
@@ -63,7 +71,19 @@ Do NOT:
     },
     security: {
         allowed_tools: [],
-        allowed_file_patterns: ['**/*.tsx', '**/*.jsx', '**/*.ts', '**/*.js', '**/*.css', '**/*.scss', '**/*.module.*', '**/*.test.*', '**/*.spec.*', '**/index.ts', '**/index.js'],
+        allowed_file_patterns: [
+            '**/*.tsx',
+            '**/*.jsx',
+            '**/*.ts',
+            '**/*.js',
+            '**/*.css',
+            '**/*.scss',
+            '**/*.module.*',
+            '**/*.test.*',
+            '**/*.spec.*',
+            '**/index.ts',
+            '**/index.js',
+        ],
         max_instruction_chars: 8000,
     },
     history: {
@@ -80,7 +100,8 @@ const scaffoldCliCommand: SkillDoc = {
         slug: 'scaffold.cli.command',
         version: '1.0.0',
         title: 'Scaffold a CLI Command',
-        description: 'Generate a new CLI command with argument parsing, help text, and test file following the project CLI structure.',
+        description:
+            'Generate a new CLI command with argument parsing, help text, and test file following the project CLI structure.',
         tags: ['scaffold', 'cli', 'command', 'generate'],
         scope: 'shipped',
         origin: 'shipped',
@@ -89,7 +110,14 @@ const scaffoldCliCommand: SkillDoc = {
     applies_to: {
         task_types: ['generate'],
         languages: ['typescript', 'javascript', 'python', 'go'],
-        keywords: ['cli', 'command', 'subcommand', 'scaffold command', 'new command', 'create command'],
+        keywords: [
+            'cli',
+            'command',
+            'subcommand',
+            'scaffold command',
+            'new command',
+            'create command',
+        ],
     },
     instruction: {
         body: `When scaffolding a CLI command:
@@ -113,7 +141,17 @@ The command should follow the project's error handling patterns (exit codes, err
     },
     security: {
         allowed_tools: [],
-        allowed_file_patterns: ['**/cmd/**', '**/commands/**', '**/cli/**', '**/*.ts', '**/*.js', '**/*.py', '**/*.go', '**/*.test.*', '**/*.spec.*'],
+        allowed_file_patterns: [
+            '**/cmd/**',
+            '**/commands/**',
+            '**/cli/**',
+            '**/*.ts',
+            '**/*.js',
+            '**/*.py',
+            '**/*.go',
+            '**/*.test.*',
+            '**/*.spec.*',
+        ],
         max_instruction_chars: 8000,
     },
     history: {
@@ -130,7 +168,8 @@ const refactorExtractModule: SkillDoc = {
         slug: 'refactor.extract.module',
         version: '1.0.0',
         title: 'Extract Code into a Separate Module',
-        description: 'Refactor by extracting related code from a large file into a dedicated module while preserving all existing behavior.',
+        description:
+            'Refactor by extracting related code from a large file into a dedicated module while preserving all existing behavior.',
         tags: ['refactor', 'extract', 'module', 'separation'],
         scope: 'shipped',
         origin: 'shipped',
@@ -138,7 +177,16 @@ const refactorExtractModule: SkillDoc = {
     },
     applies_to: {
         task_types: ['refactor', 'complex-refactor'],
-        keywords: ['extract', 'module', 'split file', 'separate', 'decompose', 'break apart', 'too large', 'too long'],
+        keywords: [
+            'extract',
+            'module',
+            'split file',
+            'separate',
+            'decompose',
+            'break apart',
+            'too large',
+            'too long',
+        ],
     },
     instruction: {
         body: `When extracting code into a separate module:
@@ -164,7 +212,15 @@ CRITICAL: Every import reference must be updated. Missing even one causes a buil
     },
     security: {
         allowed_tools: [],
-        allowed_file_patterns: ['**/*.ts', '**/*.js', '**/*.tsx', '**/*.jsx', '**/*.py', '**/*.go', '**/index.*'],
+        allowed_file_patterns: [
+            '**/*.ts',
+            '**/*.js',
+            '**/*.tsx',
+            '**/*.jsx',
+            '**/*.py',
+            '**/*.go',
+            '**/index.*',
+        ],
         max_instruction_chars: 8000,
     },
     history: {
@@ -181,7 +237,8 @@ const testGenerateUnit: SkillDoc = {
         slug: 'test.generate.unit',
         version: '1.0.0',
         title: 'Generate Unit Tests',
-        description: 'Generate comprehensive unit tests with edge cases, mocks, and assertions following the project test conventions.',
+        description:
+            'Generate comprehensive unit tests with edge cases, mocks, and assertions following the project test conventions.',
         tags: ['test', 'unit', 'generate', 'testing'],
         scope: 'shipped',
         origin: 'shipped',
@@ -189,7 +246,16 @@ const testGenerateUnit: SkillDoc = {
     },
     applies_to: {
         task_types: ['test', 'generate'],
-        keywords: ['test', 'unit test', 'tests', 'testing', 'coverage', 'spec', 'write tests', 'add tests'],
+        keywords: [
+            'test',
+            'unit test',
+            'tests',
+            'testing',
+            'coverage',
+            'spec',
+            'write tests',
+            'add tests',
+        ],
     },
     instruction: {
         body: `When generating unit tests:
@@ -222,7 +288,15 @@ Do NOT:
     },
     security: {
         allowed_tools: [],
-        allowed_file_patterns: ['**/*.test.*', '**/*.spec.*', '**/*_test.*', '**/test_*.*', '**/test/**', '**/tests/**', '**/__tests__/**'],
+        allowed_file_patterns: [
+            '**/*.test.*',
+            '**/*.spec.*',
+            '**/*_test.*',
+            '**/test_*.*',
+            '**/test/**',
+            '**/tests/**',
+            '**/__tests__/**',
+        ],
         max_instruction_chars: 8000,
     },
     history: {
@@ -247,7 +321,18 @@ const debugRootCauseAnalysis: SkillDoc = {
     },
     applies_to: {
         task_types: ['debug'],
-        keywords: ['bug', 'fix', 'broken', 'not working', 'error', 'crash', 'root cause', 'diagnose', 'debug', 'failing'],
+        keywords: [
+            'bug',
+            'fix',
+            'broken',
+            'not working',
+            'error',
+            'crash',
+            'root cause',
+            'diagnose',
+            'debug',
+            'failing',
+        ],
     },
     instruction: {
         body: `When performing root cause analysis:
@@ -301,7 +386,8 @@ const reviewCodeRubric: SkillDoc = {
         slug: 'review.code.rubric',
         version: '1.0.0',
         title: 'Structured Code Review',
-        description: 'Perform a structured code review against a quality rubric covering correctness, readability, security, and performance.',
+        description:
+            'Perform a structured code review against a quality rubric covering correctness, readability, security, and performance.',
         tags: ['review', 'code-review', 'quality', 'rubric'],
         scope: 'shipped',
         origin: 'shipped',
@@ -309,7 +395,16 @@ const reviewCodeRubric: SkillDoc = {
     },
     applies_to: {
         task_types: ['review'],
-        keywords: ['review', 'code review', 'quality', 'feedback', 'critique', 'audit', 'check', 'inspect'],
+        keywords: [
+            'review',
+            'code review',
+            'quality',
+            'feedback',
+            'critique',
+            'audit',
+            'check',
+            'inspect',
+        ],
     },
     instruction: {
         body: `When reviewing code, evaluate against this rubric:
@@ -372,7 +467,8 @@ const migrateApiVersion: SkillDoc = {
         slug: 'migrate.api.version',
         version: '1.0.0',
         title: 'Migrate API Version',
-        description: 'Systematically migrate code from one API version to another, updating all call sites and handling breaking changes.',
+        description:
+            'Systematically migrate code from one API version to another, updating all call sites and handling breaking changes.',
         tags: ['migrate', 'api', 'upgrade', 'version', 'breaking-change'],
         scope: 'shipped',
         origin: 'shipped',
@@ -380,7 +476,15 @@ const migrateApiVersion: SkillDoc = {
     },
     applies_to: {
         task_types: ['refactor', 'complex-refactor'],
-        keywords: ['migrate', 'upgrade', 'api version', 'breaking change', 'deprecation', 'update dependency', 'version bump'],
+        keywords: [
+            'migrate',
+            'upgrade',
+            'api version',
+            'breaking change',
+            'deprecation',
+            'update dependency',
+            'version bump',
+        ],
     },
     instruction: {
         body: `When migrating an API version:
@@ -418,7 +522,18 @@ const migrateApiVersion: SkillDoc = {
     },
     security: {
         allowed_tools: [],
-        allowed_file_patterns: ['**/*.ts', '**/*.js', '**/*.tsx', '**/*.jsx', '**/*.py', '**/*.go', '**/package.json', '**/go.mod', '**/requirements.txt', '**/pyproject.toml'],
+        allowed_file_patterns: [
+            '**/*.ts',
+            '**/*.js',
+            '**/*.tsx',
+            '**/*.jsx',
+            '**/*.py',
+            '**/*.go',
+            '**/package.json',
+            '**/go.mod',
+            '**/requirements.txt',
+            '**/pyproject.toml',
+        ],
         max_instruction_chars: 8000,
     },
     history: {
@@ -435,7 +550,8 @@ const optimizePerformanceHotspot: SkillDoc = {
         slug: 'optimize.performance.hotspot',
         version: '1.0.0',
         title: 'Optimize Performance Hotspot',
-        description: 'Analyze and optimize a performance-critical section of code, focusing on algorithmic improvements and resource efficiency.',
+        description:
+            'Analyze and optimize a performance-critical section of code, focusing on algorithmic improvements and resource efficiency.',
         tags: ['optimize', 'performance', 'hotspot', 'speed', 'memory'],
         scope: 'shipped',
         origin: 'shipped',
@@ -443,7 +559,17 @@ const optimizePerformanceHotspot: SkillDoc = {
     },
     applies_to: {
         task_types: ['refactor'],
-        keywords: ['optimize', 'performance', 'slow', 'speed', 'fast', 'hotspot', 'bottleneck', 'memory', 'efficient'],
+        keywords: [
+            'optimize',
+            'performance',
+            'slow',
+            'speed',
+            'fast',
+            'hotspot',
+            'bottleneck',
+            'memory',
+            'efficient',
+        ],
     },
     instruction: {
         body: `When optimizing a performance hotspot:
@@ -497,7 +623,8 @@ const docsGenerateReadme: SkillDoc = {
         slug: 'docs.generate.readme',
         version: '1.0.0',
         title: 'Generate Project README',
-        description: 'Generate or update a comprehensive README.md with installation, usage, API reference, and contribution guidelines.',
+        description:
+            'Generate or update a comprehensive README.md with installation, usage, API reference, and contribution guidelines.',
         tags: ['docs', 'readme', 'documentation', 'generate'],
         scope: 'shipped',
         origin: 'shipped',
@@ -539,7 +666,16 @@ const docsGenerateReadme: SkillDoc = {
     },
     security: {
         allowed_tools: [],
-        allowed_file_patterns: ['**/README.md', '**/README.*', '**/package.json', '**/go.mod', '**/pyproject.toml', '**/Makefile', '**/Dockerfile', '**/.env.example'],
+        allowed_file_patterns: [
+            '**/README.md',
+            '**/README.*',
+            '**/package.json',
+            '**/go.mod',
+            '**/pyproject.toml',
+            '**/Makefile',
+            '**/Dockerfile',
+            '**/.env.example',
+        ],
         max_instruction_chars: 8000,
     },
     history: {
@@ -556,7 +692,8 @@ const releasePrepareVersionBump: SkillDoc = {
         slug: 'release.prepare.version.bump',
         version: '1.0.0',
         title: 'Prepare a Version Bump Release',
-        description: 'Prepare a release by bumping version numbers, updating changelogs, and verifying release readiness.',
+        description:
+            'Prepare a release by bumping version numbers, updating changelogs, and verifying release readiness.',
         tags: ['release', 'version', 'bump', 'changelog', 'prepare'],
         scope: 'shipped',
         origin: 'shipped',
@@ -564,7 +701,16 @@ const releasePrepareVersionBump: SkillDoc = {
     },
     applies_to: {
         task_types: ['generate', 'refactor'],
-        keywords: ['release', 'version', 'bump', 'changelog', 'prepare release', 'ship', 'tag', 'publish'],
+        keywords: [
+            'release',
+            'version',
+            'bump',
+            'changelog',
+            'prepare release',
+            'ship',
+            'tag',
+            'publish',
+        ],
     },
     instruction: {
         body: `When preparing a version bump release:
@@ -602,7 +748,18 @@ Do NOT:
     },
     security: {
         allowed_tools: [],
-        allowed_file_patterns: ['**/package.json', '**/package-lock.json', '**/CHANGELOG.md', '**/CHANGES.md', '**/HISTORY.md', '**/version.ts', '**/version.py', '**/version.go', '**/Cargo.toml', '**/pyproject.toml'],
+        allowed_file_patterns: [
+            '**/package.json',
+            '**/package-lock.json',
+            '**/CHANGELOG.md',
+            '**/CHANGES.md',
+            '**/HISTORY.md',
+            '**/version.ts',
+            '**/version.py',
+            '**/version.go',
+            '**/Cargo.toml',
+            '**/pyproject.toml',
+        ],
         max_instruction_chars: 8000,
     },
     history: {
@@ -638,12 +795,12 @@ export const SHIPPED_SKILLS: readonly SkillDoc[] = Object.freeze([
  * Look up a shipped skill by slug.
  */
 export function getShippedSkill(slug: string): SkillDoc | undefined {
-    return SHIPPED_SKILLS.find(s => s.metadata.slug === slug);
+    return SHIPPED_SKILLS.find((s) => s.metadata.slug === slug);
 }
 
 /**
  * Get all shipped skill slugs.
  */
 export function getShippedSlugs(): string[] {
-    return SHIPPED_SKILLS.map(s => s.metadata.slug);
+    return SHIPPED_SKILLS.map((s) => s.metadata.slug);
 }

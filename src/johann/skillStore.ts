@@ -58,7 +58,9 @@ abstract class BaseSkillStore implements ISkillStore {
                         skills.push(skill);
                     }
                 } catch (err) {
-                    this.logger.warn(`Failed to parse skill file ${name}: ${err instanceof Error ? err.message : String(err)}`);
+                    this.logger.warn(
+                        `Failed to parse skill file ${name}: ${err instanceof Error ? err.message : String(err)}`,
+                    );
                 }
             }
         } catch {
@@ -140,7 +142,9 @@ abstract class BaseSkillStore implements ISkillStore {
         await this.ensureDirectory();
         const yaml = serializeSkillYaml(skill);
         await safeWrite(fileUri, yaml);
-        this.logger.info(`Saved skill: ${skill.metadata.slug}@${skill.metadata.version} → ${fileUri.fsPath}`);
+        this.logger.info(
+            `Saved skill: ${skill.metadata.slug}@${skill.metadata.version} → ${fileUri.fsPath}`,
+        );
     }
 
     /**
@@ -196,9 +200,10 @@ abstract class BaseSkillStore implements ISkillStore {
         try {
             const entries = await vscode.workspace.fs.readDirectory(this.getRootUri());
             return entries.filter(
-                ([name, type]) => type === vscode.FileType.File &&
+                ([name, type]) =>
+                    type === vscode.FileType.File &&
                     name.endsWith('.skill.yaml') &&
-                    !name.includes('.draft.')
+                    !name.includes('.draft.'),
             ).length;
         } catch {
             return 0;

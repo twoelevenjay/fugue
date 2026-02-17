@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
-import { safeWrite, safeAppend, withFileLock } from './safeIO';
+import { safeWrite, safeAppend } from './safeIO';
 
 // ============================================================================
 // EXECUTION LEDGER — Shared real-time coordination for subagents
@@ -116,7 +115,15 @@ export interface JournalEntry {
     /** ISO timestamp */
     timestamp: string;
     /** Type of action */
-    type: 'command' | 'file-create' | 'file-edit' | 'file-delete' | 'note' | 'error' | 'directory-create' | 'delegation-blocked';
+    type:
+        | 'command'
+        | 'file-create'
+        | 'file-edit'
+        | 'file-delete'
+        | 'note'
+        | 'error'
+        | 'directory-create'
+        | 'delegation-blocked';
     /** Brief description */
     description: string;
     /** The path affected (if applicable) */
@@ -174,7 +181,7 @@ export class ExecutionLedger {
         try {
             await vscode.workspace.fs.createDirectory(this.sessionDir);
             await vscode.workspace.fs.createDirectory(
-                vscode.Uri.joinPath(this.sessionDir, 'journal')
+                vscode.Uri.joinPath(this.sessionDir, 'journal'),
             );
         } catch {
             // Directories may already exist
@@ -202,7 +209,7 @@ export class ExecutionLedger {
      */
     registerSubtasks(subtasks: Array<{ id: string; title: string }>): void {
         for (const st of subtasks) {
-            if (!this.state.subtasks.find(e => e.id === st.id)) {
+            if (!this.state.subtasks.find((e) => e.id === st.id)) {
                 this.state.subtasks.push({
                     id: st.id,
                     title: st.title,
@@ -224,7 +231,7 @@ export class ExecutionLedger {
     async markRunning(
         subtaskId: string,
         modelId: string,
-        workingDirectory?: string
+        workingDirectory?: string,
     ): Promise<void> {
         const entry = this.findOrCreate(subtaskId);
         entry.status = 'running';
@@ -250,29 +257,28 @@ export class ExecutionLedger {
     async markCompleted(
         subtaskId: string,
         output: string,
-        fileManifest?: FileManifestEntry[]
+        fileManifest?: FileManifestEntry[],
     ): Promise<void> {
         const entry = this.findOrCreate(subtaskId);
         entry.status = 'completed';
         entry.completedAt = new Date().toISOString();
         if (entry.startedAt) {
-            entry.durationMs = new Date(entry.completedAt).getTime() -
-                new Date(entry.startedAt).getTime();
+            entry.durationMs =
+                new Date(entry.completedAt).getTime() - new Date(entry.startedAt).getTime();
         }
         entry.accomplishmentSummary = this.extractAccomplishmentSummary(output);
         entry.keyCommands = this.extractKeyCommands(output);
 
         // Merge file manifest from explicit parameter + auto-extracted from output
         const autoManifest = this.extractFileManifest(output);
-        entry.fileManifest = [
-            ...(fileManifest || []),
-            ...autoManifest,
-        ];
+        entry.fileManifest = [...(fileManifest || []), ...autoManifest];
 
         // Deduplicate file manifest by path
         const seen = new Set<string>();
-        entry.fileManifest = entry.fileManifest.filter(f => {
-            if (seen.has(f.relativePath)) return false;
+        entry.fileManifest = entry.fileManifest.filter((f) => {
+            if (seen.has(f.relativePath)) {
+                return false;
+            }
             seen.add(f.relativePath);
             return true;
         });
@@ -297,8 +303,8 @@ export class ExecutionLedger {
         entry.status = 'failed';
         entry.completedAt = new Date().toISOString();
         if (entry.startedAt) {
-            entry.durationMs = new Date(entry.completedAt).getTime() -
-                new Date(entry.startedAt).getTime();
+            entry.durationMs =
+                new Date(entry.completedAt).getTime() - new Date(entry.startedAt).getTime();
         }
         entry.error = error.substring(0, 300);
 
@@ -354,7 +360,7 @@ export class ExecutionLedger {
     async captureWorkspaceSnapshot(
         targetDir?: string,
         maxDepth: number = 4,
-        maxEntries: number = 200
+        maxEntries: number = 200,
     ): Promise<string> {
         const rootPath = targetDir || this.state.workspaceRoot;
         if (!rootPath) {
@@ -370,7 +376,9 @@ export class ExecutionLedger {
         let entryCount = 0;
 
         const walk = async (dir: vscode.Uri, prefix: string, depth: number): Promise<void> => {
-            if (depth > maxDepth || entryCount >= maxEntries) return;
+            if (depth > maxDepth || entryCount >= maxEntries) {
+                return;
+            }
 
             let entries: [string, vscode.FileType][];
             try {
@@ -381,7 +389,9 @@ export class ExecutionLedger {
 
             // Sort: directories first, then files
             entries.sort(([aName, aType], [bName, bType]) => {
-                if (aType === bType) return aName.localeCompare(bName);
+                if (aType === bType) {
+                    return aName.localeCompare(bName);
+                }
                 return aType === vscode.FileType.Directory ? -1 : 1;
             });
 
@@ -392,7 +402,9 @@ export class ExecutionLedger {
                 }
 
                 // Skip noise directories
-                if (this.shouldSkipDir(name)) continue;
+                if (this.shouldSkipDir(name)) {
+                    continue;
+                }
 
                 const isDir = type === vscode.FileType.Directory;
                 const icon = isDir ? '📁' : '📄';
@@ -420,7 +432,7 @@ export class ExecutionLedger {
                 const snapshotUri = vscode.Uri.joinPath(this.sessionDir, 'workspace-snapshot.txt');
                 await vscode.workspace.fs.writeFile(
                     snapshotUri,
-                    new TextEncoder().encode(snapshot)
+                    new TextEncoder().encode(snapshot),
                 );
             } catch {
                 // Non-critical
@@ -446,13 +458,15 @@ export class ExecutionLedger {
     buildContextForSubagent(
         forSubtaskId: string,
         freshSnapshot: string,
-        includeJournals: boolean = true
+        _includeJournals: boolean = true,
     ): string {
         const parts: string[] = [];
 
         // --- Section 1: Current Workspace State ---
         parts.push('=== CURRENT WORKSPACE STATE ===');
-        parts.push('This is the LIVE directory structure right now (not from the start of the session).');
+        parts.push(
+            'This is the LIVE directory structure right now (not from the start of the session).',
+        );
         parts.push('Any files/directories listed here ALREADY EXIST. Do NOT recreate them.');
         parts.push('');
         parts.push(this.truncate(freshSnapshot, 3000));
@@ -460,18 +474,20 @@ export class ExecutionLedger {
 
         // --- Section 2: What Other Subtasks Have Done ---
         const completedSubtasks = this.state.subtasks.filter(
-            st => st.status === 'completed' && st.id !== forSubtaskId
+            (st) => st.status === 'completed' && st.id !== forSubtaskId,
         );
         const runningSubtasks = this.state.subtasks.filter(
-            st => st.status === 'running' && st.id !== forSubtaskId
+            (st) => st.status === 'running' && st.id !== forSubtaskId,
         );
         const pendingSubtasks = this.state.subtasks.filter(
-            st => st.status === 'pending' && st.id !== forSubtaskId
+            (st) => st.status === 'pending' && st.id !== forSubtaskId,
         );
 
         if (completedSubtasks.length > 0) {
             parts.push('=== COMPLETED SUBTASKS (what has already been done) ===');
-            parts.push('These subtasks have ALREADY finished. Their results are ALREADY in the workspace.');
+            parts.push(
+                'These subtasks have ALREADY finished. Their results are ALREADY in the workspace.',
+            );
             parts.push('Do NOT redo their work. Build upon what they created.\n');
 
             for (const st of completedSubtasks) {
@@ -483,8 +499,11 @@ export class ExecutionLedger {
                     parts.push('Files created/modified:');
                     // Show up to 30 files per subtask
                     for (const f of st.fileManifest.slice(0, 30)) {
-                        const actionIcon = f.action === 'created' ? '+' : f.action === 'modified' ? '~' : '-';
-                        parts.push(`  ${actionIcon} ${f.type === 'directory' ? '📁' : '📄'} ${f.relativePath}`);
+                        const actionIcon =
+                            f.action === 'created' ? '+' : f.action === 'modified' ? '~' : '-';
+                        parts.push(
+                            `  ${actionIcon} ${f.type === 'directory' ? '📁' : '📄'} ${f.relativePath}`,
+                        );
                     }
                     if (st.fileManifest.length > 30) {
                         parts.push(`  ... and ${st.fileManifest.length - 30} more files`);
@@ -504,7 +523,9 @@ export class ExecutionLedger {
         if (runningSubtasks.length > 0) {
             parts.push('=== CURRENTLY RUNNING SUBTASKS (parallel agents) ===');
             parts.push('These subtasks are being executed RIGHT NOW by other agents.');
-            parts.push('Be aware of potential conflicts. DO NOT modify files they are likely editing.\n');
+            parts.push(
+                'Be aware of potential conflicts. DO NOT modify files they are likely editing.\n',
+            );
 
             for (const st of runningSubtasks) {
                 parts.push(`### 🔄 ${st.title} (${st.id})`);
@@ -522,9 +543,11 @@ export class ExecutionLedger {
         const worktreeEntries = Object.entries(this.state.activeWorktrees);
         if (worktreeEntries.length > 0) {
             parts.push('=== ACTIVE GIT WORKTREES ===');
-            parts.push('Each parallel subtask has its own isolated directory. Changes will be merged later.\n');
+            parts.push(
+                'Each parallel subtask has its own isolated directory. Changes will be merged later.\n',
+            );
             for (const [stId, wtPath] of worktreeEntries) {
-                const st = this.state.subtasks.find(s => s.id === stId);
+                const st = this.state.subtasks.find((s) => s.id === stId);
                 const label = st?.title || stId;
                 const isSelf = stId === forSubtaskId;
                 parts.push(`  ${isSelf ? '👉 (YOU)' : '  '} ${label}: ${wtPath}`);
@@ -535,7 +558,9 @@ export class ExecutionLedger {
         // --- Section 5: Pending Subtasks (what's coming next) ---
         if (pendingSubtasks.length > 0) {
             parts.push('=== UPCOMING SUBTASKS ===');
-            parts.push('These will run AFTER you finish. Be aware of their scope to avoid conflicts.\n');
+            parts.push(
+                'These will run AFTER you finish. Be aware of their scope to avoid conflicts.\n',
+            );
             for (const st of pendingSubtasks) {
                 parts.push(`  ⏳ ${st.title} (${st.id})`);
             }
@@ -552,13 +577,15 @@ export class ExecutionLedger {
         }
 
         // --- Section 7: Your Location ---
-        const myEntry = this.state.subtasks.find(st => st.id === forSubtaskId);
+        const myEntry = this.state.subtasks.find((st) => st.id === forSubtaskId);
         if (myEntry?.workingDirectory) {
             parts.push('=== YOUR WORKING DIRECTORY ===');
             parts.push(`You are operating in: ${myEntry.workingDirectory}`);
             if (myEntry.workingDirectory !== this.state.workspaceRoot) {
                 parts.push(`Main workspace root: ${this.state.workspaceRoot}`);
-                parts.push('Your changes are in an isolated git worktree and will be merged back automatically.');
+                parts.push(
+                    'Your changes are in an isolated git worktree and will be merged back automatically.',
+                );
             }
             parts.push('');
         }
@@ -574,18 +601,24 @@ export class ExecutionLedger {
         const parts: string[] = [];
         parts.push('=== ORCHESTRATION PROGRESS ===');
 
-        const completed = this.state.subtasks.filter(s => s.status === 'completed');
-        const running = this.state.subtasks.filter(s => s.status === 'running');
-        const pending = this.state.subtasks.filter(s => s.status === 'pending');
-        const failed = this.state.subtasks.filter(s => s.status === 'failed');
+        const completed = this.state.subtasks.filter((s) => s.status === 'completed');
+        const running = this.state.subtasks.filter((s) => s.status === 'running');
+        const pending = this.state.subtasks.filter((s) => s.status === 'pending');
+        const failed = this.state.subtasks.filter((s) => s.status === 'failed');
 
-        parts.push(`Completed: ${completed.length} | Running: ${running.length} | Pending: ${pending.length} | Failed: ${failed.length}`);
+        parts.push(
+            `Completed: ${completed.length} | Running: ${running.length} | Pending: ${pending.length} | Failed: ${failed.length}`,
+        );
         parts.push('');
 
         for (const st of completed) {
-            const files = st.fileManifest.length > 0
-                ? ` (${st.fileManifest.length} files: ${st.fileManifest.slice(0, 5).map(f => f.relativePath).join(', ')}${st.fileManifest.length > 5 ? '...' : ''})`
-                : '';
+            const files =
+                st.fileManifest.length > 0
+                    ? ` (${st.fileManifest.length} files: ${st.fileManifest
+                          .slice(0, 5)
+                          .map((f) => f.relativePath)
+                          .join(', ')}${st.fileManifest.length > 5 ? '...' : ''})`
+                    : '';
             parts.push(`  ✅ ${st.title}${files}`);
         }
 
@@ -610,13 +643,14 @@ export class ExecutionLedger {
      * concurrent journal writes (e.g., parallel subtasks + hive mind updates).
      */
     async appendJournal(subtaskId: string, entry: JournalEntry): Promise<void> {
-        if (!this.sessionDir) return;
+        if (!this.sessionDir) {
+            return;
+        }
 
-        const journalUri = vscode.Uri.joinPath(
-            this.sessionDir, 'journal', `${subtaskId}.md`
-        );
+        const journalUri = vscode.Uri.joinPath(this.sessionDir, 'journal', `${subtaskId}.md`);
 
-        const line = `[${entry.timestamp}] **${entry.type}** — ${entry.description}` +
+        const line =
+            `[${entry.timestamp}] **${entry.type}** — ${entry.description}` +
             (entry.path ? ` | Path: \`${entry.path}\`` : '') +
             (entry.details ? `\n  > ${entry.details.substring(0, 300)}` : '') +
             '\n';
@@ -626,7 +660,7 @@ export class ExecutionLedger {
                 journalUri,
                 line,
                 `# Journal — ${subtaskId}\n\n`,
-                true  // dedup: skip if line is already at the end
+                true, // dedup: skip if line is already at the end
             );
         } catch {
             // Non-critical
@@ -637,17 +671,17 @@ export class ExecutionLedger {
      * Read a subtask's journal (for injecting into another subtask's context).
      */
     async readJournal(subtaskId: string, maxChars: number = 2000): Promise<string> {
-        if (!this.sessionDir) return '';
+        if (!this.sessionDir) {
+            return '';
+        }
 
-        const journalUri = vscode.Uri.joinPath(
-            this.sessionDir, 'journal', `${subtaskId}.md`
-        );
+        const journalUri = vscode.Uri.joinPath(this.sessionDir, 'journal', `${subtaskId}.md`);
 
         try {
             const bytes = await vscode.workspace.fs.readFile(journalUri);
             const content = new TextDecoder().decode(bytes);
             return content.length > maxChars
-                ? content.substring(content.length - maxChars)  // Take the LATEST entries
+                ? content.substring(content.length - maxChars) // Take the LATEST entries
                 : content;
         } catch {
             return '';
@@ -667,7 +701,9 @@ export class ExecutionLedger {
      * — returns silently if the file is missing or unparseable.
      */
     async reloadFromDisk(): Promise<boolean> {
-        if (!this.sessionDir) return false;
+        if (!this.sessionDir) {
+            return false;
+        }
 
         const ledgerUri = vscode.Uri.joinPath(this.sessionDir, 'ledger.json');
         try {
@@ -697,21 +733,25 @@ export class ExecutionLedger {
 
         // ── Completed subtasks (may have finished while we were working) ──
         const completed = this.state.subtasks.filter(
-            st => st.status === 'completed' && st.id !== forSubtaskId
+            (st) => st.status === 'completed' && st.id !== forSubtaskId,
         );
         const running = this.state.subtasks.filter(
-            st => st.status === 'running' && st.id !== forSubtaskId
+            (st) => st.status === 'running' && st.id !== forSubtaskId,
         );
         const failed = this.state.subtasks.filter(
-            st => st.status === 'failed' && st.id !== forSubtaskId
+            (st) => st.status === 'failed' && st.id !== forSubtaskId,
         );
 
         if (completed.length > 0) {
             parts.push('\n**Completed by other agents:**');
             for (const st of completed) {
-                const files = st.fileManifest.length > 0
-                    ? ` → ${st.fileManifest.slice(0, 8).map(f => f.relativePath).join(', ')}${st.fileManifest.length > 8 ? '…' : ''}`
-                    : '';
+                const files =
+                    st.fileManifest.length > 0
+                        ? ` → ${st.fileManifest
+                              .slice(0, 8)
+                              .map((f) => f.relativePath)
+                              .join(', ')}${st.fileManifest.length > 8 ? '…' : ''}`
+                        : '';
                 parts.push(`  ✅ ${st.title}${files}`);
             }
         }
@@ -741,13 +781,15 @@ export class ExecutionLedger {
         // ── Conflict warnings ──
         // Check if any completed subtask touched paths we might also be touching
         // (basic heuristic — flag recently completed work in the same directories)
-        const myEntry = this.state.subtasks.find(st => st.id === forSubtaskId);
+        const myEntry = this.state.subtasks.find((st) => st.id === forSubtaskId);
         const myDir = myEntry?.workingDirectory || this.state.workspaceRoot;
         const recentlyTouched = completed
-            .filter(st => st.workingDirectory === myDir || !st.workingDirectory)
-            .flatMap(st => st.fileManifest.map(f => f.relativePath));
+            .filter((st) => st.workingDirectory === myDir || !st.workingDirectory)
+            .flatMap((st) => st.fileManifest.map((f) => f.relativePath));
         if (recentlyTouched.length > 0) {
-            parts.push('\n⚠️ **Files recently created/modified in YOUR working directory by other agents:**');
+            parts.push(
+                '\n⚠️ **Files recently created/modified in YOUR working directory by other agents:**',
+            );
             for (const p of recentlyTouched.slice(0, 15)) {
                 parts.push(`  • ${p}`);
             }
@@ -765,7 +807,7 @@ export class ExecutionLedger {
      */
     buildToolRoundJournalEntry(
         toolCalls: Array<{ name: string; input?: unknown }>,
-        roundText: string
+        _roundText: string,
     ): JournalEntry[] {
         const entries: JournalEntry[] = [];
 
@@ -819,7 +861,7 @@ export class ExecutionLedger {
         const all: FileManifestEntry[] = [];
         for (const st of this.state.subtasks) {
             if (st.status === 'completed') {
-                all.push(...st.fileManifest.filter(f => f.action === 'created'));
+                all.push(...st.fileManifest.filter((f) => f.action === 'created'));
             }
         }
         return all;
@@ -893,7 +935,8 @@ export class ExecutionLedger {
         }
 
         // Pattern 2: [Tool: replace_string_in_file] or [Tool: multi_replace_string_in_file]
-        const editFilePattern = /\[Tool: (?:replace_string_in_file|multi_replace_string_in_file)\].*?"filePath":\s*"([^"]+)"/g;
+        const editFilePattern =
+            /\[Tool: (?:replace_string_in_file|multi_replace_string_in_file)\].*?"filePath":\s*"([^"]+)"/g;
         while ((match = editFilePattern.exec(output)) !== null) {
             const filePath = this.toRelativePath(match[1]);
             if (!seen.has(filePath)) {
@@ -913,7 +956,8 @@ export class ExecutionLedger {
         }
 
         // Pattern 4: Simple file path mentions after "Created" or "Created file"
-        const createdPattern = /(?:Created|Wrote|Generated)\s+(?:file\s+)?[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)/g;
+        const createdPattern =
+            /(?:Created|Wrote|Generated)\s+(?:file\s+)?[`"']?([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)/g;
         while ((match = createdPattern.exec(output)) !== null) {
             const filePath = this.toRelativePath(match[1]);
             if (!seen.has(filePath) && filePath.includes('/')) {
@@ -951,7 +995,9 @@ export class ExecutionLedger {
      * Convert absolute path to relative (from workspace root).
      */
     private toRelativePath(absPath: string): string {
-        if (!this.state.workspaceRoot) return absPath;
+        if (!this.state.workspaceRoot) {
+            return absPath;
+        }
 
         // Handle worktree paths too
         if (absPath.startsWith(this.state.workspaceRoot)) {
@@ -974,11 +1020,31 @@ export class ExecutionLedger {
 
     private shouldSkipDir(name: string): boolean {
         const skip = new Set([
-            'node_modules', '.git', '.vscode', '__pycache__', '.next',
-            '.nuxt', 'dist', 'build', '.cache', '.turbo', '.parcel-cache',
-            'vendor', '.idea', '.vs', 'coverage', '.nyc_output',
-            '.tox', '.mypy_cache', '.pytest_cache', 'venv', '.venv',
-            'env', '.env', '.angular', '.svelte-kit',
+            'node_modules',
+            '.git',
+            '.vscode',
+            '__pycache__',
+            '.next',
+            '.nuxt',
+            'dist',
+            'build',
+            '.cache',
+            '.turbo',
+            '.parcel-cache',
+            'vendor',
+            '.idea',
+            '.vs',
+            'coverage',
+            '.nyc_output',
+            '.tox',
+            '.mypy_cache',
+            '.pytest_cache',
+            'venv',
+            '.venv',
+            'env',
+            '.env',
+            '.angular',
+            '.svelte-kit',
         ]);
         return skip.has(name) || name.startsWith('.');
     }
@@ -993,7 +1059,9 @@ export class ExecutionLedger {
      * concurrent updates (e.g., parallel subtasks completing at the same time).
      */
     private async saveLedger(): Promise<void> {
-        if (!this.sessionDir) return;
+        if (!this.sessionDir) {
+            return;
+        }
 
         this.state.lastUpdated = new Date().toISOString();
 
@@ -1010,7 +1078,7 @@ export class ExecutionLedger {
      * Find or create a subtask entry in the ledger.
      */
     private findOrCreate(subtaskId: string): LedgerSubtaskEntry {
-        let entry = this.state.subtasks.find(s => s.id === subtaskId);
+        let entry = this.state.subtasks.find((s) => s.id === subtaskId);
         if (!entry) {
             entry = {
                 id: subtaskId,
@@ -1027,7 +1095,12 @@ export class ExecutionLedger {
      * Truncate text with a notice.
      */
     private truncate(text: string, maxLength: number): string {
-        if (text.length <= maxLength) return text;
-        return text.substring(0, maxLength) + `\n... (truncated, ${text.length - maxLength} chars omitted)`;
+        if (text.length <= maxLength) {
+            return text;
+        }
+        return (
+            text.substring(0, maxLength) +
+            `\n... (truncated, ${text.length - maxLength} chars omitted)`
+        );
     }
 }

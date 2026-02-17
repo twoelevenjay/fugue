@@ -10,8 +10,8 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { execFile } from 'child_process'; // eslint-disable-line no-restricted-imports -- Required: runs verification tools (npm, tsc, etc.)
-import { JohannLogger, getLogger } from './logger';
+import { execFile } from 'child_process';
+import { JohannLogger } from './logger';
 
 /**
  * Result from running a verification check.
@@ -65,7 +65,7 @@ export class ToolVerifier {
      */
     async verify(
         config: VerificationConfig,
-        modifiedFiles?: string[]
+        modifiedFiles?: string[],
     ): Promise<{
         allPassed: boolean;
         results: VerificationResult[];
@@ -99,7 +99,7 @@ export class ToolVerifier {
     private async runCheck(
         check: 'compile' | 'typecheck' | 'lint' | 'test' | 'format',
         config: VerificationConfig,
-        modifiedFiles?: string[]
+        modifiedFiles?: string[],
     ): Promise<VerificationResult> {
         const startTime = Date.now();
 
@@ -141,19 +141,25 @@ export class ToolVerifier {
      */
     private async runCompile(
         config: VerificationConfig,
-        startTime: number
+        startTime: number,
     ): Promise<VerificationResult> {
         // Check for package.json build script
         const packageJsonPath = path.join(config.cwd, 'package.json');
         try {
             const packageJson = JSON.parse(
-                await vscode.workspace.fs.readFile(vscode.Uri.file(packageJsonPath)).then(
-                    buf => Buffer.from(buf).toString('utf8')
-                )
+                await vscode.workspace.fs
+                    .readFile(vscode.Uri.file(packageJsonPath))
+                    .then((buf) => Buffer.from(buf).toString('utf8')),
             );
 
             if (packageJson.scripts?.compile) {
-                return await this.runCommand('npm', ['run', 'compile'], config, startTime, 'compile');
+                return await this.runCommand(
+                    'npm',
+                    ['run', 'compile'],
+                    config,
+                    startTime,
+                    'compile',
+                );
             } else if (packageJson.scripts?.build) {
                 return await this.runCommand('npm', ['run', 'build'], config, startTime, 'compile');
             }
@@ -183,16 +189,24 @@ export class ToolVerifier {
      */
     private async runTypecheck(
         config: VerificationConfig,
-        startTime: number
+        startTime: number,
     ): Promise<VerificationResult> {
         // TypeScript
         if (await this.fileExists(path.join(config.cwd, 'tsconfig.json'))) {
-            return await this.runCommand('npx', ['tsc', '--noEmit'], config, startTime, 'typecheck');
+            return await this.runCommand(
+                'npx',
+                ['tsc', '--noEmit'],
+                config,
+                startTime,
+                'typecheck',
+            );
         }
 
         // Python (mypy)
-        if (await this.fileExists(path.join(config.cwd, 'mypy.ini')) ||
-            await this.fileExists(path.join(config.cwd, 'setup.cfg'))) {
+        if (
+            (await this.fileExists(path.join(config.cwd, 'mypy.ini'))) ||
+            (await this.fileExists(path.join(config.cwd, 'setup.cfg')))
+        ) {
             return await this.runCommand('mypy', ['.'], config, startTime, 'typecheck');
         }
 
@@ -210,13 +224,14 @@ export class ToolVerifier {
     private async runLint(
         config: VerificationConfig,
         modifiedFiles: string[] | undefined,
-        startTime: number
+        startTime: number,
     ): Promise<VerificationResult> {
         // ESLint
-        if (await this.fileExists(path.join(config.cwd, '.eslintrc.json')) ||
-            await this.fileExists(path.join(config.cwd, '.eslintrc.js')) ||
-            await this.fileExists(path.join(config.cwd, 'eslint.config.mjs'))) {
-
+        if (
+            (await this.fileExists(path.join(config.cwd, '.eslintrc.json'))) ||
+            (await this.fileExists(path.join(config.cwd, '.eslintrc.js'))) ||
+            (await this.fileExists(path.join(config.cwd, 'eslint.config.mjs')))
+        ) {
             const args = ['eslint'];
             if (modifiedFiles && modifiedFiles.length > 0) {
                 args.push(...modifiedFiles);
@@ -228,8 +243,10 @@ export class ToolVerifier {
         }
 
         // Python (ruff, flake8, pylint)
-        if (await this.fileExists(path.join(config.cwd, 'ruff.toml')) ||
-            await this.fileExists(path.join(config.cwd, '.ruff.toml'))) {
+        if (
+            (await this.fileExists(path.join(config.cwd, 'ruff.toml'))) ||
+            (await this.fileExists(path.join(config.cwd, '.ruff.toml')))
+        ) {
             return await this.runCommand('ruff', ['check', '.'], config, startTime, 'lint');
         }
 
@@ -247,15 +264,15 @@ export class ToolVerifier {
     private async runTests(
         config: VerificationConfig,
         modifiedFiles: string[] | undefined,
-        startTime: number
+        startTime: number,
     ): Promise<VerificationResult> {
         // Check for test script in package.json
         const packageJsonPath = path.join(config.cwd, 'package.json');
         try {
             const packageJson = JSON.parse(
-                await vscode.workspace.fs.readFile(vscode.Uri.file(packageJsonPath)).then(
-                    buf => Buffer.from(buf).toString('utf8')
-                )
+                await vscode.workspace.fs
+                    .readFile(vscode.Uri.file(packageJsonPath))
+                    .then((buf) => Buffer.from(buf).toString('utf8')),
             );
 
             if (packageJson.scripts?.test) {
@@ -266,8 +283,10 @@ export class ToolVerifier {
         }
 
         // Try pytest (Python)
-        if (await this.fileExists(path.join(config.cwd, 'pytest.ini')) ||
-            await this.fileExists(path.join(config.cwd, 'pyproject.toml'))) {
+        if (
+            (await this.fileExists(path.join(config.cwd, 'pytest.ini'))) ||
+            (await this.fileExists(path.join(config.cwd, 'pyproject.toml')))
+        ) {
             return await this.runCommand('pytest', [], config, startTime, 'test');
         }
 
@@ -285,7 +304,7 @@ export class ToolVerifier {
     private async runFormat(
         config: VerificationConfig,
         modifiedFiles: string[] | undefined,
-        startTime: number
+        startTime: number,
     ): Promise<VerificationResult> {
         // Prettier
         if (await this.fileExists(path.join(config.cwd, '.prettierrc'))) {
@@ -323,29 +342,34 @@ export class ToolVerifier {
         args: string[],
         config: VerificationConfig,
         startTime: number,
-        check: 'compile' | 'typecheck' | 'lint' | 'test' | 'format'
+        check: 'compile' | 'typecheck' | 'lint' | 'test' | 'format',
     ): Promise<VerificationResult> {
         return new Promise((resolve) => {
-            const proc = execFile(command, args, {
-                cwd: config.cwd,
-                timeout: config.timeoutPerCheck,
-                maxBuffer: 1024 * 1024, // 1MB output cap
-            }, (error, stdout, stderr) => {
-                const output = `${stdout}\n${stderr}`.trim();
-                const exitCode = error ? (error as any).code ?? 1 : 0;
-                const passed = exitCode === 0;
+            const proc = execFile(
+                command,
+                args,
+                {
+                    cwd: config.cwd,
+                    timeout: config.timeoutPerCheck,
+                    maxBuffer: 1024 * 1024, // 1MB output cap
+                },
+                (error, stdout, stderr) => {
+                    const output = `${stdout}\n${stderr}`.trim();
+                    const exitCode = error ? ((error as any).code ?? 1) : 0;
+                    const passed = exitCode === 0;
 
-                const errors = passed ? undefined : this.extractErrors(output, check);
+                    const errors = passed ? undefined : this.extractErrors(output, check);
 
-                resolve({
-                    check,
-                    passed,
-                    errors,
-                    exitCode,
-                    output,
-                    timeMs: Date.now() - startTime,
-                });
-            });
+                    resolve({
+                        check,
+                        passed,
+                        errors,
+                        exitCode,
+                        output,
+                        timeMs: Date.now() - startTime,
+                    });
+                },
+            );
 
             proc.on('error', (err: Error) => {
                 resolve({
@@ -362,7 +386,7 @@ export class ToolVerifier {
     /**
      * Extract relevant error messages from tool output.
      */
-    private extractErrors(output: string, check: string): string[] {
+    private extractErrors(output: string, _check: string): string[] {
         const lines = output.split('\n');
         const errors: string[] = [];
 
@@ -402,8 +426,8 @@ export class ToolVerifier {
     private summarizeResults(results: VerificationResult[]): string {
         const lines: string[] = ['## Verification Results\n'];
 
-        const passed = results.filter(r => r.passed);
-        const failed = results.filter(r => !r.passed);
+        const passed = results.filter((r) => r.passed);
+        const failed = results.filter((r) => !r.passed);
 
         if (failed.length === 0) {
             lines.push('✅ All checks passed!\n');
@@ -415,7 +439,7 @@ export class ToolVerifier {
 
                 if (result.errors && result.errors.length > 0) {
                     lines.push('**Errors:**');
-                    result.errors.forEach(err => lines.push(`- ${err}`));
+                    result.errors.forEach((err) => lines.push(`- ${err}`));
                 } else {
                     // Show truncated output if no specific errors extracted
                     const truncated = result.output.slice(0, 500);
@@ -425,7 +449,7 @@ export class ToolVerifier {
         }
 
         if (passed.length > 0) {
-            lines.push(`\n✅ Passed: ${passed.map(r => r.check).join(', ')}`);
+            lines.push(`\n✅ Passed: ${passed.map((r) => r.check).join(', ')}`);
         }
 
         return lines.join('\n');
@@ -438,7 +462,7 @@ export class ToolVerifier {
         config: VerificationConfig,
         modifiedFiles: string[],
         onRepair: (errors: string) => Promise<{ newCode: string; applied: boolean }>,
-        maxIterations: number = 3
+        maxIterations: number = 3,
     ): Promise<{
         succeeded: boolean;
         iterations: number;
@@ -451,7 +475,11 @@ export class ToolVerifier {
         escalationReason?: string;
     }> {
         let iterations = 0;
-        let lastResult: { allPassed: boolean; results: VerificationResult[]; summary: string } | null = null;
+        let lastResult: {
+            allPassed: boolean;
+            results: VerificationResult[];
+            summary: string;
+        } | null = null;
         let lastErrors: string = '';
 
         while (iterations < maxIterations) {

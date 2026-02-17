@@ -14,15 +14,7 @@
  */
 
 import * as crypto from 'crypto';
-import {
-    SkillDoc,
-    SkillValidationResult,
-    ISkillValidator,
-    SkillScope,
-    SkillOrigin,
-    SkillStatus,
-} from './skillTypes';
-import { TaskType } from './types';
+import { SkillDoc, SkillValidationResult, ISkillValidator } from './skillTypes';
 
 // ============================================================================
 // Constants
@@ -51,18 +43,27 @@ const MAX_FILE_PATTERNS = 50;
 
 /** Valid task types */
 const VALID_TASK_TYPES: readonly string[] = [
-    'generate', 'refactor', 'test', 'debug', 'review',
-    'spec', 'edit', 'design', 'complex-refactor',
+    'generate',
+    'refactor',
+    'test',
+    'debug',
+    'review',
+    'spec',
+    'edit',
+    'design',
+    'complex-refactor',
 ] as const;
 
 /** Valid scopes */
-const VALID_SCOPES: readonly string[] = [
-    'local', 'global', 'shipped', 'local-copy',
-] as const;
+const VALID_SCOPES: readonly string[] = ['local', 'global', 'shipped', 'local-copy'] as const;
 
 /** Valid origins */
 const VALID_ORIGINS: readonly string[] = [
-    'autonomous', 'user', 'shipped', 'promoted', 'flattened',
+    'autonomous',
+    'user',
+    'shipped',
+    'promoted',
+    'flattened',
 ] as const;
 
 /** Semver regex */
@@ -107,7 +108,6 @@ const URL_REGEX = /https?:\/\/[^\s'")\]]+/gi;
 // ============================================================================
 
 export class SkillValidator implements ISkillValidator {
-
     /**
      * Validate a skill document against the full schema + runtime guards.
      */
@@ -117,7 +117,9 @@ export class SkillValidator implements ISkillValidator {
 
         // ── Schema version ─────────────────────────────────────────────────
         if (skill.schema_version !== 'johann.skill.v1') {
-            errors.push(`Invalid schema_version: "${skill.schema_version}" (expected "johann.skill.v1")`);
+            errors.push(
+                `Invalid schema_version: "${skill.schema_version}" (expected "johann.skill.v1")`,
+            );
         }
 
         // ── Metadata ───────────────────────────────────────────────────────
@@ -184,7 +186,9 @@ export class SkillValidator implements ISkillValidator {
         if (!m.slug || typeof m.slug !== 'string') {
             errors.push('metadata.slug is required and must be a string');
         } else if (!/^[a-z0-9][a-z0-9._-]*$/.test(m.slug)) {
-            errors.push(`metadata.slug "${m.slug}" must be lowercase alphanumeric with dots/hyphens/underscores`);
+            errors.push(
+                `metadata.slug "${m.slug}" must be lowercase alphanumeric with dots/hyphens/underscores`,
+            );
         }
 
         if (!m.version || typeof m.version !== 'string') {
@@ -200,13 +204,17 @@ export class SkillValidator implements ISkillValidator {
         if (!m.description || typeof m.description !== 'string') {
             errors.push('metadata.description is required and must be a string');
         } else if (m.description.length > MAX_DESCRIPTION_CHARS) {
-            errors.push(`metadata.description exceeds ${MAX_DESCRIPTION_CHARS} chars (${m.description.length})`);
+            errors.push(
+                `metadata.description exceeds ${MAX_DESCRIPTION_CHARS} chars (${m.description.length})`,
+            );
         }
 
         if (!Array.isArray(m.tags)) {
             errors.push('metadata.tags must be an array');
         } else if (m.tags.length > MAX_TAGS) {
-            warnings.push(`metadata.tags has ${m.tags.length} entries (max recommended: ${MAX_TAGS})`);
+            warnings.push(
+                `metadata.tags has ${m.tags.length} entries (max recommended: ${MAX_TAGS})`,
+            );
         }
 
         if (!VALID_SCOPES.includes(m.scope)) {
@@ -214,7 +222,9 @@ export class SkillValidator implements ISkillValidator {
         }
 
         if (!VALID_ORIGINS.includes(m.origin)) {
-            errors.push(`metadata.origin "${m.origin}" must be one of: ${VALID_ORIGINS.join(', ')}`);
+            errors.push(
+                `metadata.origin "${m.origin}" must be one of: ${VALID_ORIGINS.join(', ')}`,
+            );
         }
 
         if (!m.created_at || typeof m.created_at !== 'string') {
@@ -242,7 +252,9 @@ export class SkillValidator implements ISkillValidator {
         if (!Array.isArray(a.keywords)) {
             errors.push('applies_to.keywords must be an array');
         } else if (a.keywords.length > MAX_KEYWORDS) {
-            warnings.push(`applies_to.keywords has ${a.keywords.length} entries (max: ${MAX_KEYWORDS})`);
+            warnings.push(
+                `applies_to.keywords has ${a.keywords.length} entries (max: ${MAX_KEYWORDS})`,
+            );
         }
 
         if (a.languages && !Array.isArray(a.languages)) {
@@ -294,13 +306,17 @@ export class SkillValidator implements ISkillValidator {
         if (!Array.isArray(sec.allowed_tools)) {
             errors.push('security.allowed_tools must be an array');
         } else if (sec.allowed_tools.length > MAX_ALLOWED_TOOLS) {
-            warnings.push(`security.allowed_tools has ${sec.allowed_tools.length} entries (max: ${MAX_ALLOWED_TOOLS})`);
+            warnings.push(
+                `security.allowed_tools has ${sec.allowed_tools.length} entries (max: ${MAX_ALLOWED_TOOLS})`,
+            );
         }
 
         if (!Array.isArray(sec.allowed_file_patterns)) {
             errors.push('security.allowed_file_patterns must be an array');
         } else if (sec.allowed_file_patterns.length > MAX_FILE_PATTERNS) {
-            warnings.push(`security.allowed_file_patterns has ${sec.allowed_file_patterns.length} entries (max: ${MAX_FILE_PATTERNS})`);
+            warnings.push(
+                `security.allowed_file_patterns has ${sec.allowed_file_patterns.length} entries (max: ${MAX_FILE_PATTERNS})`,
+            );
         }
 
         if (typeof sec.max_instruction_chars !== 'number' || sec.max_instruction_chars <= 0) {
@@ -308,7 +324,7 @@ export class SkillValidator implements ISkillValidator {
         }
     }
 
-    private validateHistory(skill: SkillDoc, errors: string[], warnings: string[]): void {
+    private validateHistory(skill: SkillDoc, errors: string[], _warnings: string[]): void {
         const h = skill.history;
         if (!h) {
             errors.push('Missing required field: history');
@@ -332,7 +348,7 @@ export class SkillValidator implements ISkillValidator {
     /**
      * Runtime security guards — injection detection, URL rejection, etc.
      */
-    private runSecurityGuards(skill: SkillDoc, errors: string[], warnings: string[]): void {
+    private runSecurityGuards(skill: SkillDoc, errors: string[], _warnings: string[]): void {
         if (!skill.instruction?.body) {
             return;
         }
@@ -350,7 +366,9 @@ export class SkillValidator implements ISkillValidator {
         // ── URL rejection ──────────────────────────────────────────────────
         const urls = body.match(URL_REGEX);
         if (urls && urls.length > 0) {
-            errors.push(`SECURITY: Instruction body contains URL(s): ${urls.slice(0, 3).join(', ')}${urls.length > 3 ? '...' : ''}`);
+            errors.push(
+                `SECURITY: Instruction body contains URL(s): ${urls.slice(0, 3).join(', ')}${urls.length > 3 ? '...' : ''}`,
+            );
         }
 
         // ── Check steps for injections too ────────────────────────────────
@@ -359,7 +377,9 @@ export class SkillValidator implements ISkillValidator {
                 const stepLower = step.toLowerCase();
                 for (const phrase of INJECTION_PHRASES) {
                     if (stepLower.includes(phrase.toLowerCase())) {
-                        errors.push(`SECURITY: Instruction step contains prohibited phrase: "${phrase}"`);
+                        errors.push(
+                            `SECURITY: Instruction step contains prohibited phrase: "${phrase}"`,
+                        );
                         break; // One error per step is enough
                     }
                 }
@@ -374,7 +394,7 @@ export class SkillValidator implements ISkillValidator {
         // ── Tool allowlist sanity ──────────────────────────────────────────
         if (skill.security?.allowed_tools) {
             const suspiciousTools = skill.security.allowed_tools.filter(
-                t => t.includes('..') || t.includes('/') || t.includes('\\')
+                (t) => t.includes('..') || t.includes('/') || t.includes('\\'),
             );
             if (suspiciousTools.length > 0) {
                 errors.push(`SECURITY: Suspicious tool names: ${suspiciousTools.join(', ')}`);
@@ -386,7 +406,9 @@ export class SkillValidator implements ISkillValidator {
             for (const pattern of skill.security.allowed_file_patterns) {
                 // Reject path traversal
                 if (pattern.includes('..') || pattern.startsWith('/') || /^[A-Z]:/i.test(pattern)) {
-                    errors.push(`SECURITY: File pattern "${pattern}" contains path traversal or absolute path`);
+                    errors.push(
+                        `SECURITY: File pattern "${pattern}" contains path traversal or absolute path`,
+                    );
                 }
             }
         }

@@ -1,4 +1,3 @@
-import * as vscode from 'vscode';
 import { getConfig } from './config';
 import { readBootstrapFile, getJohannWorkspaceUri } from './bootstrap';
 import { logEvent } from './dailyNotes';
@@ -64,7 +63,7 @@ export class HeartbeatManager {
         this.logger.info(`Starting heartbeat with ${config.heartbeatIntervalMinutes}min interval.`);
 
         this.timer = setInterval(() => {
-            this.pulse().catch(err => {
+            this.pulse().catch((err) => {
                 this.logger.error(`Heartbeat pulse error: ${err}`);
             });
         }, intervalMs);
@@ -73,7 +72,7 @@ export class HeartbeatManager {
 
         // Run an initial pulse after a short delay
         setTimeout(() => {
-            this.pulse().catch(err => {
+            this.pulse().catch((err) => {
                 this.logger.error(`Initial heartbeat pulse error: ${err}`);
             });
         }, 5000);
@@ -129,7 +128,9 @@ export class HeartbeatManager {
 
             // 2. Execute lightweight checks (file-based, no LLM)
             for (const check of checks) {
-                if (check.done) continue;
+                if (check.done) {
+                    continue;
+                }
 
                 // Log that we saw the check
                 this.logger.debug(`Heartbeat check: ${check.description}`);
@@ -138,9 +139,8 @@ export class HeartbeatManager {
             // 3. Log the heartbeat event
             await logEvent(
                 `Heartbeat #${this.heartbeatCount}`,
-                `Pulse completed. ${checks.filter(c => !c.done).length} pending checks.`
+                `Pulse completed. ${checks.filter((c) => !c.done).length} pending checks.`,
             );
-
         } catch (err) {
             this.logger.error(`Heartbeat pulse failed: ${err}`);
         }
@@ -151,10 +151,14 @@ export class HeartbeatManager {
      */
     private async loadChecks(): Promise<HeartbeatCheck[]> {
         const base = getJohannWorkspaceUri();
-        if (!base) return [];
+        if (!base) {
+            return [];
+        }
 
         const content = await readBootstrapFile(base, 'HEARTBEAT.md');
-        if (!content) return [];
+        if (!content) {
+            return [];
+        }
 
         return this.parseChecks(content);
     }

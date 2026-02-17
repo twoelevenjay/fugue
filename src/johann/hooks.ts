@@ -116,8 +116,10 @@ export class HookRunner {
      */
     unregister(hook: HookName, handlerName: string): void {
         const list = this.handlers.get(hook);
-        if (!list) return;
-        const idx = list.findIndex(h => h.name === handlerName);
+        if (!list) {
+            return;
+        }
+        const idx = list.findIndex((h) => h.name === handlerName);
         if (idx >= 0) {
             list.splice(idx, 1);
         }
@@ -139,7 +141,7 @@ export class HookRunner {
                 await entry.handler(context);
             } catch (err) {
                 this.logger.error(
-                    `Hook "${hook}" handler "${entry.name}" failed: ${err instanceof Error ? err.message : String(err)}`
+                    `Hook "${hook}" handler "${entry.name}" failed: ${err instanceof Error ? err.message : String(err)}`,
                 );
                 // Continue — one handler failure doesn't break others
             }
@@ -157,7 +159,7 @@ export class HookRunner {
      * Get all registered handler names for a hook (debugging).
      */
     getHandlerNames(hook: HookName): string[] {
-        return (this.handlers.get(hook) ?? []).map(h => h.name);
+        return (this.handlers.get(hook) ?? []).map((h) => h.name);
     }
 
     /**
@@ -191,7 +193,7 @@ export function createDefaultHookRunner(): HookRunner {
             const logger = getLogger();
             logger.error(
                 `Orchestration error: ${ctx.error?.message ?? 'unknown'}` +
-                (ctx.subtask ? ` (subtask: ${ctx.subtask.title})` : '')
+                    (ctx.subtask ? ` (subtask: ${ctx.subtask.title})` : ''),
             );
         },
     });
@@ -202,11 +204,12 @@ export function createDefaultHookRunner(): HookRunner {
         priority: 0,
         handler: async (ctx) => {
             const logger = getLogger();
-            const pct = ctx.estimatedTokens && ctx.contextLimit
-                ? ((ctx.estimatedTokens / ctx.contextLimit) * 100).toFixed(0)
-                : '?';
+            const pct =
+                ctx.estimatedTokens && ctx.contextLimit
+                    ? ((ctx.estimatedTokens / ctx.contextLimit) * 100).toFixed(0)
+                    : '?';
             logger.info(
-                `Context limit approaching (${pct}%) for subtask ${ctx.subtaskId ?? '?'} at round ${ctx.round ?? '?'}`
+                `Context limit approaching (${pct}%) for subtask ${ctx.subtaskId ?? '?'} at round ${ctx.round ?? '?'}`,
             );
         },
     });

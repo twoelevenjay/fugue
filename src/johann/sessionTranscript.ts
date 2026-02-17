@@ -68,7 +68,9 @@ export class SessionTranscript {
      */
     async initialize(): Promise<boolean> {
         const base = getJohannWorkspaceUri();
-        if (!base) return false;
+        if (!base) {
+            return false;
+        }
 
         this.sessionDir = vscode.Uri.joinPath(base, 'sessions');
         try {
@@ -132,7 +134,7 @@ export class SessionTranscript {
         subtaskId: string,
         content: string,
         success: boolean,
-        modelUsed: string
+        modelUsed: string,
     ): Promise<void> {
         await this.append({
             ts: new Date().toISOString(),
@@ -163,15 +165,17 @@ export class SessionTranscript {
      * Read back the full transcript as an array of entries.
      */
     async readTranscript(): Promise<TranscriptEntry[]> {
-        if (!this.transcriptUri) return [];
+        if (!this.transcriptUri) {
+            return [];
+        }
 
         try {
             const bytes = await vscode.workspace.fs.readFile(this.transcriptUri);
             const text = new TextDecoder().decode(bytes);
             return text
                 .split('\n')
-                .filter(line => line.trim().length > 0)
-                .map(line => {
+                .filter((line) => line.trim().length > 0)
+                .map((line) => {
                     try {
                         return JSON.parse(line) as TranscriptEntry;
                     } catch {
@@ -190,7 +194,9 @@ export class SessionTranscript {
      */
     async getRecentContext(maxEntries: number = 10, maxChars: number = 3000): Promise<string> {
         const entries = await this.readTranscript();
-        if (entries.length === 0) return '';
+        if (entries.length === 0) {
+            return '';
+        }
 
         const recent = entries.slice(-maxEntries);
         const lines: string[] = [`=== Session ${this.sessionId} (recent) ===`, ''];
@@ -198,7 +204,9 @@ export class SessionTranscript {
 
         for (const entry of recent) {
             const line = `[${entry.role}] ${entry.content.substring(0, 500)}`;
-            if (totalChars + line.length > maxChars) break;
+            if (totalChars + line.length > maxChars) {
+                break;
+            }
             lines.push(line);
             totalChars += line.length;
         }
@@ -211,7 +219,9 @@ export class SessionTranscript {
     // ========================================================================
 
     private async append(entry: TranscriptEntry): Promise<void> {
-        if (!this.transcriptUri) return;
+        if (!this.transcriptUri) {
+            return;
+        }
 
         const line = JSON.stringify(entry) + '\n';
 
@@ -225,13 +235,12 @@ export class SessionTranscript {
     }
 
     private async writeMeta(): Promise<void> {
-        if (!this.metaUri) return;
+        if (!this.metaUri) {
+            return;
+        }
         try {
             const content = JSON.stringify(this.meta, null, 2);
-            await vscode.workspace.fs.writeFile(
-                this.metaUri,
-                new TextEncoder().encode(content)
-            );
+            await vscode.workspace.fs.writeFile(this.metaUri, new TextEncoder().encode(content));
         } catch {
             // Silently fail
         }
@@ -251,7 +260,9 @@ export class SessionTranscript {
  */
 export async function listSessions(): Promise<SessionMeta[]> {
     const base = getJohannWorkspaceUri();
-    if (!base) return [];
+    if (!base) {
+        return [];
+    }
 
     const sessionsDir = vscode.Uri.joinPath(base, 'sessions');
 
@@ -286,7 +297,9 @@ export async function listSessions(): Promise<SessionMeta[]> {
  */
 export async function getRecentSessionsSummary(maxSessions: number = 5): Promise<string> {
     const sessions = await listSessions();
-    if (sessions.length === 0) return '';
+    if (sessions.length === 0) {
+        return '';
+    }
 
     const lines: string[] = ['=== Recent Sessions ===', ''];
     for (const session of sessions.slice(0, maxSessions)) {

@@ -66,7 +66,7 @@ export class SkillSelector implements ISkillSelector {
      */
     async select(
         context: SkillSelectionContext,
-        allSkills?: SkillDoc[]
+        allSkills?: SkillDoc[],
     ): Promise<SkillSelectionResult> {
         const skills = allSkills ?? [];
 
@@ -81,11 +81,11 @@ export class SkillSelector implements ISkillSelector {
 
         // Score all skills
         const scored = skills
-            .map(skill => {
+            .map((skill) => {
                 const { score, reasons } = this.scoreSkill(skill, context);
                 return { skill, score, matchReasons: reasons };
             })
-            .filter(c => c.score > 0)
+            .filter((c) => c.score > 0)
             .sort((a, b) => b.score - a.score);
 
         if (scored.length === 0) {
@@ -98,7 +98,8 @@ export class SkillSelector implements ISkillSelector {
         }
 
         const winner = scored[0];
-        const logMessage = `Selected skill "${winner.skill.metadata.slug}@${winner.skill.metadata.version}" ` +
+        const logMessage =
+            `Selected skill "${winner.skill.metadata.slug}@${winner.skill.metadata.version}" ` +
             `(score: ${winner.score.toFixed(1)}, scope: ${winner.skill.metadata.scope}) ` +
             `for taskType=${context.taskType}, ` +
             `reasons: [${winner.matchReasons.join(', ')}]`;
@@ -119,7 +120,7 @@ export class SkillSelector implements ISkillSelector {
      */
     scoreSkill(
         skill: SkillDoc,
-        context: SkillSelectionContext
+        context: SkillSelectionContext,
     ): { score: number; reasons: string[] } {
         let score = 0;
         const reasons: string[] = [];
@@ -135,7 +136,7 @@ export class SkillSelector implements ISkillSelector {
         // ── 2. Keyword matching ────────────────────────────────────────────
         if (skill.applies_to.keywords.length > 0 && context.description) {
             const descLower = context.description.toLowerCase();
-            const descTokens = new Set(descLower.split(/\W+/).filter(t => t.length > 2));
+            const descTokens = new Set(descLower.split(/\W+/).filter((t) => t.length > 2));
 
             for (const keyword of skill.applies_to.keywords) {
                 const kwLower = keyword.toLowerCase();
@@ -152,7 +153,7 @@ export class SkillSelector implements ISkillSelector {
         // ── 3. Language match ──────────────────────────────────────────────
         if (context.language && skill.applies_to.languages) {
             const langLower = context.language.toLowerCase();
-            if (skill.applies_to.languages.some(l => l.toLowerCase() === langLower)) {
+            if (skill.applies_to.languages.some((l) => l.toLowerCase() === langLower)) {
                 score += WEIGHTS.LANGUAGE_MATCH;
                 reasons.push(`lang:${context.language}`);
             }
@@ -161,7 +162,7 @@ export class SkillSelector implements ISkillSelector {
         // ── 4. Framework match ─────────────────────────────────────────────
         if (context.framework && skill.applies_to.frameworks) {
             const fwLower = context.framework.toLowerCase();
-            if (skill.applies_to.frameworks.some(f => f.toLowerCase() === fwLower)) {
+            if (skill.applies_to.frameworks.some((f) => f.toLowerCase() === fwLower)) {
                 score += WEIGHTS.FRAMEWORK_MATCH;
                 reasons.push(`framework:${context.framework}`);
             }
@@ -171,7 +172,7 @@ export class SkillSelector implements ISkillSelector {
         if (context.filePaths && skill.applies_to.repo_patterns) {
             for (const pattern of skill.applies_to.repo_patterns) {
                 const regex = globToRegex(pattern);
-                if (context.filePaths.some(fp => regex.test(fp))) {
+                if (context.filePaths.some((fp) => regex.test(fp))) {
                     score += WEIGHTS.REPO_PATTERN_MATCH;
                     reasons.push(`repo-pattern:${pattern}`);
                     break; // One match is enough
@@ -230,7 +231,7 @@ export class SkillSelector implements ISkillSelector {
  */
 export function findEquivalentSkill(
     candidate: SkillDoc,
-    existingSkills: SkillDoc[]
+    existingSkills: SkillDoc[],
 ): SkillDoc | undefined {
     const candidateSlug = candidate.metadata.slug;
     const candidateMajor = candidate.metadata.version.split('.')[0];
@@ -263,9 +264,10 @@ export function findEquivalentSkill(
  */
 function tokenize(text: string): Set<string> {
     return new Set(
-        text.toLowerCase()
+        text
+            .toLowerCase()
             .split(/\W+/)
-            .filter(t => t.length > 2)
+            .filter((t) => t.length > 2),
     );
 }
 

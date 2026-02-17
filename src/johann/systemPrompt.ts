@@ -1,5 +1,4 @@
 import * as os from 'os';
-import * as vscode from 'vscode';
 import { BootstrapFile, formatBootstrapForPrompt } from './bootstrap';
 
 // ============================================================================
@@ -96,7 +95,7 @@ export function assembleSystemPrompt(config: SystemPromptConfig): string {
     // == 8. PROJECT CONTEXT (Bootstrap Files) ==
     const bootstrapContext = formatBootstrapForPrompt(
         config.bootstrapFiles,
-        config.maxBootstrapChars
+        config.maxBootstrapChars,
     );
     if (bootstrapContext) {
         sections.push(bootstrapContext);
@@ -105,7 +104,7 @@ export function assembleSystemPrompt(config: SystemPromptConfig): string {
     // == 9. RUNTIME LINE ==
     sections.push(buildRuntimeLine(config));
 
-    return sections.filter(s => s.length > 0).join('\n\n---\n\n');
+    return sections.filter((s) => s.length > 0).join('\n\n---\n\n');
 }
 
 // ============================================================================
@@ -154,14 +153,20 @@ function buildIdentitySection(config: SystemPromptConfig): string {
 
     if (config.isFirstRun) {
         lines.push('');
-        lines.push('**This is your first run in this workspace.** Read BOOTSTRAP.md for the onboarding ritual.');
-        lines.push('After onboarding, update your files (SOUL.md, USER.md, IDENTITY.md) and delete BOOTSTRAP.md.');
+        lines.push(
+            '**This is your first run in this workspace.** Read BOOTSTRAP.md for the onboarding ritual.',
+        );
+        lines.push(
+            'After onboarding, update your files (SOUL.md, USER.md, IDENTITY.md) and delete BOOTSTRAP.md.',
+        );
     }
 
-    const soulFile = config.bootstrapFiles.find(f => f.name === 'SOUL.md');
+    const soulFile = config.bootstrapFiles.find((f) => f.name === 'SOUL.md');
     if (soulFile) {
         lines.push('');
-        lines.push('If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it.');
+        lines.push(
+            'If SOUL.md is present, embody its persona and tone. Avoid stiff, generic replies; follow its guidance unless higher-priority instructions override it.',
+        );
     }
 
     return lines.join('\n');
@@ -263,7 +268,7 @@ function buildSkillsSection(skills: string[]): string {
         '# Available Skills',
         '',
         'Before replying: scan the skill descriptions below.',
-        'If exactly one skill clearly applies to the user\'s request, follow its instructions.',
+        "If exactly one skill clearly applies to the user's request, follow its instructions.",
         '',
         '<available_skills>',
     ];
@@ -276,7 +281,7 @@ function buildSkillsSection(skills: string[]): string {
     return lines.join('\n');
 }
 
-function buildSelfAwarenessSection(config: SystemPromptConfig): string {
+function buildSelfAwarenessSection(_config: SystemPromptConfig): string {
     return `# Self-Awareness
 
 You are a **self-evolving** agent. Your workspace files define who you are:

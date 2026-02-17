@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { MemoryEntry, OrchestratorConfig, DEFAULT_CONFIG } from './types';
 
 // ============================================================================
@@ -32,7 +31,9 @@ export class MemorySystem {
      */
     async ensureMemoryDir(): Promise<vscode.Uri | undefined> {
         const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders || workspaceFolders.length === 0) return undefined;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            return undefined;
+        }
 
         const rootUri = workspaceFolders[0].uri;
         const memoryUri = vscode.Uri.joinPath(rootUri, this.memoryDir);
@@ -51,7 +52,9 @@ export class MemorySystem {
      */
     private getMemoryUri(): vscode.Uri | undefined {
         const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders || workspaceFolders.length === 0) return undefined;
+        if (!workspaceFolders || workspaceFolders.length === 0) {
+            return undefined;
+        }
         return vscode.Uri.joinPath(workspaceFolders[0].uri, this.memoryDir);
     }
 
@@ -74,7 +77,9 @@ export class MemorySystem {
      */
     async writeMemory(entry: MemoryEntry): Promise<void> {
         const memDir = await this.ensureMemoryDir();
-        if (!memDir) return;
+        if (!memDir) {
+            return;
+        }
 
         const filename = this.generateFilename(entry.category, entry.title);
         const fileUri = vscode.Uri.joinPath(memDir, filename);
@@ -112,7 +117,9 @@ export class MemorySystem {
      */
     async readAllMemory(): Promise<Array<{ filename: string; content: string }>> {
         const memDir = this.getMemoryUri();
-        if (!memDir) return [];
+        if (!memDir) {
+            return [];
+        }
 
         try {
             const entries = await vscode.workspace.fs.readDirectory(memDir);
@@ -139,15 +146,22 @@ export class MemorySystem {
      * Get recent memory as a context string for the orchestrator.
      * Limits to the most recent N entries to keep context manageable.
      */
-    async getRecentMemoryContext(maxEntries: number = 10, maxChars: number = 5000): Promise<string> {
+    async getRecentMemoryContext(
+        maxEntries: number = 10,
+        maxChars: number = 5000,
+    ): Promise<string> {
         const memories = await this.readAllMemory();
-        if (memories.length === 0) return '';
+        if (memories.length === 0) {
+            return '';
+        }
 
         const lines: string[] = ['=== JOHANN MEMORY (Recent) ===', ''];
         let totalChars = 0;
 
         for (const mem of memories.slice(0, maxEntries)) {
-            if (totalChars + mem.content.length > maxChars) break;
+            if (totalChars + mem.content.length > maxChars) {
+                break;
+            }
             lines.push(`--- ${mem.filename} ---`);
             lines.push(mem.content);
             lines.push('');
@@ -163,7 +177,7 @@ export class MemorySystem {
     async recordTaskCompletion(
         taskSummary: string,
         subtaskResults: Array<{ title: string; model: string; success: boolean; notes: string }>,
-        overallSuccess: boolean
+        overallSuccess: boolean,
     ): Promise<void> {
         const content: string[] = [];
         content.push(`## Overall: ${overallSuccess ? 'SUCCESS' : 'FAILED'}`);
@@ -172,7 +186,9 @@ export class MemorySystem {
         content.push('');
         content.push('### Subtask Results:');
         for (const result of subtaskResults) {
-            content.push(`- **${result.title}** — Model: ${result.model}, ${result.success ? 'OK' : 'FAILED'}`);
+            content.push(
+                `- **${result.title}** — Model: ${result.model}, ${result.success ? 'OK' : 'FAILED'}`,
+            );
             if (result.notes) {
                 content.push(`  - Notes: ${result.notes}`);
             }
@@ -194,7 +210,7 @@ export class MemorySystem {
     async recordDecision(
         decision: string,
         reasoning: string,
-        alternatives: string[] = []
+        alternatives: string[] = [],
     ): Promise<void> {
         const content: string[] = [];
         content.push(`## Decision: ${decision}`);
@@ -221,11 +237,7 @@ export class MemorySystem {
     /**
      * Record a learning to memory.
      */
-    async recordLearning(
-        what: string,
-        details: string,
-        tags: string[] = []
-    ): Promise<void> {
+    async recordLearning(what: string, details: string, tags: string[] = []): Promise<void> {
         await this.writeMemory({
             timestamp: new Date().toISOString(),
             category: 'learning',
@@ -238,11 +250,7 @@ export class MemorySystem {
     /**
      * Record an error to memory.
      */
-    async recordError(
-        error: string,
-        context: string,
-        resolution?: string
-    ): Promise<void> {
+    async recordError(error: string, context: string, resolution?: string): Promise<void> {
         const content: string[] = [];
         content.push(`## Error: ${error}`);
         content.push('');
@@ -268,7 +276,9 @@ export class MemorySystem {
      */
     async clearMemory(): Promise<number> {
         const memDir = this.getMemoryUri();
-        if (!memDir) return 0;
+        if (!memDir) {
+            return 0;
+        }
 
         try {
             const entries = await vscode.workspace.fs.readDirectory(memDir);
@@ -290,7 +300,9 @@ export class MemorySystem {
      */
     async listMemory(): Promise<string[]> {
         const memDir = this.getMemoryUri();
-        if (!memDir) return [];
+        if (!memDir) {
+            return [];
+        }
 
         try {
             const entries = await vscode.workspace.fs.readDirectory(memDir);

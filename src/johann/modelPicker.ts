@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ModelInfo, TaskComplexity, TaskType } from './types';
 import { getConfig } from './config';
-import { MODEL_SELECTION_GUIDE, TASK_TO_MODEL_ROUTING, TASK_TYPE_PATTERNS } from './modelSelectionGuide';
+import { TASK_TO_MODEL_ROUTING, TASK_TYPE_PATTERNS } from './modelSelectionGuide';
 import { getMultiPassStrategy, shouldUseMultiPass } from './multiPassStrategies';
 
 // ============================================================================
@@ -21,9 +21,9 @@ import { getMultiPassStrategy, shouldUseMultiPass } from './multiPassStrategies'
  * Cost: 0 = free, 0.25-0.33 = cheap premium, 1 = standard premium, 3+ = Opus
  * Tier: 1 = basic/fast, 5 = frontier/most capable
  */
-const MODEL_TIER_MAP: Array<{ 
-    pattern: RegExp; 
-    tier: number; 
+const MODEL_TIER_MAP: Array<{
+    pattern: RegExp;
+    tier: number;
     cost: number;
     category: string;
     family: string;
@@ -33,26 +33,98 @@ const MODEL_TIER_MAP: Array<{
     { pattern: /gpt-4\.1/i, tier: 3, cost: 0, category: 'free', family: 'gpt-4.1' },
     { pattern: /gpt-4o(?!-mini)/i, tier: 3, cost: 0, category: 'free', family: 'gpt-4o' },
     { pattern: /raptor.*mini/i, tier: 1, cost: 0, category: 'free', family: 'raptor-mini' },
-    
+
     // === CHEAP PREMIUM (0.25× - 0.33×) ===
     { pattern: /grok.*fast/i, tier: 2, cost: 0.25, category: 'cheap-premium', family: 'grok-fast' },
     { pattern: /haiku/i, tier: 2, cost: 0.33, category: 'cheap-premium', family: 'claude-haiku' },
-    { pattern: /gemini.*flash/i, tier: 3, cost: 0.33, category: 'cheap-premium', family: 'gemini-flash' },
-    { pattern: /gpt-5\.1.*codex.*mini/i, tier: 3, cost: 0.33, category: 'cheap-premium', family: 'gpt-5.1-codex-mini' },
-    
+    {
+        pattern: /gemini.*flash/i,
+        tier: 3,
+        cost: 0.33,
+        category: 'cheap-premium',
+        family: 'gemini-flash',
+    },
+    {
+        pattern: /gpt-5\.1.*codex.*mini/i,
+        tier: 3,
+        cost: 0.33,
+        category: 'cheap-premium',
+        family: 'gpt-5.1-codex-mini',
+    },
+
     // === STANDARD PREMIUM (1×) ===
-    { pattern: /sonnet.*4\.5/i, tier: 4, cost: 1, category: 'standard-premium', family: 'claude-sonnet-4.5' },
-    { pattern: /sonnet.*4(?!\.)/i, tier: 4, cost: 1, category: 'standard-premium', family: 'claude-sonnet-4' },
-    { pattern: /gemini.*2\.5.*pro/i, tier: 4, cost: 1, category: 'standard-premium', family: 'gemini-2.5-pro' },
-    { pattern: /gemini.*3.*pro/i, tier: 4, cost: 1, category: 'standard-premium', family: 'gemini-3-pro' },
-    { pattern: /gpt-5\.3.*codex/i, tier: 4, cost: 1, category: 'standard-premium', family: 'gpt-5.3-codex' },
-    { pattern: /gpt-5\.2.*codex/i, tier: 4, cost: 1, category: 'standard-premium', family: 'gpt-5.2-codex' },
-    { pattern: /gpt-5\.1.*codex(?!.*mini)/i, tier: 4, cost: 1, category: 'standard-premium', family: 'gpt-5.1-codex' },
-    { pattern: /gpt-5\.2(?!.*codex)/i, tier: 4, cost: 1, category: 'standard-premium', family: 'gpt-5.2' },
-    { pattern: /gpt-5\.1(?!.*codex)/i, tier: 4, cost: 1, category: 'standard-premium', family: 'gpt-5.1' },
+    {
+        pattern: /sonnet.*4\.5/i,
+        tier: 4,
+        cost: 1,
+        category: 'standard-premium',
+        family: 'claude-sonnet-4.5',
+    },
+    {
+        pattern: /sonnet.*4(?!\.)/i,
+        tier: 4,
+        cost: 1,
+        category: 'standard-premium',
+        family: 'claude-sonnet-4',
+    },
+    {
+        pattern: /gemini.*2\.5.*pro/i,
+        tier: 4,
+        cost: 1,
+        category: 'standard-premium',
+        family: 'gemini-2.5-pro',
+    },
+    {
+        pattern: /gemini.*3.*pro/i,
+        tier: 4,
+        cost: 1,
+        category: 'standard-premium',
+        family: 'gemini-3-pro',
+    },
+    {
+        pattern: /gpt-5\.3.*codex/i,
+        tier: 4,
+        cost: 1,
+        category: 'standard-premium',
+        family: 'gpt-5.3-codex',
+    },
+    {
+        pattern: /gpt-5\.2.*codex/i,
+        tier: 4,
+        cost: 1,
+        category: 'standard-premium',
+        family: 'gpt-5.2-codex',
+    },
+    {
+        pattern: /gpt-5\.1.*codex(?!.*mini)/i,
+        tier: 4,
+        cost: 1,
+        category: 'standard-premium',
+        family: 'gpt-5.1-codex',
+    },
+    {
+        pattern: /gpt-5\.2(?!.*codex)/i,
+        tier: 4,
+        cost: 1,
+        category: 'standard-premium',
+        family: 'gpt-5.2',
+    },
+    {
+        pattern: /gpt-5\.1(?!.*codex)/i,
+        tier: 4,
+        cost: 1,
+        category: 'standard-premium',
+        family: 'gpt-5.1',
+    },
     { pattern: /gpt-5(?!\.|\-)/i, tier: 4, cost: 1, category: 'standard-premium', family: 'gpt-5' }, // Legacy, retiring soon
-    { pattern: /gpt-5-codex/i, tier: 4, cost: 1, category: 'standard-premium', family: 'gpt-5-codex' }, // Legacy
-    
+    {
+        pattern: /gpt-5-codex/i,
+        tier: 4,
+        cost: 1,
+        category: 'standard-premium',
+        family: 'gpt-5-codex',
+    }, // Legacy
+
     // === OPUS (3× - 10×) — Emergency only ===
     { pattern: /opus.*4\.6/i, tier: 5, cost: 3, category: 'opus', family: 'claude-opus-4.6' },
     { pattern: /opus.*4\.5/i, tier: 5, cost: 3, category: 'opus', family: 'claude-opus-4.5' },
@@ -65,10 +137,10 @@ const MODEL_TIER_MAP: Array<{
  */
 const COMPLEXITY_TO_TIER: Record<TaskComplexity, { ideal: number; min: number; max: number }> = {
     trivial: { ideal: 1, min: 1, max: 2 },
-    simple:  { ideal: 2, min: 1, max: 3 },
+    simple: { ideal: 2, min: 1, max: 3 },
     moderate: { ideal: 3, min: 2, max: 4 },
     complex: { ideal: 4, min: 3, max: 5 },
-    expert:  { ideal: 5, min: 4, max: 5 },
+    expert: { ideal: 5, min: 4, max: 5 },
 };
 
 export class ModelPicker {
@@ -112,7 +184,7 @@ export class ModelPicker {
 
     /**
      * Discover and classify all available models.
-        * Filters models based on configuration (blockedModels).
+     * Filters models based on configuration (blockedModels).
      */
     async refreshModels(): Promise<ModelInfo[]> {
         const now = Date.now();
@@ -121,10 +193,10 @@ export class ModelPicker {
         }
 
         const allModels = await vscode.lm.selectChatModels();
-        const classified = allModels.map(model => this.classifyModel(model));
-        
+        const classified = allModels.map((model) => this.classifyModel(model));
+
         // Filter based on configuration
-        this.cachedModels = classified.filter(m => this.isModelAllowed(m));
+        this.cachedModels = classified.filter((m) => this.isModelAllowed(m));
         this.lastRefresh = now;
 
         // Sort by tier descending (most capable first)
@@ -190,28 +262,30 @@ export class ModelPicker {
     /**
      * Select the best model for a specific task type and complexity.
      * This is the main entry point for task-aware model selection.
-     * 
+     *
      * Prioritizes free (0×) models first, then escalates through cost tiers
      * only if the task complexity and type require it.
-     * 
+     *
      * If modelPickerEnabled is false, returns the fixed model instead.
      */
     async selectForTask(
         taskType: TaskType,
         complexity: TaskComplexity,
-        excludeModelIds: string[] = []
+        excludeModelIds: string[] = [],
     ): Promise<ModelInfo | undefined> {
         const config = getConfig();
-        
+
         // If picker is disabled, use fixed model
         if (!config.modelPickerEnabled) {
             return this.getFixedModel();
         }
 
         const models = await this.refreshModels();
-        const available = models.filter(m => !excludeModelIds.includes(m.id));
+        const available = models.filter((m) => !excludeModelIds.includes(m.id));
 
-        if (available.length === 0) return undefined;
+        if (available.length === 0) {
+            return undefined;
+        }
 
         // Get routing recommendation for this task type
         const routing = TASK_TO_MODEL_ROUTING[taskType];
@@ -222,20 +296,20 @@ export class ModelPicker {
 
         // Find models matching the preferred cost tier
         const preferredCost = routing.preferredCost;
-        let candidates = available.filter(m => m.costMultiplier === preferredCost);
+        let candidates = available.filter((m) => m.costMultiplier === preferredCost);
 
         // If no models at preferred cost, try escalating according to routing rule
         if (candidates.length === 0 && routing.escalateTo.length > 0) {
             if (complexity === 'complex' || complexity === 'expert') {
                 // For hard tasks, escalate to next cost tier
                 const nextCost = this.getNextCostTier(preferredCost);
-                candidates = available.filter(m => m.costMultiplier === nextCost);
+                candidates = available.filter((m) => m.costMultiplier === nextCost);
             }
         }
 
         // If still no candidates, fall back to any available model at preferred cost or lower
         if (candidates.length === 0) {
-            candidates = available.filter(m => m.costMultiplier <= preferredCost);
+            candidates = available.filter((m) => m.costMultiplier <= preferredCost);
         }
 
         // If STILL no candidates, just use any available model (last resort)
@@ -249,8 +323,10 @@ export class ModelPicker {
             // Primary: closeness to ideal tier
             const distA = Math.abs(a.tier - tierConfig.ideal);
             const distB = Math.abs(b.tier - tierConfig.ideal);
-            if (distA !== distB) return distA - distB;
-            
+            if (distA !== distB) {
+                return distA - distB;
+            }
+
             // Secondary: prefer lower cost
             return a.costMultiplier - b.costMultiplier;
         });
@@ -263,9 +339,15 @@ export class ModelPicker {
      * 0 → 0.33 → 1 → 3
      */
     private getNextCostTier(currentCost: number): number {
-        if (currentCost === 0) return 0.33;
-        if (currentCost <= 0.33) return 1;
-        if (currentCost === 1) return 3;
+        if (currentCost === 0) {
+            return 0.33;
+        }
+        if (currentCost <= 0.33) {
+            return 1;
+        }
+        if (currentCost === 1) {
+            return 3;
+        }
         return 3; // Already at max
     }
 
@@ -273,31 +355,33 @@ export class ModelPicker {
      * Select the best model for a given task complexity.
      * Returns the model closest to the ideal tier for the complexity level.
      * Prioritizes free (0×) models when appropriate.
-     * 
+     *
      * If modelPickerEnabled is false, returns the fixed model instead.
      */
     async selectForComplexity(
         complexity: TaskComplexity,
-        excludeModelIds: string[] = []
+        excludeModelIds: string[] = [],
     ): Promise<ModelInfo | undefined> {
         const config = getConfig();
-        
+
         // If picker is disabled, use fixed model
         if (!config.modelPickerEnabled) {
             return this.getFixedModel();
         }
 
         const models = await this.refreshModels();
-        const available = models.filter(m => !excludeModelIds.includes(m.id));
+        const available = models.filter((m) => !excludeModelIds.includes(m.id));
 
-        if (available.length === 0) return undefined;
+        if (available.length === 0) {
+            return undefined;
+        }
 
         const tierConfig = COMPLEXITY_TO_TIER[complexity];
 
         // Find model closest to ideal tier within acceptable range
         // Prioritize lower cost when tier is equal
         const candidates = available.filter(
-            m => m.tier >= tierConfig.min && m.tier <= tierConfig.max
+            (m) => m.tier >= tierConfig.min && m.tier <= tierConfig.max,
         );
 
         if (candidates.length > 0) {
@@ -305,8 +389,10 @@ export class ModelPicker {
             candidates.sort((a, b) => {
                 const distA = Math.abs(a.tier - tierConfig.ideal);
                 const distB = Math.abs(b.tier - tierConfig.ideal);
-                if (distA !== distB) return distA - distB;
-                
+                if (distA !== distB) {
+                    return distA - distB;
+                }
+
                 // Prefer lower cost when tier distance is equal
                 return a.costMultiplier - b.costMultiplier;
             });
@@ -317,8 +403,10 @@ export class ModelPicker {
         available.sort((a, b) => {
             const distA = Math.abs(a.tier - tierConfig.ideal);
             const distB = Math.abs(b.tier - tierConfig.ideal);
-            if (distA !== distB) return distA - distB;
-            
+            if (distA !== distB) {
+                return distA - distB;
+            }
+
             return a.costMultiplier - b.costMultiplier;
         });
 
@@ -328,36 +416,37 @@ export class ModelPicker {
     /**
      * Given a failed attempt, pick the next model to try.
      * Escalation is cost-aware and follows the 0× → 0.33× → 1× → 3× path.
-     * 
+     *
      * Never auto-selects Opus (cost 3+) unless explicitly enabled via config.
-     * 
+     *
      * If modelPickerEnabled is false, always returns the fixed model.
      */
     async escalate(
         complexity: TaskComplexity,
         failedModelIds: string[],
-        failureReason: string
+        failureReason: string,
     ): Promise<ModelInfo | undefined> {
         const config = getConfig();
-        
+
         // If picker is disabled, escalation is not possible - return fixed model
         if (!config.modelPickerEnabled) {
             return this.getFixedModel();
         }
 
         const models = await this.refreshModels();
-        const available = models.filter(m => !failedModelIds.includes(m.id));
+        const available = models.filter((m) => !failedModelIds.includes(m.id));
 
-        if (available.length === 0) return undefined;
+        if (available.length === 0) {
+            return undefined;
+        }
 
         // Get cost of highest failed model
         const failedModels = failedModelIds
-            .map(id => models.find(m => m.id === id))
+            .map((id) => models.find((m) => m.id === id))
             .filter((m): m is ModelInfo => m !== undefined);
-        
-        const highestFailedCost = failedModels.length > 0
-            ? Math.max(...failedModels.map(m => m.costMultiplier))
-            : 0;
+
+        const highestFailedCost =
+            failedModels.length > 0 ? Math.max(...failedModels.map((m) => m.costMultiplier)) : 0;
 
         // Analyze the failure to decide escalation direction
         const shouldGoUp = this.shouldEscalateUp(failureReason);
@@ -365,12 +454,12 @@ export class ModelPicker {
         if (shouldGoUp) {
             // Escalate up: next cost tier
             const nextCost = this.getNextCostTier(highestFailedCost);
-            
+
             // IMPORTANT: Block Opus (3+) unless explicitly enabled
             const allowOpus = config.allowOpusEscalation ?? false;
             if (nextCost >= 3 && !allowOpus) {
                 // Don't escalate to Opus - return best non-Opus model
-                const nonOpusCandidates = available.filter(m => m.costMultiplier < 3);
+                const nonOpusCandidates = available.filter((m) => m.costMultiplier < 3);
                 if (nonOpusCandidates.length === 0) {
                     // No non-Opus models available
                     return undefined;
@@ -380,13 +469,12 @@ export class ModelPicker {
             }
 
             // Find models at next cost tier
-            let upCandidates = available.filter(m => m.costMultiplier === nextCost);
-            
+            let upCandidates = available.filter((m) => m.costMultiplier === nextCost);
+
             // If no models at exact cost, try any higher cost up to next tier
             if (upCandidates.length === 0) {
-                upCandidates = available.filter(m => 
-                    m.costMultiplier > highestFailedCost && 
-                    m.costMultiplier <= nextCost
+                upCandidates = available.filter(
+                    (m) => m.costMultiplier > highestFailedCost && m.costMultiplier <= nextCost,
                 );
             }
 
@@ -395,11 +483,12 @@ export class ModelPicker {
             }
         } else {
             // Escalate down — the model may have been overthinking
-            const lowestFailedCost = failedModels.length > 0
-                ? Math.min(...failedModels.map(m => m.costMultiplier))
-                : 3;
+            const lowestFailedCost =
+                failedModels.length > 0
+                    ? Math.min(...failedModels.map((m) => m.costMultiplier))
+                    : 3;
 
-            const downCandidates = available.filter(m => m.costMultiplier < lowestFailedCost);
+            const downCandidates = available.filter((m) => m.costMultiplier < lowestFailedCost);
             if (downCandidates.length > 0) {
                 return this.selectFromCandidates(downCandidates, complexity);
             }
@@ -414,13 +503,15 @@ export class ModelPicker {
      */
     private selectFromCandidates(candidates: ModelInfo[], complexity: TaskComplexity): ModelInfo {
         const tierConfig = COMPLEXITY_TO_TIER[complexity];
-        
+
         candidates.sort((a, b) => {
             // Primary: closeness to ideal tier
             const distA = Math.abs(a.tier - tierConfig.ideal);
             const distB = Math.abs(b.tier - tierConfig.ideal);
-            if (distA !== distB) return distA - distB;
-            
+            if (distA !== distB) {
+                return distA - distB;
+            }
+
             // Secondary: prefer lower cost
             return a.costMultiplier - b.costMultiplier;
         });
@@ -460,17 +551,22 @@ export class ModelPicker {
         const config = getConfig();
         const models = await this.refreshModels();
 
-        if (models.length === 0) return undefined;
+        if (models.length === 0) {
+            return undefined;
+        }
 
         // If fixedModel is specified, try to find it
         if (config.fixedModel) {
             const fixedPattern = config.fixedModel.toLowerCase();
-            const match = models.find(m => 
-                m.id.toLowerCase().includes(fixedPattern) ||
-                m.family.toLowerCase().includes(fixedPattern) ||
-                m.name.toLowerCase().includes(fixedPattern)
+            const match = models.find(
+                (m) =>
+                    m.id.toLowerCase().includes(fixedPattern) ||
+                    m.family.toLowerCase().includes(fixedPattern) ||
+                    m.name.toLowerCase().includes(fixedPattern),
             );
-            if (match) return match;
+            if (match) {
+                return match;
+            }
         }
 
         // Fallback: return first available allowed model
@@ -482,7 +578,7 @@ export class ModelPicker {
      */
     async getModel(modelId: string): Promise<ModelInfo | undefined> {
         const models = await this.refreshModels();
-        return models.find(m => m.id === modelId);
+        return models.find((m) => m.id === modelId);
     }
 
     /**
@@ -498,9 +594,9 @@ export class ModelPicker {
     async getModelSummary(): Promise<string> {
         const config = getConfig();
         const models = await this.refreshModels();
-        
+
         const lines: string[] = [];
-        
+
         // Model picker status
         if (!config.modelPickerEnabled) {
             lines.push('🔒 **Model picker is DISABLED**');
@@ -510,7 +606,7 @@ export class ModelPicker {
             lines.push('✅ **Model picker is ENABLED**');
             lines.push('');
         }
-        
+
         // Opus status
         if (config.allowOpusEscalation) {
             lines.push('⚡ **Opus escalation:** ENABLED (3×+ cost models available)');
@@ -524,7 +620,7 @@ export class ModelPicker {
             lines.push(`🚫 **Blocked models:** ${config.blockedModels.join(', ')}`);
             lines.push('');
         }
-        
+
         if (config.blockedModels.length === 0 && !config.allowOpusEscalation) {
             lines.push('ℹ️ No additional model restrictions (Opus blocked by default)');
             lines.push('');
@@ -532,18 +628,20 @@ export class ModelPicker {
             lines.push('ℹ️ No model restrictions — all discovered models allowed (including Opus)');
             lines.push('');
         }
-        
+
         // Available models
         if (models.length === 0) {
-            lines.push('⚠️ **No models available** (check your restrictions or install more models)');
+            lines.push(
+                '⚠️ **No models available** (check your restrictions or install more models)',
+            );
             return lines.join('\n');
         }
-        
+
         lines.push(`**Available models (${models.length}):**`);
         for (const m of models) {
             lines.push(`  [Tier ${m.tier}] ${m.name} (${m.family}) — ${m.vendor}`);
         }
-        
+
         return lines.join('\n');
     }
 
@@ -554,18 +652,22 @@ export class ModelPicker {
     async getModelDiagnostics(): Promise<string> {
         const config = getConfig();
         const allModels = await vscode.lm.selectChatModels();
-        const classified = allModels.map(model => this.classifyModel(model));
-        
+        const classified = allModels.map((model) => this.classifyModel(model));
+
         const lines: string[] = ['=== Model Diagnostics ===', ''];
-        
+
         // Configuration summary
         lines.push('**Configuration:**');
         lines.push(`- Model Picker: ${config.modelPickerEnabled ? 'Enabled' : 'Disabled'}`);
         lines.push(`- Fixed Model: ${config.fixedModel || '(not set)'}`);
-        lines.push(`- Opus Escalation: ${config.allowOpusEscalation ? 'ENABLED' : 'DISABLED (default)'}`);
-        lines.push(`- Blocked Patterns: ${config.blockedModels.length > 0 ? config.blockedModels.join(', ') : '(none)'}`);
+        lines.push(
+            `- Opus Escalation: ${config.allowOpusEscalation ? 'ENABLED' : 'DISABLED (default)'}`,
+        );
+        lines.push(
+            `- Blocked Patterns: ${config.blockedModels.length > 0 ? config.blockedModels.join(', ') : '(none)'}`,
+        );
         lines.push('');
-        
+
         // Model availability
         lines.push('**All Discovered Models:**');
         for (const m of classified) {
@@ -573,11 +675,11 @@ export class ModelPicker {
             const status = allowed ? '✅ ALLOWED' : '🚫 BLOCKED';
             lines.push(`  ${status} [Tier ${m.tier}] ${m.name} (${m.family})`);
         }
-        
-        const allowedCount = classified.filter(m => this.isModelAllowed(m)).length;
+
+        const allowedCount = classified.filter((m) => this.isModelAllowed(m)).length;
         lines.push('');
         lines.push(`**Summary:** ${allowedCount}/${classified.length} models available to Johann`);
-        
+
         return lines.join('\n');
     }
 
@@ -595,15 +697,19 @@ export class ModelPicker {
     refineSelection(
         description: string,
         taskType: TaskType,
-        complexity: TaskComplexity
+        complexity: TaskComplexity,
     ): { taskType: TaskType; complexity: TaskComplexity } {
-        let refined = { taskType, complexity };
+        const refined = { taskType, complexity };
 
         // Heuristic 1 — Cross-file surgery boost
         refined.complexity = this.applyCrossFileSurgeryBoost(description, refined.complexity);
 
         // Heuristic 2 — Algorithm / data-structure generation boost
-        refined.complexity = this.applyAlgorithmBoost(description, refined.taskType, refined.complexity);
+        refined.complexity = this.applyAlgorithmBoost(
+            description,
+            refined.taskType,
+            refined.complexity,
+        );
 
         // Heuristic 3 — Spec → analysis reroute
         refined.taskType = this.applySpecAnalysisReroute(description, refined.taskType);
@@ -623,19 +729,19 @@ export class ModelPicker {
      *   • ≥ 7 distinct file-path references → boost two levels
      *   • Explicit "across N files" / "in N files" with N ≥ 4 → boost one level
      */
-    private applyCrossFileSurgeryBoost(
-        description: string,
-        base: TaskComplexity
-    ): TaskComplexity {
+    private applyCrossFileSurgeryBoost(description: string, base: TaskComplexity): TaskComplexity {
         const COMPLEXITY_LADDER: TaskComplexity[] = [
-            'trivial', 'simple', 'moderate', 'complex', 'expert',
+            'trivial',
+            'simple',
+            'moderate',
+            'complex',
+            'expert',
         ];
         let idx = COMPLEXITY_LADDER.indexOf(base);
 
         // Count distinct file-path-like references (e.g. src/foo/bar.ts)
         const fileRefs = new Set(
-            (description.match(/[\w./\-]+\.[a-z]{1,4}/gi) || [])
-                .map(p => p.toLowerCase())
+            (description.match(/[\w./\-]+\.[a-z]{1,4}/gi) || []).map((p) => p.toLowerCase()),
         );
 
         if (fileRefs.size >= 7) {
@@ -646,7 +752,7 @@ export class ModelPicker {
 
         // Explicit "across N files" / "in N files" / "N files" with N ≥ 4
         const multiFileMatch = description.match(
-            /(?:across|in|touch(?:es|ing)?|modif(?:y|ies|ying)|updat(?:e|es|ing))\s+(\d+)\s+files?/i
+            /(?:across|in|touch(?:es|ing)?|modif(?:y|ies|ying)|updat(?:e|es|ing))\s+(\d+)\s+files?/i,
         );
         if (multiFileMatch && parseInt(multiFileMatch[1], 10) >= 4) {
             idx = Math.min(idx + 1, COMPLEXITY_LADDER.length - 1);
@@ -666,7 +772,7 @@ export class ModelPicker {
     private applyAlgorithmBoost(
         description: string,
         taskType: TaskType,
-        base: TaskComplexity
+        base: TaskComplexity,
     ): TaskComplexity {
         // Only applies to generate / refactor / complex-refactor
         if (taskType !== 'generate' && taskType !== 'refactor' && taskType !== 'complex-refactor') {
@@ -696,11 +802,17 @@ export class ModelPicker {
             /state\s*machine/i,
         ];
 
-        const hasAlgo = ALGO_INDICATORS.some(p => p.test(description));
-        if (!hasAlgo) return base;
+        const hasAlgo = ALGO_INDICATORS.some((p) => p.test(description));
+        if (!hasAlgo) {
+            return base;
+        }
 
         const COMPLEXITY_LADDER: TaskComplexity[] = [
-            'trivial', 'simple', 'moderate', 'complex', 'expert',
+            'trivial',
+            'simple',
+            'moderate',
+            'complex',
+            'expert',
         ];
         const idx = COMPLEXITY_LADDER.indexOf(base);
         // Boost at least to 'moderate' (idx 2), or +1 if already there
@@ -719,11 +831,10 @@ export class ModelPicker {
      * "architecture", "understand the codebase", "how does X work"), reroute
      * from 'spec' → 'review' (which maps to GPT-4.1, the analysis-tier model).
      */
-    private applySpecAnalysisReroute(
-        description: string,
-        taskType: TaskType
-    ): TaskType {
-        if (taskType !== 'spec') return taskType;
+    private applySpecAnalysisReroute(description: string, taskType: TaskType): TaskType {
+        if (taskType !== 'spec') {
+            return taskType;
+        }
 
         const ANALYSIS_INDICATORS = [
             /\bstudy\b/i,
@@ -740,7 +851,7 @@ export class ModelPicker {
             /what\s+does\s+\w+\s+do/i,
         ];
 
-        const isAnalysis = ANALYSIS_INDICATORS.some(p => p.test(description));
+        const isAnalysis = ANALYSIS_INDICATORS.some((p) => p.test(description));
         return isAnalysis ? 'review' : taskType;
     }
 

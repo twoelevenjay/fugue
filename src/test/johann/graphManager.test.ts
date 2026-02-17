@@ -1,19 +1,12 @@
 import * as assert from 'assert';
-import {
-    getExecutionWaves,
-    getDownstreamTasks,
-    validateGraph,
-    Wave,
-} from '../../johann/graphManager';
+import { getExecutionWaves, getDownstreamTasks, validateGraph } from '../../johann/graphManager';
 import { OrchestrationPlan, Subtask } from '../../johann/types';
 
 /**
  * Build a minimal OrchestrationPlan from compact subtask definitions.
  */
-function makePlan(
-    defs: Array<{ id: string; deps?: string[] }>
-): OrchestrationPlan {
-    const subtasks: Subtask[] = defs.map(d => ({
+function makePlan(defs: Array<{ id: string; deps?: string[] }>): OrchestrationPlan {
+    const subtasks: Subtask[] = defs.map((d) => ({
         id: d.id,
         title: `Task ${d.id}`,
         description: '',
@@ -46,18 +39,14 @@ suite('graphManager', () => {
         });
 
         test('single task produces one wave', () => {
-            const waves = getExecutionWaves(
-                makePlan([{ id: 'a' }])
-            );
+            const waves = getExecutionWaves(makePlan([{ id: 'a' }]));
             assert.strictEqual(waves.length, 1);
             assert.deepStrictEqual(waves[0].taskIds, ['a']);
             assert.strictEqual(waves[0].level, 0);
         });
 
         test('two independent tasks share wave 0', () => {
-            const waves = getExecutionWaves(
-                makePlan([{ id: 'a' }, { id: 'b' }])
-            );
+            const waves = getExecutionWaves(makePlan([{ id: 'a' }, { id: 'b' }]));
             assert.strictEqual(waves.length, 1);
             assert.strictEqual(waves[0].taskIds.length, 2);
             assert.ok(waves[0].taskIds.includes('a'));
@@ -66,11 +55,7 @@ suite('graphManager', () => {
 
         test('linear chain produces sequential waves', () => {
             const waves = getExecutionWaves(
-                makePlan([
-                    { id: 'a' },
-                    { id: 'b', deps: ['a'] },
-                    { id: 'c', deps: ['b'] },
-                ])
+                makePlan([{ id: 'a' }, { id: 'b', deps: ['a'] }, { id: 'c', deps: ['b'] }]),
             );
             assert.strictEqual(waves.length, 3);
             assert.deepStrictEqual(waves[0].taskIds, ['a']);
@@ -86,7 +71,7 @@ suite('graphManager', () => {
                     { id: 'b', deps: ['a'] },
                     { id: 'c', deps: ['a'] },
                     { id: 'd', deps: ['b', 'c'] },
-                ])
+                ]),
             );
             assert.strictEqual(waves.length, 3);
             assert.deepStrictEqual(waves[0].taskIds, ['a']);
@@ -105,7 +90,7 @@ suite('graphManager', () => {
                     { id: 'c', deps: ['a', 'b'] },
                     { id: 'd', deps: ['a'] },
                     { id: 'e', deps: ['c', 'd'] },
-                ])
+                ]),
             );
             assert.strictEqual(waves.length, 3);
             // Wave 0: a, b (both roots)
@@ -118,13 +103,14 @@ suite('graphManager', () => {
 
         test('throws on cycle', () => {
             assert.throws(
-                () => getExecutionWaves(
-                    makePlan([
-                        { id: 'a', deps: ['b'] },
-                        { id: 'b', deps: ['a'] },
-                    ])
-                ),
-                /[Cc]ycle/
+                () =>
+                    getExecutionWaves(
+                        makePlan([
+                            { id: 'a', deps: ['b'] },
+                            { id: 'b', deps: ['a'] },
+                        ]),
+                    ),
+                /[Cc]ycle/,
             );
         });
     });
@@ -135,10 +121,7 @@ suite('graphManager', () => {
 
     suite('getDownstreamTasks', () => {
         test('leaf task has no downstream', () => {
-            const plan = makePlan([
-                { id: 'a' },
-                { id: 'b', deps: ['a'] },
-            ]);
+            const plan = makePlan([{ id: 'a' }, { id: 'b', deps: ['a'] }]);
             const downstream = getDownstreamTasks(plan, 'b');
             assert.strictEqual(downstream.length, 0);
         });
@@ -186,7 +169,7 @@ suite('graphManager', () => {
                     { id: 'b', deps: ['a'] },
                     { id: 'c', deps: ['a'] },
                     { id: 'd', deps: ['b', 'c'] },
-                ])
+                ]),
             );
             assert.strictEqual(result.valid, true);
             assert.strictEqual(result.cycles.length, 0);
@@ -201,10 +184,7 @@ suite('graphManager', () => {
 
         test('detects missing dependency', () => {
             const result = validateGraph(
-                makePlan([
-                    { id: 'a' },
-                    { id: 'b', deps: ['nonexistent'] },
-                ])
+                makePlan([{ id: 'a' }, { id: 'b', deps: ['nonexistent'] }]),
             );
             assert.strictEqual(result.valid, false);
             assert.strictEqual(result.missingDeps.length, 1);
@@ -218,16 +198,14 @@ suite('graphManager', () => {
                     { id: 'a', deps: ['c'] },
                     { id: 'b', deps: ['a'] },
                     { id: 'c', deps: ['b'] },
-                ])
+                ]),
             );
             assert.strictEqual(result.valid, false);
             assert.ok(result.cycles.length > 0);
         });
 
         test('all independent tasks are valid (no orphans)', () => {
-            const result = validateGraph(
-                makePlan([{ id: 'a' }, { id: 'b' }, { id: 'c' }])
-            );
+            const result = validateGraph(makePlan([{ id: 'a' }, { id: 'b' }, { id: 'c' }]));
             assert.strictEqual(result.valid, true);
             assert.strictEqual(result.orphans.length, 0);
         });

@@ -125,7 +125,7 @@ export class RateLimitGuard {
      */
     private pruneWindow(bucket: FamilyBucket, now: number): void {
         const cutoff = now - this.config.windowMs;
-        bucket.timestamps = bucket.timestamps.filter(t => t > cutoff);
+        bucket.timestamps = bucket.timestamps.filter((t) => t > cutoff);
     }
 
     /**
@@ -167,7 +167,7 @@ export class RateLimitGuard {
 
         // Add ±25% jitter
         const jitter = capped * 0.25;
-        return Math.round(capped + (Math.random() * jitter * 2) - jitter);
+        return Math.round(capped + Math.random() * jitter * 2 - jitter);
     }
 
     /**
@@ -194,7 +194,7 @@ export class RateLimitGuard {
             return parseInt(waitMatch[1], 10) * 1000;
         }
 
-        // Pattern: plain number that looks like seconds (e.g. "30" at the end 
+        // Pattern: plain number that looks like seconds (e.g. "30" at the end
         // of a "Too Many Requests" message)
         const trailingNum = msg.match(/(?:too many requests|rate limit).*?(\d+)\s*$/i);
         if (trailingNum) {
@@ -210,12 +210,11 @@ export class RateLimitGuard {
      * Sleep for `ms` milliseconds, cancellable via token.
      * Returns false if cancelled.
      */
-    private async sleep(
-        ms: number,
-        token: vscode.CancellationToken
-    ): Promise<boolean> {
-        if (ms <= 0) return true;
-        return new Promise<boolean>(resolve => {
+    private async sleep(ms: number, token: vscode.CancellationToken): Promise<boolean> {
+        if (ms <= 0) {
+            return true;
+        }
+        return new Promise<boolean>((resolve) => {
             const timeout = setTimeout(() => {
                 listener.dispose();
                 resolve(true);
@@ -257,17 +256,19 @@ export class RateLimitGuard {
         if (proactivePause > 0) {
             logger.info(
                 `[RateLimitGuard] Proactive throttle for "${family}": ` +
-                `pausing ${(proactivePause / 1000).toFixed(1)}s ` +
-                `(${bucket.timestamps.length} requests in window)`
+                    `pausing ${(proactivePause / 1000).toFixed(1)}s ` +
+                    `(${bucket.timestamps.length} requests in window)`,
             );
             if (stream) {
                 stream.markdown(
                     `\n> ⏳ Rate limit guard: pausing ${(proactivePause / 1000).toFixed(1)}s ` +
-                    `to stay under request limits…\n`
+                        `to stay under request limits…\n`,
                 );
             }
             const ok = await this.sleep(proactivePause, token);
-            if (!ok) throw new vscode.CancellationError();
+            if (!ok) {
+                throw new vscode.CancellationError();
+            }
             proactivePauseTotal += proactivePause;
         }
 
@@ -307,37 +308,36 @@ export class RateLimitGuard {
                 if (retryCount > this.config.maxRetries) {
                     logger.warn(
                         `[RateLimitGuard] Exhausted ${this.config.maxRetries} retries ` +
-                        `for "${family}". Giving up.`
+                            `for "${family}". Giving up.`,
                     );
                     throw err;
                 }
 
                 // Calculate backoff
                 const retryAfterMs = this.extractRetryAfter(err);
-                const backoff = this.calculateReactiveBackoff(
-                    bucket.consecutiveHits,
-                    retryAfterMs
-                );
+                const backoff = this.calculateReactiveBackoff(bucket.consecutiveHits, retryAfterMs);
 
                 // Set a global cooldown so other agents sharing this guard also pause
                 bucket.cooldownUntil = Date.now() + backoff;
 
                 logger.warn(
                     `[RateLimitGuard] Rate limit hit for "${family}" ` +
-                    `(attempt ${retryCount}/${this.config.maxRetries}). ` +
-                    `Backing off ${(backoff / 1000).toFixed(1)}s` +
-                    (retryAfterMs ? ` (server said ${(retryAfterMs / 1000).toFixed(0)}s)` : '')
+                        `(attempt ${retryCount}/${this.config.maxRetries}). ` +
+                        `Backing off ${(backoff / 1000).toFixed(1)}s` +
+                        (retryAfterMs ? ` (server said ${(retryAfterMs / 1000).toFixed(0)}s)` : ''),
                 );
 
                 if (stream) {
                     stream.markdown(
                         `\n> ⏸️ Rate limited — waiting ${(backoff / 1000).toFixed(1)}s ` +
-                        `before retry ${retryCount}/${this.config.maxRetries}…\n`
+                            `before retry ${retryCount}/${this.config.maxRetries}…\n`,
                     );
                 }
 
                 const ok = await this.sleep(backoff, token);
-                if (!ok) throw new vscode.CancellationError();
+                if (!ok) {
+                    throw new vscode.CancellationError();
+                }
                 reactivePauseTotal += backoff;
             }
         }
@@ -364,8 +364,8 @@ export class RateLimitGuard {
 
             lines.push(
                 `**${family}:** ${bucket.timestamps.length}/${this.config.maxRequestsPerWindow} ` +
-                `requests in window | consecutive hits: ${bucket.consecutiveHits} | ` +
-                `cooldown: ${cooldownRemaining}`
+                    `requests in window | consecutive hits: ${bucket.consecutiveHits} | ` +
+                    `cooldown: ${cooldownRemaining}`,
             );
         }
 

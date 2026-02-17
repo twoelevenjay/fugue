@@ -12,15 +12,13 @@
 import * as vscode from 'vscode';
 import { TaskComplexity, TaskType } from './types';
 import { ModelPicker } from './modelPicker';
-import { JohannLogger, getLogger } from './logger';
+import { JohannLogger } from './logger';
 import {
     MultiPassStrategy,
     MultiPassStep,
     ConsistencySample,
-    CritiqueIssue,
     ReviewFinding,
     voteOnConsistency,
-    verifyRevisionAddressesIssues,
     deduplicateReviewFindings,
 } from './multiPassStrategies';
 
@@ -87,7 +85,7 @@ export class MultiPassExecutor {
             taskDescription: string;
             relevantFiles?: Array<{ path: string; content: string }>;
             previousAttempts?: string[];
-        }
+        },
     ): Promise<MultiPassResult> {
         const startTime = Date.now();
         const passResults: PassResult[] = [];
@@ -100,25 +98,27 @@ export class MultiPassExecutor {
             // Execute each pass in sequence
             for (let i = 0; i < strategy.passes.length; i++) {
                 const step = strategy.passes[i];
-                
+
                 // Skip aggregate steps (deterministic, no LLM call)
                 if (step.role === 'aggregate') {
                     continue;
                 }
 
-                this.logger.debug(`Executing pass ${i + 1}/${strategy.passes.length}: ${step.role}`);
+                this.logger.debug(
+                    `Executing pass ${i + 1}/${strategy.passes.length}: ${step.role}`,
+                );
 
                 const passResult = await this.executePass(
                     step,
                     taskType,
                     complexity,
                     context,
-                    passResults // Previous pass results for context
+                    passResults, // Previous pass results for context
                 );
 
                 passResults.push(passResult);
                 modelsUsed.push(passResult.modelId);
-                
+
                 // Get cost of model used
                 const modelInfo = await this.modelPicker.getModel(passResult.modelId);
                 if (modelInfo) {
@@ -192,11 +192,11 @@ export class MultiPassExecutor {
             relevantFiles?: Array<{ path: string; content: string }>;
             previousAttempts?: string[];
         },
-        previousResults: PassResult[]
+        previousResults: PassResult[],
     ): Promise<PassResult> {
         // Select model for this pass based on target cost
         const modelInfo = await this.selectModelForPass(step, taskType, complexity);
-        
+
         if (!modelInfo) {
             return {
                 step,
@@ -212,12 +212,14 @@ export class MultiPassExecutor {
 
         // Call the model
         try {
-            const messages = [
-                vscode.LanguageModelChatMessage.User(prompt),
-            ];
+            const messages = [vscode.LanguageModelChatMessage.User(prompt)];
 
-            const chatResponse = await modelInfo.model.sendRequest(messages, {}, new vscode.CancellationTokenSource().token);
-            
+            const chatResponse = await modelInfo.model.sendRequest(
+                messages,
+                {},
+                new vscode.CancellationTokenSource().token,
+            );
+
             let rawOutput = '';
             for await (const fragment of chatResponse.text) {
                 rawOutput += fragment;
@@ -231,7 +233,7 @@ export class MultiPassExecutor {
                     const jsonMatch = rawOutput.match(/```json\s*\n([\s\S]*?)\n```/);
                     const jsonStr = jsonMatch ? jsonMatch[1] : rawOutput;
                     structuredOutput = JSON.parse(jsonStr.trim());
-                } catch (parseError) {
+                } catch {
                     this.logger.warn(`Failed to parse JSON output from ${step.role} pass`);
                     // Continue anyway - we have raw output
                 }
@@ -261,21 +263,20 @@ export class MultiPassExecutor {
      */
     private async selectModelForPass(
         step: MultiPassStep,
-        taskType: TaskType,
-        complexity: TaskComplexity
+        _taskType: TaskType,
+        _complexity: TaskComplexity,
     ): Promise<any> {
         const models = await this.modelPicker.getAllModels();
-        
+
         // Filter to models at or near target cost
         const targetCost = step.targetCost;
-        const candidates = models.filter(m => 
-            m.costMultiplier >= targetCost && 
-            m.costMultiplier <= targetCost + 0.33 // Allow slightly higher cost
+        const candidates = models.filter(
+            (m) => m.costMultiplier >= targetCost && m.costMultiplier <= targetCost + 0.33, // Allow slightly higher cost
         );
 
         if (candidates.length === 0) {
             // Fallback to any 0× model
-            return models.find(m => m.costMultiplier === 0);
+            return models.find((m) => m.costMultiplier === 0);
         }
 
         // Pick the model closest to target cost with appropriate tier
@@ -292,7 +293,7 @@ export class MultiPassExecutor {
             relevantFiles?: Array<{ path: string; content: string }>;
             previousAttempts?: string[];
         },
-        previousResults: PassResult[]
+        previousResults: PassResult[],
     ): string {
         const parts: string[] = [];
 
@@ -310,7 +311,8 @@ export class MultiPassExecutor {
         // Relevant files
         if (context.relevantFiles && context.relevantFiles.length > 0) {
             parts.push('\n## Relevant Files:\n');
-            for (const file of context.relevantFiles.slice(0, 3)) { // Limit to 3 files
+            for (const file of context.relevantFiles.slice(0, 3)) {
+                // Limit to 3 files
                 parts.push(`\n### ${file.path}\n\`\`\`\n${file.content.slice(0, 2000)}\n\`\`\`\n`);
             }
         }
@@ -328,9 +330,13 @@ export class MultiPassExecutor {
 
         // Output format requirements
         if (step.outputFormat === 'json' && step.jsonSchema) {
-            parts.push(`\n## Required Output Format:\nProvide your response as a JSON object matching this schema:\n\`\`\`json\n${JSON.stringify(step.jsonSchema, null, 2)}\n\`\`\`\n`);
+            parts.push(
+                `\n## Required Output Format:\nProvide your response as a JSON object matching this schema:\n\`\`\`json\n${JSON.stringify(step.jsonSchema, null, 2)}\n\`\`\`\n`,
+            );
         } else if (step.outputFormat === 'structured-list') {
-            parts.push(`\n## Required Output Format:\nProvide a structured list with clear sections and bullet points.\n`);
+            parts.push(
+                `\n## Required Output Format:\nProvide a structured list with clear sections and bullet points.\n`,
+            );
         }
 
         return parts.join('');
@@ -341,7 +347,7 @@ export class MultiPassExecutor {
      */
     private async aggregate(
         strategy: MultiPassStrategy,
-        passResults: PassResult[]
+        passResults: PassResult[],
     ): Promise<{
         output: string;
         success: boolean;
@@ -352,14 +358,23 @@ export class MultiPassExecutor {
 
         switch (aggregator.type) {
             case 'majority-vote':
-                return this.aggregateMajorityVote(passResults, aggregator.config as Record<string, any>);
-            
+                return this.aggregateMajorityVote(
+                    passResults,
+                    aggregator.config as Record<string, any>,
+                );
+
             case 'critic-fixes':
-                return this.aggregateCriticFixes(passResults, aggregator.config as Record<string, any>);
-            
+                return this.aggregateCriticFixes(
+                    passResults,
+                    aggregator.config as Record<string, any>,
+                );
+
             case 'rubric-score':
-                return this.aggregateRubricScore(passResults, aggregator.config as Record<string, any>);
-            
+                return this.aggregateRubricScore(
+                    passResults,
+                    aggregator.config as Record<string, any>,
+                );
+
             case 'tool-oracle':
                 // Tool verification is handled separately (needs external tool calls)
                 return {
@@ -367,7 +382,7 @@ export class MultiPassExecutor {
                     success: true,
                     shouldEscalate: false,
                 };
-            
+
             default:
                 // Default: return last pass output
                 return {
@@ -383,7 +398,7 @@ export class MultiPassExecutor {
      */
     private aggregateMajorityVote(
         passResults: PassResult[],
-        config?: Record<string, any>
+        config?: Record<string, any>,
     ): {
         output: string;
         success: boolean;
@@ -391,8 +406,8 @@ export class MultiPassExecutor {
         escalationReason?: string;
     } {
         const samples: ConsistencySample[] = passResults
-            .filter(r => r.structuredOutput)
-            .map(r => r.structuredOutput as ConsistencySample);
+            .filter((r) => r.structuredOutput)
+            .map((r) => r.structuredOutput as ConsistencySample);
 
         if (samples.length === 0) {
             return {
@@ -422,12 +437,12 @@ export class MultiPassExecutor {
             `## Consensus Answer\n${vote.consensus}\n`,
             `\n**Confidence:** ${(vote.confidence * 100).toFixed(0)}%`,
             `\n**Supporting Evidence:**`,
-            ...vote.evidence.slice(0, 5).map(e => `- ${e}`),
+            ...vote.evidence.slice(0, 5).map((e) => `- ${e}`),
         ].join('\n');
 
         // Escalate if confidence is low even with consensus
         const shouldEscalate = vote.confidence < 0.6;
-        const escalationReason = shouldEscalate 
+        const escalationReason = shouldEscalate
             ? `Consensus found but confidence is low (${(vote.confidence * 100).toFixed(0)}%)`
             : undefined;
 
@@ -444,7 +459,7 @@ export class MultiPassExecutor {
      */
     private aggregateCriticFixes(
         passResults: PassResult[],
-        config?: Record<string, any>
+        config?: Record<string, any>,
     ): {
         output: string;
         success: boolean;
@@ -456,11 +471,12 @@ export class MultiPassExecutor {
                 output: '',
                 success: false,
                 shouldEscalate: true,
-                escalationReason: 'Not enough passes for critic-fixes pattern (need draft, critique, revise)',
+                escalationReason:
+                    'Not enough passes for critic-fixes pattern (need draft, critique, revise)',
             };
         }
 
-        const draft = passResults[0].rawOutput;
+        const _draft = passResults[0].rawOutput;
         const critiqueOutput = passResults[1].rawOutput;
         const revision = passResults[2].rawOutput;
 
@@ -468,22 +484,24 @@ export class MultiPassExecutor {
         // Simple heuristic: look for "must-fix" or "MUST-FIX" sections
         const mustFixMatches = critiqueOutput.match(/must-fix[:\s]+([\s\S]*?)(?=nice-to-have|$)/i);
         const mustFixText = mustFixMatches ? mustFixMatches[1] : '';
-        
+
         // Count number of must-fix issues (approximation)
         const mustFixCount = (mustFixText.match(/^[-*]\s+/gm) || []).length;
 
         // Check if revision addresses issues
         const requireAllAddressed = config?.requireAllMustFixAddressed ?? true;
-        
+
         // Simple check: does revision mention critical terms from critique?
-        const criticalTerms = mustFixText.toLowerCase().match(/\b\w{5,}\b/g)?.slice(0, 10) || [];
-        const addressedCount = criticalTerms.filter(term => 
-            revision.toLowerCase().includes(term)
+        const criticalTerms =
+            mustFixText
+                .toLowerCase()
+                .match(/\b\w{5,}\b/g)
+                ?.slice(0, 10) || [];
+        const addressedCount = criticalTerms.filter((term) =>
+            revision.toLowerCase().includes(term),
         ).length;
-        
-        const addressedRatio = criticalTerms.length > 0 
-            ? addressedCount / criticalTerms.length 
-            : 1;
+
+        const addressedRatio = criticalTerms.length > 0 ? addressedCount / criticalTerms.length : 1;
 
         if (requireAllAddressed && addressedRatio < 0.7) {
             return {
@@ -516,7 +534,7 @@ export class MultiPassExecutor {
      */
     private aggregateRubricScore(
         passResults: PassResult[],
-        config?: Record<string, any>
+        config?: Record<string, any>,
     ): {
         output: string;
         success: boolean;
@@ -548,7 +566,7 @@ export class MultiPassExecutor {
         const deduplicated = deduplicateReviewFindings(findings, minimumConfidence);
 
         // Check for critical findings
-        const criticalFindings = deduplicated.filter(f => f.severity === 'critical');
+        const criticalFindings = deduplicated.filter((f) => f.severity === 'critical');
         const shouldEscalate = escalateOnCritical && criticalFindings.length > 0;
         const escalationReason = shouldEscalate
             ? `Found ${criticalFindings.length} critical issue(s) requiring review`
@@ -576,13 +594,15 @@ export class MultiPassExecutor {
         const lines: string[] = ['## Code Review Findings\n'];
 
         const bySeverity = {
-            critical: findings.filter(f => f.severity === 'critical'),
-            warning: findings.filter(f => f.severity === 'warning'),
-            info: findings.filter(f => f.severity === 'info'),
+            critical: findings.filter((f) => f.severity === 'critical'),
+            warning: findings.filter((f) => f.severity === 'warning'),
+            info: findings.filter((f) => f.severity === 'info'),
         };
 
         for (const [severity, items] of Object.entries(bySeverity)) {
-            if (items.length === 0) continue;
+            if (items.length === 0) {
+                continue;
+            }
 
             const icon = severity === 'critical' ? '🚨' : severity === 'warning' ? '⚠️' : 'ℹ️';
             lines.push(`\n### ${icon} ${severity.toUpperCase()} (${items.length})\n`);

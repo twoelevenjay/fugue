@@ -1,20 +1,15 @@
 import * as vscode from 'vscode';
 import { Orchestrator } from './orchestrator';
 import { DEFAULT_CONFIG } from './types';
-import {
-    getJohannWorkspaceUri,
-    loadBootstrapFiles,
-    completeBootstrap,
-} from './bootstrap';
+import { getJohannWorkspaceUri, loadBootstrapFiles, completeBootstrap } from './bootstrap';
 import { assembleSystemPrompt } from './systemPrompt';
 import { handleDirective } from './directives';
 import { getConfig, onConfigChange, migrateModelSettingsFromCopilot } from './config';
 import { SessionTranscript } from './sessionTranscript';
-import { logEvent, logUserInfo, getRecentDailyNotesContext } from './dailyNotes';
-import { searchMemory, formatSearchResults } from './memorySearch';
+import { logEvent, getRecentDailyNotesContext } from './dailyNotes';
 import { discoverSkills, formatSkillsForPrompt } from './skills';
 import { HeartbeatManager } from './heartbeat';
-import { createLogger, JohannLogger } from './logger';
+import { createLogger } from './logger';
 import { SubagentRegistry } from './subagentRegistry';
 import { BackgroundTaskManager } from './backgroundTaskManager';
 import { RunStateManager } from './runState';
@@ -83,8 +78,15 @@ async function getWorkspaceContext(): Promise<string> {
 
     // Check for common config files
     const configFiles = [
-        'package.json', 'tsconfig.json', 'Cargo.toml', 'pyproject.toml',
-        'go.mod', 'pom.xml', 'build.gradle', '.gitignore', 'Makefile',
+        'package.json',
+        'tsconfig.json',
+        'Cargo.toml',
+        'pyproject.toml',
+        'go.mod',
+        'pom.xml',
+        'build.gradle',
+        '.gitignore',
+        'Makefile',
     ];
 
     const foundConfigs: string[] = [];
@@ -122,7 +124,7 @@ async function getWorkspaceContext(): Promise<string> {
  * or fall back to the best available model.
  */
 async function getModel(
-    request: vscode.ChatRequest
+    request: vscode.ChatRequest,
 ): Promise<vscode.LanguageModelChat | undefined> {
     // Use the model the user has selected in the chat
     if (request.model) {
@@ -141,9 +143,7 @@ async function getModel(
 /**
  * Register the @johann chat participant and return disposables.
  */
-export function registerJohannParticipant(
-    context: vscode.ExtensionContext
-): vscode.Disposable[] {
+export function registerJohannParticipant(_context: vscode.ExtensionContext): vscode.Disposable[] {
     const config = getConfig();
     const orchestrator = new Orchestrator({
         ...DEFAULT_CONFIG,
@@ -158,26 +158,30 @@ export function registerJohannParticipant(
     const disposables: vscode.Disposable[] = [];
 
     // Attempt to migrate model settings from Copilot (one-time, backwards compatibility)
-    migrateModelSettingsFromCopilot().then(migrated => {
-        if (migrated) {
-            logger.info('Migrated model restrictions from Copilot settings to Johann settings');
-        }
-    }).catch(err => {
-        logger.warn(`Failed to migrate model settings: ${err}`);
-    });
+    migrateModelSettingsFromCopilot()
+        .then((migrated) => {
+            if (migrated) {
+                logger.info('Migrated model restrictions from Copilot settings to Johann settings');
+            }
+        })
+        .catch((err) => {
+            logger.warn(`Failed to migrate model settings: ${err}`);
+        });
 
     // Start heartbeat if enabled
     heartbeat.start();
 
     // Listen for config changes
-    disposables.push(onConfigChange(newConfig => {
-        logger.refreshLevel();
-        if (newConfig.heartbeatEnabled && !heartbeat.running()) {
-            heartbeat.start();
-        } else if (!newConfig.heartbeatEnabled && heartbeat.running()) {
-            heartbeat.stop();
-        }
-    }));
+    disposables.push(
+        onConfigChange((newConfig) => {
+            logger.refreshLevel();
+            if (newConfig.heartbeatEnabled && !heartbeat.running()) {
+                heartbeat.start();
+            } else if (!newConfig.heartbeatEnabled && heartbeat.running()) {
+                heartbeat.stop();
+            }
+        }),
+    );
 
     // Register participant
     const participant = vscode.chat.createChatParticipant(
@@ -186,21 +190,21 @@ export function registerJohannParticipant(
             request: vscode.ChatRequest,
             chatContext: vscode.ChatContext,
             response: vscode.ChatResponseStream,
-            token: vscode.CancellationToken
+            token: vscode.CancellationToken,
         ): Promise<JohannChatResult> => {
             const userMessage = request.prompt.trim();
 
             if (!userMessage) {
                 response.markdown(
                     '**Johann** — Orchestration agent for GitHub Copilot.\n\n' +
-                    'Send me a task and I will:\n' +
-                    '1. Decompose it into subtasks\n' +
-                    '2. Select the best model for each subtask\n' +
-                    '3. Execute with subagents\n' +
-                    '4. Escalate between models if needed\n' +
-                    '5. Merge results and report back\n\n' +
-                    'Type `/help` for available directives.\n' +
-                    'All decisions are recorded in `.vscode/johann/` for continuity.\n'
+                        'Send me a task and I will:\n' +
+                        '1. Decompose it into subtasks\n' +
+                        '2. Select the best model for each subtask\n' +
+                        '3. Execute with subagents\n' +
+                        '4. Escalate between models if needed\n' +
+                        '5. Merge results and report back\n\n' +
+                        'Type `/help` for available directives.\n' +
+                        'All decisions are recorded in `.vscode/johann/` for continuity.\n',
                 );
                 return { metadata: { command: 'help' } };
             }
@@ -221,7 +225,7 @@ export function registerJohannParticipant(
                         directiveResult.resumeSession,
                         model,
                         response,
-                        token
+                        token,
                     );
                     if (!resumed) {
                         response.markdown('Nothing to resume — all subtasks already completed.\n');
@@ -251,7 +255,11 @@ export function registerJohannParticipant(
                 }
 
                 // Add task: enqueue user message for integration at next checkpoint
-                if (lowerMsg.startsWith('add task:') || lowerMsg.startsWith('add:') || lowerMsg.startsWith('also ')) {
+                if (
+                    lowerMsg.startsWith('add task:') ||
+                    lowerMsg.startsWith('add:') ||
+                    lowerMsg.startsWith('also ')
+                ) {
                     const taskDescription = userMessage
                         .replace(/^(add task:|add:|also)\s*/i, '')
                         .trim();
@@ -260,8 +268,8 @@ export function registerJohannParticipant(
                         const position = await runManager.enqueueUserMessage(taskDescription);
                         response.markdown(
                             `📨 **Task queued** (position ${position})\n\n` +
-                            `> ${taskDescription}\n\n` +
-                            `Johann will integrate this at the next safe checkpoint between waves.\n`
+                                `> ${taskDescription}\n\n` +
+                                `Johann will integrate this at the next safe checkpoint between waves.\n`,
                         );
                         return { metadata: { command: 'add-task' } };
                     }
@@ -271,10 +279,10 @@ export function registerJohannParticipant(
                 const position = await runManager.enqueueUserMessage(userMessage);
                 response.markdown(
                     `📨 **Message queued** (position ${position})\n\n` +
-                    `Johann is currently running. Your message has been queued:\n\n` +
-                    `> ${userMessage.substring(0, 200)}${userMessage.length > 200 ? '…' : ''}\n\n` +
-                    `It will be integrated at the next safe checkpoint.\n\n` +
-                    `Say \`@johann status\` for a live progress snapshot.\n`
+                        `Johann is currently running. Your message has been queued:\n\n` +
+                        `> ${userMessage.substring(0, 200)}${userMessage.length > 200 ? '…' : ''}\n\n` +
+                        `It will be integrated at the next safe checkpoint.\n\n` +
+                        `Say \`@johann status\` for a live progress snapshot.\n`,
                 );
                 return { metadata: { command: 'queued' } };
             }
@@ -286,10 +294,10 @@ export function registerJohannParticipant(
             if (!vscode.workspace.isTrusted) {
                 response.markdown(
                     '**Workspace not trusted.** Johann requires a trusted workspace to orchestrate tasks.\n\n' +
-                    'This workspace has not been marked as trusted. Johann performs file writes, ' +
-                    'git operations, and LLM-driven tool invocations that could be influenced by ' +
-                    'malicious workspace content.\n\n' +
-                    'To trust this workspace, run **Workspaces: Manage Workspace Trust** from the Command Palette.\n'
+                        'This workspace has not been marked as trusted. Johann performs file writes, ' +
+                        'git operations, and LLM-driven tool invocations that could be influenced by ' +
+                        'malicious workspace content.\n\n' +
+                        'To trust this workspace, run **Workspaces: Manage Workspace Trust** from the Command Palette.\n',
                 );
                 return { metadata: { command: 'orchestrate', success: false } };
             }
@@ -299,7 +307,7 @@ export function registerJohannParticipant(
             if (!model) {
                 response.markdown(
                     '**Error:** No language models available. ' +
-                    'Make sure you have GitHub Copilot active and a model selected.\n'
+                        'Make sure you have GitHub Copilot active and a model selected.\n',
                 );
                 return { metadata: { command: 'orchestrate', success: false } };
             }
@@ -360,14 +368,17 @@ export function registerJohannParticipant(
 
             // Build conversation history for context
             const conversationHistory = chatContext.history
-                .map(entry => {
+                .map((entry) => {
                     if (entry instanceof vscode.ChatRequestTurn) {
                         return `User: ${entry.prompt}`;
                     }
                     if (entry instanceof vscode.ChatResponseTurn) {
                         const parts = entry.response
-                            .filter((p): p is vscode.ChatResponseMarkdownPart => p instanceof vscode.ChatResponseMarkdownPart)
-                            .map(p => p.value.value)
+                            .filter(
+                                (p): p is vscode.ChatResponseMarkdownPart =>
+                                    p instanceof vscode.ChatResponseMarkdownPart,
+                            )
+                            .map((p) => p.value.value)
                             .join('');
                         return `Assistant: ${parts.substring(0, 500)}`;
                     }
@@ -409,7 +420,7 @@ export function registerJohannParticipant(
 
             // === ORCHESTRATE ===
             const registry = new SubagentRegistry(
-                transcript?.getSessionId() || `anon-${Date.now()}`
+                transcript?.getSessionId() || `anon-${Date.now()}`,
             );
             await registry.initialize();
 
@@ -421,19 +432,19 @@ export function registerJohannParticipant(
                     fullContext,
                     subagentContext,
                     model,
-                    request.toolInvocationToken
+                    request.toolInvocationToken,
                 );
 
                 response.markdown(
                     `🔄 **Background orchestration started**\n\n` +
-                    `Task ID: \`${taskId}\`\n\n` +
-                    `Your request is being processed in the background. ` +
-                    `You can continue working while Johann orchestrates the task.\n\n` +
-                    `**View progress:**\n` +
-                    `- Watch the status bar for live updates\n` +
-                    `- Use \`/tasks\` to view all background tasks\n` +
-                    `- Run \`Johann: Show Background Tasks\` from the command palette\n\n` +
-                    `You'll receive a notification when the task completes.`
+                        `Task ID: \`${taskId}\`\n\n` +
+                        `Your request is being processed in the background. ` +
+                        `You can continue working while Johann orchestrates the task.\n\n` +
+                        `**View progress:**\n` +
+                        `- Watch the status bar for live updates\n` +
+                        `- Use \`/tasks\` to view all background tasks\n` +
+                        `- Run \`Johann: Show Background Tasks\` from the command palette\n\n` +
+                        `You'll receive a notification when the task completes.`,
                 );
 
                 response.button({
@@ -455,7 +466,7 @@ export function registerJohannParticipant(
                     model,
                     response,
                     token,
-                    request.toolInvocationToken
+                    request.toolInvocationToken,
                 );
             }
 
@@ -483,7 +494,7 @@ export function registerJohannParticipant(
                     summary: userMessage.substring(0, 200),
                 },
             };
-        }
+        },
     );
 
     participant.iconPath = new vscode.ThemeIcon('hubot');
@@ -494,7 +505,7 @@ export function registerJohannParticipant(
         provideFollowups(
             result: JohannChatResult,
             _context: vscode.ChatContext,
-            _token: vscode.CancellationToken
+            _token: vscode.CancellationToken,
         ): vscode.ChatFollowup[] {
             const followups: vscode.ChatFollowup[] = [];
 
@@ -531,7 +542,7 @@ export function registerJohannParticipant(
     disposables.push(
         participant.onDidReceiveFeedback((feedback: vscode.ChatResultFeedback) => {
             logger.info(`Chat feedback: ${feedback.kind === 1 ? 'helpful' : 'unhelpful'}`);
-        })
+        }),
     );
 
     disposables.push(participant);
@@ -547,7 +558,7 @@ export function registerJohannParticipant(
                 return;
             }
 
-            const items = entries.map(name => ({
+            const items = entries.map((name) => ({
                 label: name,
             }));
 
@@ -560,13 +571,15 @@ export function registerJohannParticipant(
                 if (folders) {
                     const uri = vscode.Uri.joinPath(
                         folders[0].uri,
-                        '.vscode', 'johann', selected.label
+                        '.vscode',
+                        'johann',
+                        selected.label,
                     );
                     const doc = await vscode.workspace.openTextDocument(uri);
                     await vscode.window.showTextDocument(doc);
                 }
             }
-        })
+        }),
     );
 
     disposables.push(
@@ -574,7 +587,7 @@ export function registerJohannParticipant(
             const answer = await vscode.window.showWarningMessage(
                 'Clear all Johann memory entries?',
                 { modal: true },
-                'Clear'
+                'Clear',
             );
 
             if (answer === 'Clear') {
@@ -582,13 +595,13 @@ export function registerJohannParticipant(
                 await memory.clearMemory();
                 vscode.window.showInformationMessage('Johann: Memory cleared.');
             }
-        })
+        }),
     );
 
     disposables.push(
         vscode.commands.registerCommand('johann.showLog', () => {
             logger.show();
-        })
+        }),
     );
 
     disposables.push(
@@ -631,7 +644,7 @@ export function registerJohannParticipant(
             } catch {
                 vscode.window.showInformationMessage('Johann: No debug logs found.');
             }
-        })
+        }),
     );
 
     // Model diagnostics command
@@ -644,7 +657,7 @@ export function registerJohannParticipant(
                 'johannModelDiagnostics',
                 'Johann Model Diagnostics',
                 vscode.ViewColumn.One,
-                {}
+                {},
             );
 
             panel.webview.html = `<!DOCTYPE html>
@@ -670,7 +683,7 @@ export function registerJohannParticipant(
     <pre>${diagnostics}</pre>
 </body>
 </html>`;
-        })
+        }),
     );
 
     // Disable model picker command
@@ -679,11 +692,13 @@ export function registerJohannParticipant(
             const models = await orchestrator.getModelPicker().getAllModels();
 
             if (models.length === 0) {
-                vscode.window.showErrorMessage('No models available. Cannot configure fixed model.');
+                vscode.window.showErrorMessage(
+                    'No models available. Cannot configure fixed model.',
+                );
                 return;
             }
 
-            const items = models.map(m => ({
+            const items = models.map((m) => ({
                 label: m.name,
                 description: `Tier ${m.tier} — ${m.family}`,
                 detail: m.vendor,
@@ -697,14 +712,22 @@ export function registerJohannParticipant(
 
             if (selected) {
                 const config = vscode.workspace.getConfiguration('johann');
-                await config.update('modelPickerEnabled', false, vscode.ConfigurationTarget.Workspace);
-                await config.update('fixedModel', selected.modelInfo.family, vscode.ConfigurationTarget.Workspace);
+                await config.update(
+                    'modelPickerEnabled',
+                    false,
+                    vscode.ConfigurationTarget.Workspace,
+                );
+                await config.update(
+                    'fixedModel',
+                    selected.modelInfo.family,
+                    vscode.ConfigurationTarget.Workspace,
+                );
 
                 vscode.window.showInformationMessage(
-                    `Model picker disabled. Johann will now use: ${selected.label}`
+                    `Model picker disabled. Johann will now use: ${selected.label}`,
                 );
             }
-        })
+        }),
     );
 
     // Enable model picker command
@@ -713,8 +736,10 @@ export function registerJohannParticipant(
             const config = vscode.workspace.getConfiguration('johann');
             await config.update('modelPickerEnabled', true, vscode.ConfigurationTarget.Workspace);
 
-            vscode.window.showInformationMessage('Model picker enabled. Johann will intelligently select models based on task complexity.');
-        })
+            vscode.window.showInformationMessage(
+                'Model picker enabled. Johann will intelligently select models based on task complexity.',
+            );
+        }),
     );
 
     // Background task commands
@@ -729,13 +754,17 @@ export function registerJohannParticipant(
                 return;
             }
 
-            const items = allTasks.map(task => {
+            const items = allTasks.map((task) => {
                 const statusIcon =
-                    task.status === 'running' ? '$(sync~spin)' :
-                    task.status === 'completed' ? '$(check)' :
-                    task.status === 'failed' ? '$(error)' :
-                    task.status === 'cancelled' ? '$(circle-slash)' :
-                    '$(debug-pause)';
+                    task.status === 'running'
+                        ? '$(sync~spin)'
+                        : task.status === 'completed'
+                          ? '$(check)'
+                          : task.status === 'failed'
+                            ? '$(error)'
+                            : task.status === 'cancelled'
+                              ? '$(circle-slash)'
+                              : '$(debug-pause)';
 
                 const progress = task.progress?.percentage ?? 0;
                 const phase = task.progress?.phase ?? 'Starting';
@@ -761,7 +790,7 @@ export function registerJohannParticipant(
                 });
                 await vscode.window.showTextDocument(doc);
             }
-        })
+        }),
     );
 
     disposables.push(
@@ -774,7 +803,7 @@ export function registerJohannParticipant(
                     return;
                 }
 
-                const items = allTasks.map(task => ({
+                const items = allTasks.map((task) => ({
                     label: task.sessionId,
                     description: task.status,
                     taskId: task.id,
@@ -797,22 +826,23 @@ export function registerJohannParticipant(
                 language: 'markdown',
             });
             await vscode.window.showTextDocument(doc);
-        })
+        }),
     );
 
     disposables.push(
         vscode.commands.registerCommand('johann.cancelTask', async (taskId?: string) => {
             if (!taskId) {
                 // Prompt user to select a running task
-                const allTasks = taskManager.getAllTasks()
-                    .filter(t => t.status === 'running' || t.status === 'paused');
+                const allTasks = taskManager
+                    .getAllTasks()
+                    .filter((t) => t.status === 'running' || t.status === 'paused');
 
                 if (allTasks.length === 0) {
                     vscode.window.showInformationMessage('Johann: No active tasks to cancel.');
                     return;
                 }
 
-                const items = allTasks.map(task => ({
+                const items = allTasks.map((task) => ({
                     label: task.sessionId,
                     description: `${task.status} — ${task.progress?.percentage ?? 0}%`,
                     taskId: task.id,
@@ -832,7 +862,7 @@ export function registerJohannParticipant(
             const answer = await vscode.window.showWarningMessage(
                 `Cancel task ${taskId}?`,
                 { modal: true },
-                'Cancel Task'
+                'Cancel Task',
             );
 
             if (answer === 'Cancel Task') {
@@ -843,7 +873,7 @@ export function registerJohannParticipant(
                     vscode.window.showErrorMessage(`Johann: Failed to cancel task ${taskId}.`);
                 }
             }
-        })
+        }),
     );
 
     disposables.push(
@@ -851,14 +881,14 @@ export function registerJohannParticipant(
             const answer = await vscode.window.showWarningMessage(
                 'Clear all completed background tasks?',
                 { modal: true },
-                'Clear'
+                'Clear',
             );
 
             if (answer === 'Clear') {
                 await taskManager.clearCompletedTasks();
                 vscode.window.showInformationMessage('Johann: Completed tasks cleared.');
             }
-        })
+        }),
     );
 
     // Clean up heartbeat on deactivate

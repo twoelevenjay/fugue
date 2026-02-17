@@ -48,7 +48,9 @@ export async function withFileLock<T>(uri: vscode.Uri, fn: () => Promise<T>): Pr
     const prev = fileLocks.get(key) ?? Promise.resolve();
 
     let resolve: () => void;
-    const next = new Promise<void>(r => { resolve = r; });
+    const next = new Promise<void>((r) => {
+        resolve = r;
+    });
     fileLocks.set(key, next);
 
     // Wait for the previous holder to finish
@@ -78,19 +80,14 @@ export async function withFileLock<T>(uri: vscode.Uri, fn: () => Promise<T>): Pr
  * @param uri      Target file URI
  * @param content  Content to write (string or Uint8Array)
  */
-export async function atomicWrite(
-    uri: vscode.Uri,
-    content: string | Uint8Array
-): Promise<void> {
-    const data = typeof content === 'string'
-        ? new TextEncoder().encode(content)
-        : content;
+export async function atomicWrite(uri: vscode.Uri, content: string | Uint8Array): Promise<void> {
+    const data = typeof content === 'string' ? new TextEncoder().encode(content) : content;
 
     // Generate a unique temp file name adjacent to the target
     const suffix = crypto.randomBytes(6).toString('hex');
     const tmpUri = vscode.Uri.joinPath(
-        uri.with({ path: uri.path.replace(/\/[^/]+$/, '') }),  // parent dir
-        `.${uri.path.split('/').pop()}.${suffix}.tmp`
+        uri.with({ path: uri.path.replace(/\/[^/]+$/, '') }), // parent dir
+        `.${uri.path.split('/').pop()}.${suffix}.tmp`,
     );
 
     try {
@@ -99,7 +96,7 @@ export async function atomicWrite(
 
         // Step 2: Rename temp → target (atomic on most filesystems)
         await vscode.workspace.fs.rename(tmpUri, uri, { overwrite: true });
-    } catch (renameErr) {
+    } catch {
         // Fallback for providers that don't support rename:
         // Write directly (less safe, but better than failing)
         try {
@@ -128,7 +125,7 @@ export async function safeAppend(
     uri: vscode.Uri,
     newContent: string,
     header?: string,
-    dedup: boolean = true
+    dedup: boolean = true,
 ): Promise<void> {
     await withFileLock(uri, async () => {
         let existing = '';
@@ -165,10 +162,7 @@ export async function safeAppend(
  * @param uri     Target file URI
  * @param content Content to write
  */
-export async function safeWrite(
-    uri: vscode.Uri,
-    content: string | Uint8Array
-): Promise<void> {
+export async function safeWrite(uri: vscode.Uri, content: string | Uint8Array): Promise<void> {
     await withFileLock(uri, async () => {
         await atomicWrite(uri, content);
     });
@@ -208,9 +202,7 @@ export async function cleanupTempFiles(dirUri: vscode.Uri): Promise<number> {
         for (const [name, type] of entries) {
             if (type === vscode.FileType.File && name.endsWith('.tmp') && name.startsWith('.')) {
                 try {
-                    await vscode.workspace.fs.delete(
-                        vscode.Uri.joinPath(dirUri, name)
-                    );
+                    await vscode.workspace.fs.delete(vscode.Uri.joinPath(dirUri, name));
                     cleaned++;
                 } catch {
                     // Non-critical

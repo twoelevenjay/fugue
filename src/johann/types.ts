@@ -15,14 +15,14 @@ export type TaskComplexity = 'trivial' | 'simple' | 'moderate' | 'complex' | 'ex
  * Enables deterministic routing to free (0×) vs premium models.
  */
 export type TaskType =
-    | 'generate'        // Code generation, scaffolding, boilerplate
-    | 'refactor'        // Code transformations, renames, moves
-    | 'test'            // Test generation and writing
-    | 'debug'           // Debugging, fixing failures, error analysis
-    | 'review'          // Code review, security, edge cases
-    | 'spec'            // Planning, documentation, communication
-    | 'edit'            // Small edits, formatting, single functions
-    | 'design'          // Architecture decisions, multi-file design
+    | 'generate' // Code generation, scaffolding, boilerplate
+    | 'refactor' // Code transformations, renames, moves
+    | 'test' // Test generation and writing
+    | 'debug' // Debugging, fixing failures, error analysis
+    | 'review' // Code review, security, edge cases
+    | 'spec' // Planning, documentation, communication
+    | 'edit' // Small edits, formatting, single functions
+    | 'design' // Architecture decisions, multi-file design
     | 'complex-refactor'; // Large-scale refactors requiring deep reasoning
 
 /**
@@ -220,11 +220,11 @@ export const DEFAULT_CONFIG: OrchestratorConfig = {
  * Status of a background task.
  */
 export type BackgroundTaskStatus =
-    | 'running'      // Currently executing
-    | 'paused'       // Paused (e.g., waiting for user input)
-    | 'completed'    // Successfully finished
-    | 'failed'       // Failed with error
-    | 'cancelled';   // User cancelled
+    | 'running' // Currently executing
+    | 'paused' // Paused (e.g., waiting for user input)
+    | 'completed' // Successfully finished
+    | 'failed' // Failed with error
+    | 'cancelled'; // User cancelled
 
 /**
  * Progress information for a background task.

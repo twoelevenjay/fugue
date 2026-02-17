@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { registerJohannParticipant } from './johann/participant';
 
 // ============================================================================
@@ -86,34 +85,49 @@ async function readFileContent(uri: vscode.Uri, maxSize: number): Promise<string
 
 async function getWorkspaceStructure(): Promise<string> {
     const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders) return '';
+    if (!workspaceFolders) {
+        return '';
+    }
 
     const lines: string[] = ['Workspace structure:'];
-    
+
     for (const folder of workspaceFolders) {
         lines.push(`\n📁 ${folder.name}/`);
-        
+
         // Get top-level directories and key files
         try {
             const entries = await vscode.workspace.fs.readDirectory(folder.uri);
             const dirs: string[] = [];
             const files: string[] = [];
-            
+
             for (const [name, type] of entries) {
-                if (name.startsWith('.') && name !== '.github') continue;
-                if (name === 'node_modules' || name === 'dist' || name === 'out' || name === 'build') continue;
-                
+                if (name.startsWith('.') && name !== '.github') {
+                    continue;
+                }
+                if (
+                    name === 'node_modules' ||
+                    name === 'dist' ||
+                    name === 'out' ||
+                    name === 'build'
+                ) {
+                    continue;
+                }
+
                 if (type === vscode.FileType.Directory) {
                     dirs.push(name);
                 } else if (type === vscode.FileType.File) {
                     // Only include important files
-                    if (name.match(/^(README|CHANGELOG|package\.json|tsconfig\.json|\.env\.example)$/i) ||
-                        name.endsWith('.md')) {
+                    if (
+                        name.match(
+                            /^(README|CHANGELOG|package\.json|tsconfig\.json|\.env\.example)$/i,
+                        ) ||
+                        name.endsWith('.md')
+                    ) {
                         files.push(name);
                     }
                 }
             }
-            
+
             for (const dir of dirs.sort()) {
                 lines.push(`  📁 ${dir}/`);
             }
@@ -124,7 +138,7 @@ async function getWorkspaceStructure(): Promise<string> {
             // Ignore errors
         }
     }
-    
+
     return lines.join('\n');
 }
 
@@ -214,19 +228,23 @@ async function analyzeCodebaseForMissingInfo(
     workspaceContext: string,
     model: vscode.LanguageModelChat,
     token: vscode.CancellationToken,
-    response: vscode.ChatResponseStream
+    response: vscode.ChatResponseStream,
 ): Promise<ResolutionAttempt[]> {
     const attempts: ResolutionAttempt[] = [];
 
     response.markdown('🔍 Searching codebase for answers before asking questions...\n\n');
 
     for (const question of missingInfo) {
-        if (token.isCancellationRequested) { break; }
+        if (token.isCancellationRequested) {
+            break;
+        }
 
         // Build search query from question and field
         const searchTerms = extractSearchTerms(question.question, question.field, contextPacket);
-        
-        response.markdown(`- Analyzing: "${question.question.substring(0, 80)}${question.question.length > 80 ? '...' : ''}"\n`);
+
+        response.markdown(
+            `- Analyzing: "${question.question.substring(0, 80)}${question.question.length > 80 ? '...' : ''}"\n`,
+        );
 
         // Search codebase
         const codebaseFindings = await searchCodebaseForAnswer(searchTerms, token);
@@ -239,7 +257,7 @@ async function analyzeCodebaseForMissingInfo(
                 contextPacket,
                 workspaceContext,
                 model,
-                token
+                token,
             );
 
             attempts.push(resolution);
@@ -259,29 +277,35 @@ async function analyzeCodebaseForMissingInfo(
 /**
  * Extract search terms from a question to find relevant code.
  */
-function extractSearchTerms(question: string, field: string, contextPacket: ContextPacket): string[] {
+function extractSearchTerms(
+    question: string,
+    field: string,
+    contextPacket: ContextPacket,
+): string[] {
     const terms: string[] = [];
-    
+
     // Extract quoted terms
     const quotedMatch = question.match(/"([^"]+)"/g);
     if (quotedMatch) {
-        terms.push(...quotedMatch.map(q => q.replace(/"/g, '')));
+        terms.push(...quotedMatch.map((q) => q.replace(/"/g, '')));
     }
 
     // Extract technical terms (camelCase, PascalCase, snake_case, kebab-case)
-    const techTerms = question.match(/\b[a-z]+[A-Z][a-zA-Z]*\b|\b[A-Z][a-z]+(?:[A-Z][a-z]+)*\b|\b[a-z]+_[a-z_]+\b|\b[a-z]+-[a-z-]+\b/g);
+    const techTerms = question.match(
+        /\b[a-z]+[A-Z][a-zA-Z]*\b|\b[A-Z][a-z]+(?:[A-Z][a-z]+)*\b|\b[a-z]+_[a-z_]+\b|\b[a-z]+-[a-z-]+\b/g,
+    );
     if (techTerms) {
         terms.push(...techTerms);
     }
 
     // Extract from context packet (e.g., if question is about a feature mentioned in goal/currentState)
     const contextText = `${contextPacket.goal} ${contextPacket.currentState} ${contextPacket.additionalContext}`;
-    const contextWords = contextText.split(/\s+/).filter(w => w.length > 3);
+    const contextWords = contextText.split(/\s+/).filter((w) => w.length > 3);
     const questionWords = question.toLowerCase().split(/\s+/);
-    
+
     // Find overlapping significant words
-    const overlapping = contextWords.filter(w => 
-        questionWords.some(qw => qw.includes(w.toLowerCase()) || w.toLowerCase().includes(qw))
+    const overlapping = contextWords.filter((w) =>
+        questionWords.some((qw) => qw.includes(w.toLowerCase()) || w.toLowerCase().includes(qw)),
     );
     terms.push(...overlapping.slice(0, 3));
 
@@ -290,7 +314,7 @@ function extractSearchTerms(question: string, field: string, contextPacket: Cont
         terms.push(field);
     }
 
-    return [...new Set(terms)].filter(t => t.length > 2);
+    return [...new Set(terms)].filter((t) => t.length > 2);
 }
 
 /**
@@ -298,11 +322,13 @@ function extractSearchTerms(question: string, field: string, contextPacket: Cont
  */
 async function searchCodebaseForAnswer(
     searchTerms: string[],
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
 ): Promise<Array<{ path: string; content: string; source: string }>> {
     const findings = new Map<string, { path: string; content: string; source: string }>();
 
-    if (searchTerms.length === 0) { return []; }
+    if (searchTerms.length === 0) {
+        return [];
+    }
 
     // TODO: Semantic search - API not yet available in VS Code
     // const semanticQuery = searchTerms.join(' ');
@@ -315,12 +341,14 @@ async function searchCodebaseForAnswer(
 
     // Grep search for specific terms
     for (const term of searchTerms.slice(0, 3)) {
-        if (token.isCancellationRequested) { break; }
+        if (token.isCancellationRequested) {
+            break;
+        }
         try {
             const files = await vscode.workspace.findFiles(
                 '**/*.{ts,js,json,md,txt}',
                 '**/node_modules/**',
-                5
+                5,
             );
 
             for (const file of files) {
@@ -335,12 +363,16 @@ async function searchCodebaseForAnswer(
                         });
                     }
                 }
-                if (findings.size >= 5) { break; }
+                if (findings.size >= 5) {
+                    break;
+                }
             }
         } catch {
             // Continue
         }
-        if (findings.size >= 5) { break; }
+        if (findings.size >= 5) {
+            break;
+        }
     }
 
     return Array.from(findings.values());
@@ -355,11 +387,11 @@ async function attemptCodebaseResolution(
     contextPacket: ContextPacket,
     workspaceContext: string,
     model: vscode.LanguageModelChat,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
 ): Promise<ResolutionAttempt> {
-    const findingsText = findings.map(f => 
-        `--- ${f.path} (found via ${f.source}) ---\n${f.content}`
-    ).join('\n\n');
+    const findingsText = findings
+        .map((f) => `--- ${f.path} (found via ${f.source}) ---\n${f.content}`)
+        .join('\n\n');
 
     const resolutionPrompt = `You are analyzing codebase files to answer a missing information question.
 
@@ -430,16 +462,20 @@ async function attemptKnowledgeResolution(
     contextPacket: ContextPacket,
     model: vscode.LanguageModelChat,
     token: vscode.CancellationToken,
-    response: vscode.ChatResponseStream
+    response: vscode.ChatResponseStream,
 ): Promise<ResolutionAttempt[]> {
     const attempts: ResolutionAttempt[] = [];
 
-    if (unresolvedQuestions.length === 0) { return attempts; }
+    if (unresolvedQuestions.length === 0) {
+        return attempts;
+    }
 
     response.markdown('🧠 Attempting knowledge resolution (only unambiguous facts)...\n\n');
 
     for (const question of unresolvedQuestions) {
-        if (token.isCancellationRequested) { break; }
+        if (token.isCancellationRequested) {
+            break;
+        }
 
         const knowledgePrompt = `You are attempting to answer a question using ONLY your training knowledge.
 
@@ -487,7 +523,9 @@ Return ONLY valid JSON.`;
             }>(result);
 
             if (parsed && parsed.resolved && parsed.certainty === 'ABSOLUTE' && parsed.answer) {
-                response.markdown(`  ✓ Resolved: "${question.question.substring(0, 60)}..." from training knowledge\n`);
+                response.markdown(
+                    `  ✓ Resolved: "${question.question.substring(0, 60)}..." from training knowledge\n`,
+                );
                 attempts.push({
                     question,
                     resolved: true,
@@ -519,13 +557,18 @@ async function mergeResolvedAnswers(
     contextPacket: ContextPacket,
     resolvedAttempts: ResolutionAttempt[],
     model: vscode.LanguageModelChat,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
 ): Promise<ContextPacket> {
-    if (resolvedAttempts.length === 0) { return contextPacket; }
+    if (resolvedAttempts.length === 0) {
+        return contextPacket;
+    }
 
-    const answersText = resolvedAttempts.map(a => 
-        `Q: ${a.question.question}\nField: ${a.question.field}\nAnswer (from ${a.source}): ${a.answer}`
-    ).join('\n\n');
+    const answersText = resolvedAttempts
+        .map(
+            (a) =>
+                `Q: ${a.question.question}\nField: ${a.question.field}\nAnswer (from ${a.source}): ${a.answer}`,
+        )
+        .join('\n\n');
 
     const mergePrompt = `You are integrating newly discovered information into a context packet.
 
@@ -565,14 +608,14 @@ Return ONLY valid JSON.`;
 async function getLLM(): Promise<vscode.LanguageModelChat | undefined> {
     const models = await vscode.lm.selectChatModels({
         vendor: 'copilot',
-        family: 'gpt-4o'
+        family: 'gpt-4o',
     });
-    
+
     if (models.length === 0) {
         const anyModels = await vscode.lm.selectChatModels();
         return anyModels[0];
     }
-    
+
     return models[0];
 }
 
@@ -580,19 +623,19 @@ async function sendToLLM(
     model: vscode.LanguageModelChat,
     systemPrompt: string,
     userPrompt: string,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
 ): Promise<string> {
     const messages = [
-        vscode.LanguageModelChatMessage.User(systemPrompt + '\n\n---\n\n' + userPrompt)
+        vscode.LanguageModelChatMessage.User(systemPrompt + '\n\n---\n\n' + userPrompt),
     ];
-    
+
     const response = await model.sendRequest(messages, {}, token);
-    
+
     let result = '';
     for await (const chunk of response.text) {
         result += chunk;
     }
-    
+
     return result;
 }
 
@@ -611,7 +654,6 @@ function chunkLargeInput(text: string, chunkSize: number = CHUNK_SIZE): string[]
 
     const chunks: string[] = [];
     let remaining = text;
-    let chunkIndex = 0;
 
     while (remaining.length > 0) {
         if (remaining.length <= chunkSize) {
@@ -637,7 +679,6 @@ function chunkLargeInput(text: string, chunkSize: number = CHUNK_SIZE): string[]
 
         chunks.push(remaining.substring(0, breakPoint));
         remaining = remaining.substring(breakPoint);
-        chunkIndex++;
     }
 
     return chunks;
@@ -652,16 +693,20 @@ async function analyzeChunkedInput(
     input: string,
     workspaceContext: string,
     response: vscode.ChatResponseStream,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
 ): Promise<AnalysisResult | null> {
     const chunks = chunkLargeInput(input);
 
-    response.markdown(`Input is large (${input.length.toLocaleString()} chars) — processing in ${chunks.length} chunks to preserve all information...\n\n`);
+    response.markdown(
+        `Input is large (${input.length.toLocaleString()} chars) — processing in ${chunks.length} chunks to preserve all information...\n\n`,
+    );
 
     const chunkResults: AnalysisResult[] = [];
 
     for (let i = 0; i < chunks.length; i++) {
-        if (token.isCancellationRequested) { return null; }
+        if (token.isCancellationRequested) {
+            return null;
+        }
 
         response.markdown(`Processing chunk ${i + 1}/${chunks.length}...\n`);
 
@@ -683,14 +728,20 @@ ${chunks.length > 1 ? `This is part ${i + 1} of ${chunks.length}. The user's ful
                 chunkResults.push(parsed);
             }
         } catch (err) {
-            response.markdown(`Warning: Chunk ${i + 1} analysis failed: ${err instanceof Error ? err.message : 'Unknown error'}\n`);
+            response.markdown(
+                `Warning: Chunk ${i + 1} analysis failed: ${err instanceof Error ? err.message : 'Unknown error'}\n`,
+            );
         }
     }
 
-    if (chunkResults.length === 0) { return null; }
+    if (chunkResults.length === 0) {
+        return null;
+    }
 
     // If only one chunk, return directly
-    if (chunkResults.length === 1) { return chunkResults[0]; }
+    if (chunkResults.length === 1) {
+        return chunkResults[0];
+    }
 
     // Merge all chunk results
     response.markdown(`Merging ${chunkResults.length} chunk results...\n\n`);
@@ -704,7 +755,7 @@ async function mergeChunkResults(
     model: vscode.LanguageModelChat,
     chunkResults: AnalysisResult[],
     workspaceContext: string,
-    token: vscode.CancellationToken
+    token: vscode.CancellationToken,
 ): Promise<AnalysisResult | null> {
     const mergePrompt = `You are merging multiple analysis results from chunks of a large user request into a single unified context packet.
 
@@ -748,19 +799,25 @@ function manualMergeChunks(chunkResults: AnalysisResult[]): AnalysisResult {
 
     for (const chunk of chunkResults) {
         const cp = chunk.contextPacket;
-        if (cp.goal && !merged.goal) { merged.goal = cp.goal; }
-        else if (cp.goal) { merged.goal += ' ' + cp.goal; }
+        if (cp.goal && !merged.goal) {
+            merged.goal = cp.goal;
+        } else if (cp.goal) {
+            merged.goal += ' ' + cp.goal;
+        }
 
         if (cp.currentState) {
             merged.currentState += (merged.currentState ? '\n' : '') + cp.currentState;
         }
         merged.constraints.push(...cp.constraints);
         merged.inputsArtifacts.push(...cp.inputsArtifacts);
-        if (cp.outputFormat && !merged.outputFormat) { merged.outputFormat = cp.outputFormat; }
+        if (cp.outputFormat && !merged.outputFormat) {
+            merged.outputFormat = cp.outputFormat;
+        }
         merged.successCriteria.push(...cp.successCriteria);
         merged.nonGoals.push(...cp.nonGoals);
         if (cp.additionalContext) {
-            merged.additionalContext += (merged.additionalContext ? '\n\n' : '') + cp.additionalContext;
+            merged.additionalContext +=
+                (merged.additionalContext ? '\n\n' : '') + cp.additionalContext;
         }
         merged.suspectedTranscriptionIssues.push(...(cp.suspectedTranscriptionIssues || []));
 
@@ -835,14 +892,18 @@ Examples:
 - User says "we're using prism for the database" and package.json has "prisma" → resolve to "Prisma", note the correction
 - User says "the flack API" and you're unsure if they mean Flask or Flack → ask in missingInfo: "You mentioned 'flack API' — did you mean Flask (Python web framework) or something else?"
 
-${workspaceContext ? `IMPORTANT - WORKSPACE CONTEXT:
+${
+    workspaceContext
+        ? `IMPORTANT - WORKSPACE CONTEXT:
 The user is working in a specific workspace. Use this context to understand references like project names, paths, and terminology. This is your PRIMARY source for resolving potential transcription errors:
 
 ${workspaceContext}
 
 ---
 
-` : ''}Analyze the user's request and return a JSON object with this EXACT structure:
+`
+        : ''
+}Analyze the user's request and return a JSON object with this EXACT structure:
 {
   "contextPacket": {
     "goal": "The main goal/objective. Preserve all specifics mentioned - if they said 'hooks inspired by WordPress action and filter hooks', include that exact framing.",
@@ -886,15 +947,15 @@ STEP 1 - IDENTIFY AMBIGUITIES (check each category):
 a) **Multiple interpretations**: Does any part of the request have 2+ valid interpretations?
    - Example: "update the dashboard" → which dashboard? (user dashboard, admin panel, analytics view)
    - Example: "add authentication" → OAuth, JWT, session-based, API keys, or combination?
-   
+
 b) **Vague scope boundaries**: Where exactly does the work start/stop?
    - Example: "integrate payment processing" → full checkout flow or just payment capture? refunds? webhooks?
    - Example: "improve performance" → optimize what specific bottleneck? [page load, API response, database queries]
-   
+
 c) **Underspecified behavior**: How should edge cases or alternatives be handled?
    - Example: "validate user input" → what happens on validation failure? [show errors inline, redirect, modal]
    - Example: "sync data between systems" → real-time or batch? conflict resolution strategy?
-   
+
 d) **Missing critical context for decision-making**: What information would materially change the implementation approach?
    - Example: "add search functionality" → full-text search across 1K records or faceted search across millions?
    - Example: User mentions "integrate with the API" without specifying WHICH API (internal vs external, REST vs GraphQL)
@@ -909,7 +970,7 @@ f) **Unclear pronouns or references**: "Add it to that system" - what is "it" an
 STEP 2 - FILTER OUT NON-QUESTIONS:
 DO NOT ask about:
 - Things clearly implied by context ("implement feature X" → obviously need code + tests)
-- Standard practices (file extensions, common patterns)  
+- Standard practices (file extensions, common patterns)
 - Details typically decided during implementation (exact variable names, folder structure for new features)
 - Information that will be automatically resolved (framework compatibility checks, codebase searches)
 - Clarifications where any reasonable choice would work fine
@@ -919,7 +980,7 @@ For each ambiguity that passed Step 2:
 ✓ GOOD: Grounded in their specific request
   "You mentioned updating the user profile page - should this include avatar upload or just text fields?"
   "The notification system you described - should it support email, in-app, or both?"
-  
+
 ✗ BAD: Generic or detached from their context
   "What features do you want?"
   "What programming language?"
@@ -931,7 +992,7 @@ EXAMPLE 1 - User says: "Add a settings page"
 ❌ BAD: "What should the settings page include?" (too generic)
 ✓ GOOD: "You mentioned a settings page - should it manage user preferences, system configuration, or both? Are there specific settings you need (e.g., notifications, privacy, integrations)?"
 
-EXAMPLE 2 - User says: "Make the app work offline"  
+EXAMPLE 2 - User says: "Make the app work offline"
 ❌ BAD: "How should offline mode work?" (too broad)
 ✓ GOOD: "For offline functionality - should users be able to create/edit data offline (requires conflict resolution) or just view previously loaded data?"
 
@@ -986,12 +1047,16 @@ CRITICAL: PRESERVE ALL DISTINCT INFORMATION from the context packet. Your job is
 
 TALK-TO-TEXT NOTE: The context packet was extracted from talk-to-text input. Any transcription corrections are noted in "suspectedTranscriptionIssues". Use the CORRECTED terms throughout the compiled prompt (not the original misheard versions). Do not mention the transcription issues in the compiled prompt itself — they have already been resolved.
 
-${workspaceContext ? `WORKSPACE CONTEXT (include relevant parts in the compiled prompt):
+${
+    workspaceContext
+        ? `WORKSPACE CONTEXT (include relevant parts in the compiled prompt):
 ${workspaceContext}
 
 ---
 
-` : ''}The compiled prompt should:
+`
+        : ''
+}The compiled prompt should:
 1. Start with a clear role definition
 2. Include relevant workspace context (paths, project structure, conventions)
 3. State the goal precisely - preserve all specifics from the context packet
@@ -1026,12 +1091,16 @@ TALK-TO-TEXT AWARENESS: The user's answers are likely dictated via talk-to-text 
 - If you CANNOT confidently resolve a term, add a follow-up question to "missingInfo" with field "transcription".
 - NEVER guess — ask when uncertain.
 
-${workspaceContext ? `WORKSPACE CONTEXT:
+${
+    workspaceContext
+        ? `WORKSPACE CONTEXT:
 ${workspaceContext}
 
 ---
 
-` : ''}Previous context packet:
+`
+        : ''
+}Previous context packet:
 {CONTEXT_PACKET}
 
 Questions that were asked:
@@ -1135,12 +1204,12 @@ function createEmptySession(): Session {
 
 function parseJSON<T>(text: string): T | null {
     let jsonStr = text.trim();
-    
+
     const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (jsonMatch) {
         jsonStr = jsonMatch[1].trim();
     }
-    
+
     try {
         return JSON.parse(jsonStr) as T;
     } catch {
@@ -1158,9 +1227,11 @@ function parseJSON<T>(text: string): T | null {
 
 function looksLikeNewRequest(text: string, session?: Session): boolean {
     const trimmed = text.trim();
-    const lines = trimmed.split('\n').filter(l => l.trim());
-    if (lines.length === 0) return false;
-    
+    const lines = trimmed.split('\n').filter((l) => l.trim());
+    if (lines.length === 0) {
+        return false;
+    }
+
     const firstLine = lines[0].trim();
 
     // If we're waiting for answers, be VERY conservative about treating input as a new request.
@@ -1184,27 +1255,27 @@ function looksLikeNewRequest(text: string, session?: Session): boolean {
     if (answerPattern.test(firstLine)) {
         return false;
     }
-    
+
     const newRequestIndicators = [
         /^(i want|i need|please|help me|create|build|implement|fix|refactor|add|remove|change|update|use your|analyze|design|we need|we have|we are)/i,
         /^(can you|could you|would you|how do i|how can i|what is|let's|lets)/i,
     ];
-    
+
     for (const pattern of newRequestIndicators) {
         if (pattern.test(firstLine)) {
             return true;
         }
     }
-    
+
     // Long messages from IDLE/DONE are likely new requests
     if (trimmed.length > 300) {
         return true;
     }
-    
+
     if (lines.length > 5) {
         return true;
     }
-    
+
     return false;
 }
 
@@ -1274,7 +1345,7 @@ function formatContextPacketMarkdown(packet: ContextPacket): string {
 // ============================================================================
 
 export function activate(context: vscode.ExtensionContext) {
-    console.log('Fugue for GitHub Copilot activated');
+    console.warn('Fugue for GitHub Copilot activated');
 
     // Register the copy command
     const copyCommand = vscode.commands.registerCommand('ramble.copyLast', async () => {
@@ -1294,7 +1365,7 @@ export function activate(context: vscode.ExtensionContext) {
         const lastPrompt = context.workspaceState.get<string>(LAST_PROMPT_KEY);
         if (lastPrompt) {
             await vscode.commands.executeCommand('workbench.action.chat.open', {
-                query: `@johann ${lastPrompt}`
+                query: `@johann ${lastPrompt}`,
             });
         } else {
             vscode.window.showWarningMessage('No compiled prompt available yet.');
@@ -1304,16 +1375,19 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(sendToJohannCommand);
 
     // Register send to Copilot command
-    const sendToCopilotCommand = vscode.commands.registerCommand('ramble.sendToCopilot', async () => {
-        const lastPrompt = context.workspaceState.get<string>(LAST_PROMPT_KEY);
-        if (lastPrompt) {
-            await vscode.commands.executeCommand('workbench.action.chat.open', {
-                query: lastPrompt
-            });
-        } else {
-            vscode.window.showWarningMessage('No compiled prompt available yet.');
-        }
-    });
+    const sendToCopilotCommand = vscode.commands.registerCommand(
+        'ramble.sendToCopilot',
+        async () => {
+            const lastPrompt = context.workspaceState.get<string>(LAST_PROMPT_KEY);
+            if (lastPrompt) {
+                await vscode.commands.executeCommand('workbench.action.chat.open', {
+                    query: lastPrompt,
+                });
+            } else {
+                vscode.window.showWarningMessage('No compiled prompt available yet.');
+            }
+        },
+    );
 
     context.subscriptions.push(sendToCopilotCommand);
 
@@ -1328,121 +1402,357 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(refreshCommand);
 
     // Register the chat participant
-    const participant = vscode.chat.createChatParticipant('ramble', async (
-        request: vscode.ChatRequest,
-        chatContext: vscode.ChatContext,
-        response: vscode.ChatResponseStream,
-        token: vscode.CancellationToken
-    ) => {
-        const userMessage = request.prompt.trim();
+    const participant = vscode.chat.createChatParticipant(
+        'ramble',
+        async (
+            request: vscode.ChatRequest,
+            chatContext: vscode.ChatContext,
+            response: vscode.ChatResponseStream,
+            token: vscode.CancellationToken,
+        ) => {
+            const userMessage = request.prompt.trim();
 
-        // Explicit reset command
-        if (userMessage.toLowerCase() === 'reset' || userMessage.toLowerCase() === 'start over') {
-            await context.workspaceState.update(STATE_KEY, createEmptySession());
-            response.markdown('Session reset. Send me your request and I\'ll compile it into a structured prompt.\n');
-            return;
-        }
+            // Explicit reset command
+            if (
+                userMessage.toLowerCase() === 'reset' ||
+                userMessage.toLowerCase() === 'start over'
+            ) {
+                await context.workspaceState.update(STATE_KEY, createEmptySession());
+                response.markdown(
+                    "Session reset. Send me your request and I'll compile it into a structured prompt.\n",
+                );
+                return;
+            }
 
-        // Refresh context command
-        if (userMessage.toLowerCase() === 'refresh' || userMessage.toLowerCase() === 'refresh context') {
-            response.markdown('Refreshing workspace context...\n');
-            const workspaceCtx = await gatherWorkspaceContext();
-            const formatted = formatWorkspaceContext(workspaceCtx);
-            await context.workspaceState.update(WORKSPACE_CONTEXT_KEY, formatted);
-            response.markdown('✅ Workspace context refreshed! Found:\n');
-            response.markdown(`- Copilot instructions: ${workspaceCtx.copilotInstructions ? 'Yes' : 'No'}\n`);
-            response.markdown(`- READMEs: ${workspaceCtx.readmes.length}\n`);
-            response.markdown(`- Workspace folders: ${vscode.workspace.workspaceFolders?.length || 0}\n`);
-            return;
-        }
+            // Refresh context command
+            if (
+                userMessage.toLowerCase() === 'refresh' ||
+                userMessage.toLowerCase() === 'refresh context'
+            ) {
+                response.markdown('Refreshing workspace context...\n');
+                const workspaceCtx = await gatherWorkspaceContext();
+                const formatted = formatWorkspaceContext(workspaceCtx);
+                await context.workspaceState.update(WORKSPACE_CONTEXT_KEY, formatted);
+                response.markdown('✅ Workspace context refreshed! Found:\n');
+                response.markdown(
+                    `- Copilot instructions: ${workspaceCtx.copilotInstructions ? 'Yes' : 'No'}\n`,
+                );
+                response.markdown(`- READMEs: ${workspaceCtx.readmes.length}\n`);
+                response.markdown(
+                    `- Workspace folders: ${vscode.workspace.workspaceFolders?.length || 0}\n`,
+                );
+                return;
+            }
 
-        // Get LLM
-        const model = await getLLM();
-        if (!model) {
-            response.markdown('**Error:** No language model available. Please ensure Copilot is active.\n');
-            return;
-        }
+            // Get LLM
+            const model = await getLLM();
+            if (!model) {
+                response.markdown(
+                    '**Error:** No language model available. Please ensure Copilot is active.\n',
+                );
+                return;
+            }
 
-        // Get or gather workspace context
-        let workspaceContext = context.workspaceState.get<string>(WORKSPACE_CONTEXT_KEY);
-        if (!workspaceContext) {
-            response.markdown('Gathering workspace context (first run)...\n\n');
-            const workspaceCtx = await gatherWorkspaceContext();
-            workspaceContext = formatWorkspaceContext(workspaceCtx);
-            await context.workspaceState.update(WORKSPACE_CONTEXT_KEY, workspaceContext);
-        }
+            // Get or gather workspace context
+            let workspaceContext = context.workspaceState.get<string>(WORKSPACE_CONTEXT_KEY);
+            if (!workspaceContext) {
+                response.markdown('Gathering workspace context (first run)...\n\n');
+                const workspaceCtx = await gatherWorkspaceContext();
+                workspaceContext = formatWorkspaceContext(workspaceCtx);
+                await context.workspaceState.update(WORKSPACE_CONTEXT_KEY, workspaceContext);
+            }
 
-        // Load or create session
-        let session = context.workspaceState.get<Session>(STATE_KEY) || createEmptySession();
-        session.workspaceContext = workspaceContext;
-
-        // Check if new request while waiting for answers
-        if (session.state === 'WAITING_FOR_ANSWERS' && looksLikeNewRequest(userMessage, session)) {
-            session = createEmptySession();
+            // Load or create session
+            let session = context.workspaceState.get<Session>(STATE_KEY) || createEmptySession();
             session.workspaceContext = workspaceContext;
-        }
 
-        // WAITING_FOR_ANSWERS: Process user answers
-        if (session.state === 'WAITING_FOR_ANSWERS') {
-            response.markdown('Processing your answers...\n\n');
+            // Check if new request while waiting for answers
+            if (
+                session.state === 'WAITING_FOR_ANSWERS' &&
+                looksLikeNewRequest(userMessage, session)
+            ) {
+                session = createEmptySession();
+                session.workspaceContext = workspaceContext;
+            }
 
-            const mergePromptTemplate = getMergePrompt(workspaceContext);
-            const mergePrompt = mergePromptTemplate
-                .replace('{CONTEXT_PACKET}', JSON.stringify(session.contextPacket, null, 2))
-                .replace('{QUESTIONS}', session.pendingQuestions.map(q => `Q${q.index}: ${q.question}`).join('\n'))
-                .replace('{ANSWERS}', userMessage);
+            // WAITING_FOR_ANSWERS: Process user answers
+            if (session.state === 'WAITING_FOR_ANSWERS') {
+                response.markdown('Processing your answers...\n\n');
+
+                const mergePromptTemplate = getMergePrompt(workspaceContext);
+                const mergePrompt = mergePromptTemplate
+                    .replace('{CONTEXT_PACKET}', JSON.stringify(session.contextPacket, null, 2))
+                    .replace(
+                        '{QUESTIONS}',
+                        session.pendingQuestions
+                            .map((q) => `Q${q.index}: ${q.question}`)
+                            .join('\n'),
+                    )
+                    .replace('{ANSWERS}', userMessage);
+
+                try {
+                    const mergeResult = await sendToLLM(model, mergePrompt, '', token);
+                    const parsed = parseJSON<AnalysisResult>(mergeResult);
+
+                    if (!parsed) {
+                        response.markdown(
+                            '**Error:** Failed to process your answers. Please try again or type `reset` to start over.\n',
+                        );
+                        return;
+                    }
+
+                    session.contextPacket = parsed.contextPacket;
+
+                    // Validate and filter missingInfo — drop any entries with undefined fields
+                    const validMissingInfo = (parsed.missingInfo || [])
+                        .filter(
+                            (q): q is PendingQuestion =>
+                                q !== null &&
+                                q !== undefined &&
+                                typeof q.question === 'string' &&
+                                q.question.length > 0 &&
+                                typeof q.field === 'string' &&
+                                q.field.length > 0,
+                        )
+                        .map((q, idx) => ({
+                            ...q,
+                            index: typeof q.index === 'number' ? q.index : idx + 1,
+                        }));
+
+                    // 3-TIER RESOLUTION: Try to resolve missing info before asking user
+                    if (
+                        !parsed.isComplete &&
+                        validMissingInfo.length > 0 &&
+                        session.questionRound < MAX_QUESTION_ROUNDS
+                    ) {
+                        // Tier 1: Codebase analysis
+                        const codebaseAttempts = await analyzeCodebaseForMissingInfo(
+                            validMissingInfo,
+                            session.contextPacket,
+                            workspaceContext,
+                            model,
+                            token,
+                            response,
+                        );
+
+                        // Merge resolved answers into context packet
+                        const codebaseResolved = codebaseAttempts.filter((a) => a.resolved);
+                        if (codebaseResolved.length > 0) {
+                            response.markdown(
+                                `✓ Resolved ${codebaseResolved.length} question(s) from codebase\n\n`,
+                            );
+                            // Update context packet with resolved answers
+                            session.contextPacket = await mergeResolvedAnswers(
+                                session.contextPacket,
+                                codebaseResolved,
+                                model,
+                                token,
+                            );
+                        }
+
+                        // Tier 2: Knowledge resolution (for unresolved questions only)
+                        const unresolvedAfterCodebase = codebaseAttempts
+                            .filter((a) => !a.resolved)
+                            .map((a) => a.question);
+
+                        let stillUnresolved = unresolvedAfterCodebase;
+                        if (unresolvedAfterCodebase.length > 0) {
+                            const knowledgeAttempts = await attemptKnowledgeResolution(
+                                unresolvedAfterCodebase,
+                                session.contextPacket,
+                                model,
+                                token,
+                                response,
+                            );
+
+                            const knowledgeResolved = knowledgeAttempts.filter((a) => a.resolved);
+                            if (knowledgeResolved.length > 0) {
+                                response.markdown(
+                                    `✓ Resolved ${knowledgeResolved.length} question(s) from training knowledge\n\n`,
+                                );
+                                session.contextPacket = await mergeResolvedAnswers(
+                                    session.contextPacket,
+                                    knowledgeResolved,
+                                    model,
+                                    token,
+                                );
+                            }
+
+                            stillUnresolved = knowledgeAttempts
+                                .filter((a) => !a.resolved)
+                                .map((a) => a.question);
+                        }
+
+                        // Tier 3: Ask user (only for still unresolved)
+                        if (stillUnresolved.length > 0) {
+                            session.pendingQuestions = stillUnresolved.map((q, idx) => ({
+                                ...q,
+                                index: idx + 1,
+                            }));
+                            session.questionRound++;
+                            session.state = 'WAITING_FOR_ANSWERS';
+                            await context.workspaceState.update(STATE_KEY, session);
+
+                            response.markdown('I still need a few clarifications:\n\n');
+                            for (const q of session.pendingQuestions) {
+                                response.markdown(`**Q${q.index}:** ${q.question}\n\n`);
+                            }
+                            return;
+                        }
+
+                        // All questions resolved! Continue to compilation
+                    }
+
+                    // Complete - compile the prompt
+                    response.markdown('All information gathered. Compiling your prompt...\n\n');
+
+                    const compileSystemPrompt = getCompilePrompt(workspaceContext);
+                    const compileUserPrompt = `Context Packet:\n${JSON.stringify(session.contextPacket, null, 2)}\n\nOriginal Request:\n${session.rawRamble}`;
+                    const compiledPrompt = await sendToLLM(
+                        model,
+                        compileSystemPrompt,
+                        compileUserPrompt,
+                        token,
+                    );
+
+                    await context.workspaceState.update(LAST_PROMPT_KEY, compiledPrompt);
+                    session.state = 'DONE';
+                    await context.workspaceState.update(STATE_KEY, session);
+
+                    response.markdown(formatContextPacketMarkdown(session.contextPacket));
+                    response.markdown(
+                        '\n---\n\n## Compiled Prompt\n\n```text\n' + compiledPrompt + '\n```\n\n',
+                    );
+                    response.button({
+                        command: 'ramble.copyLast',
+                        title: '📋 Copy prompt',
+                    });
+                    response.button({
+                        command: 'ramble.sendToJohann',
+                        title: '🤖 Send to @johann',
+                    });
+                    response.button({
+                        command: 'ramble.sendToCopilot',
+                        title: '💬 Send to Copilot',
+                    });
+                    return { metadata: { compiled: true, prompt: compiledPrompt } };
+                } catch (err) {
+                    response.markdown(
+                        `**Error:** ${err instanceof Error ? err.message : 'Unknown error'}\n`,
+                    );
+                    return;
+                }
+            }
+
+            // NEW REQUEST: Analyze the user request
+            session = createEmptySession();
+            session.rawRamble = userMessage;
+            session.workspaceContext = workspaceContext;
+            session.state = 'IDLE';
+
+            // Check input size and warn if extremely large
+            if (userMessage.length > MAX_INPUT_SIZE) {
+                response.markdown(
+                    `⚠️ Input is very large (${userMessage.length.toLocaleString()} chars). Truncating to ${MAX_INPUT_SIZE.toLocaleString()} chars to stay within processing limits.\n\n`,
+                );
+                session.rawRamble = userMessage.substring(0, MAX_INPUT_SIZE);
+            }
+
+            response.markdown('Analyzing your request...\n\n');
 
             try {
-                const mergeResult = await sendToLLM(model, mergePrompt, '', token);
-                const parsed = parseJSON<AnalysisResult>(mergeResult);
+                let parsed: AnalysisResult | null;
+
+                // Use chunked analysis for large inputs
+                if (session.rawRamble.length > LARGE_INPUT_THRESHOLD) {
+                    parsed = await analyzeChunkedInput(
+                        model,
+                        session.rawRamble,
+                        workspaceContext,
+                        response,
+                        token,
+                    );
+                } else {
+                    const analysisPrompt = getAnalysisPrompt(workspaceContext);
+                    const analysisResult = await sendToLLM(
+                        model,
+                        analysisPrompt,
+                        session.rawRamble,
+                        token,
+                    );
+                    parsed = parseJSON<AnalysisResult>(analysisResult);
+
+                    if (!parsed) {
+                        response.markdown(
+                            '**Error:** Failed to analyze your request. Please try again.\n',
+                        );
+                        response.markdown(
+                            '\n*Debug info:*\n```\n' + analysisResult.substring(0, 500) + '\n```\n',
+                        );
+                        return;
+                    }
+                }
 
                 if (!parsed) {
-                    response.markdown('**Error:** Failed to process your answers. Please try again or type `reset` to start over.\n');
+                    response.markdown(
+                        '**Error:** Failed to analyze your request. Please try again.\n',
+                    );
                     return;
                 }
 
                 session.contextPacket = parsed.contextPacket;
 
-                // Validate and filter missingInfo — drop any entries with undefined fields
-                let validMissingInfo = (parsed.missingInfo || []).filter(
-                    (q): q is PendingQuestion =>
-                        q != null &&
-                        typeof q.question === 'string' && q.question.length > 0 &&
-                        typeof q.field === 'string' && q.field.length > 0
-                ).map((q, idx) => ({
-                    ...q,
-                    index: typeof q.index === 'number' ? q.index : idx + 1,
-                }));
+                // Show what was extracted
+                response.markdown(formatContextPacketMarkdown(parsed.contextPacket));
+
+                // Validate missingInfo — drop entries with undefined/empty fields
+                const validMissing = (parsed.missingInfo || [])
+                    .filter(
+                        (q): q is PendingQuestion =>
+                            q !== null &&
+                            q !== undefined &&
+                            typeof q.question === 'string' &&
+                            q.question.length > 0 &&
+                            typeof q.field === 'string' &&
+                            q.field.length > 0,
+                    )
+                    .map((q, idx) => ({
+                        ...q,
+                        index: typeof q.index === 'number' ? q.index : idx + 1,
+                    }));
 
                 // 3-TIER RESOLUTION: Try to resolve missing info before asking user
-                if (!parsed.isComplete && validMissingInfo.length > 0 && session.questionRound < MAX_QUESTION_ROUNDS) {
+                if (!parsed.isComplete && validMissing.length > 0) {
+                    response.markdown('\n---\n\n');
+
                     // Tier 1: Codebase analysis
                     const codebaseAttempts = await analyzeCodebaseForMissingInfo(
-                        validMissingInfo,
+                        validMissing,
                         session.contextPacket,
                         workspaceContext,
                         model,
                         token,
-                        response
+                        response,
                     );
 
                     // Merge resolved answers into context packet
-                    const codebaseResolved = codebaseAttempts.filter(a => a.resolved);
+                    const codebaseResolved = codebaseAttempts.filter((a) => a.resolved);
                     if (codebaseResolved.length > 0) {
-                        response.markdown(`✓ Resolved ${codebaseResolved.length} question(s) from codebase\n\n`);
-                        // Update context packet with resolved answers
+                        response.markdown(
+                            `✓ Resolved ${codebaseResolved.length} question(s) from codebase\n\n`,
+                        );
                         session.contextPacket = await mergeResolvedAnswers(
                             session.contextPacket,
                             codebaseResolved,
                             model,
-                            token
+                            token,
                         );
                     }
 
                     // Tier 2: Knowledge resolution (for unresolved questions only)
                     const unresolvedAfterCodebase = codebaseAttempts
-                        .filter(a => !a.resolved)
-                        .map(a => a.question);
+                        .filter((a) => !a.resolved)
+                        .map((a) => a.question);
 
                     let stillUnresolved = unresolvedAfterCodebase;
                     if (unresolvedAfterCodebase.length > 0) {
@@ -1451,23 +1761,25 @@ export function activate(context: vscode.ExtensionContext) {
                             session.contextPacket,
                             model,
                             token,
-                            response
+                            response,
                         );
 
-                        const knowledgeResolved = knowledgeAttempts.filter(a => a.resolved);
+                        const knowledgeResolved = knowledgeAttempts.filter((a) => a.resolved);
                         if (knowledgeResolved.length > 0) {
-                            response.markdown(`✓ Resolved ${knowledgeResolved.length} question(s) from training knowledge\n\n`);
+                            response.markdown(
+                                `✓ Resolved ${knowledgeResolved.length} question(s) from training knowledge\n\n`,
+                            );
                             session.contextPacket = await mergeResolvedAnswers(
                                 session.contextPacket,
                                 knowledgeResolved,
                                 model,
-                                token
+                                token,
                             );
                         }
 
                         stillUnresolved = knowledgeAttempts
-                            .filter(a => !a.resolved)
-                            .map(a => a.question);
+                            .filter((a) => !a.resolved)
+                            .map((a) => a.question);
                     }
 
                     // Tier 3: Ask user (only for still unresolved)
@@ -1476,33 +1788,41 @@ export function activate(context: vscode.ExtensionContext) {
                             ...q,
                             index: idx + 1,
                         }));
-                        session.questionRound++;
+                        session.questionRound = 1;
                         session.state = 'WAITING_FOR_ANSWERS';
                         await context.workspaceState.update(STATE_KEY, session);
 
-                        response.markdown('I still need a few clarifications:\n\n');
+                        response.markdown('**I still need a few clarifications:**\n\n');
                         for (const q of session.pendingQuestions) {
                             response.markdown(`**Q${q.index}:** ${q.question}\n\n`);
                         }
+                        response.markdown(
+                            "\nJust reply with your answers - I'll figure out which question each answer is for.\n",
+                        );
                         return;
                     }
 
                     // All questions resolved! Continue to compilation
+                    response.markdown('✓ All questions resolved automatically!\n\n');
                 }
 
-                // Complete - compile the prompt
-                response.markdown('All information gathered. Compiling your prompt...\n\n');
+                // Complete - compile immediately
+                response.markdown('\n---\n\nCompiling your prompt...\n\n');
 
                 const compileSystemPrompt = getCompilePrompt(workspaceContext);
                 const compileUserPrompt = `Context Packet:\n${JSON.stringify(session.contextPacket, null, 2)}\n\nOriginal Request:\n${session.rawRamble}`;
-                const compiledPrompt = await sendToLLM(model, compileSystemPrompt, compileUserPrompt, token);
+                const compiledPrompt = await sendToLLM(
+                    model,
+                    compileSystemPrompt,
+                    compileUserPrompt,
+                    token,
+                );
 
                 await context.workspaceState.update(LAST_PROMPT_KEY, compiledPrompt);
                 session.state = 'DONE';
                 await context.workspaceState.update(STATE_KEY, session);
 
-                response.markdown(formatContextPacketMarkdown(session.contextPacket));
-                response.markdown('\n---\n\n## Compiled Prompt\n\n```text\n' + compiledPrompt + '\n```\n\n');
+                response.markdown('## Compiled Prompt\n\n```text\n' + compiledPrompt + '\n```\n\n');
                 response.button({
                     command: 'ramble.copyLast',
                     title: '📋 Copy prompt',
@@ -1515,183 +1835,15 @@ export function activate(context: vscode.ExtensionContext) {
                     command: 'ramble.sendToCopilot',
                     title: '💬 Send to Copilot',
                 });
+
                 return { metadata: { compiled: true, prompt: compiledPrompt } };
-
             } catch (err) {
-                response.markdown(`**Error:** ${err instanceof Error ? err.message : 'Unknown error'}\n`);
-                return;
-            }
-        }
-
-        // NEW REQUEST: Analyze the user request
-        session = createEmptySession();
-        session.rawRamble = userMessage;
-        session.workspaceContext = workspaceContext;
-        session.state = 'IDLE';
-
-        // Check input size and warn if extremely large
-        if (userMessage.length > MAX_INPUT_SIZE) {
-            response.markdown(`⚠️ Input is very large (${userMessage.length.toLocaleString()} chars). Truncating to ${MAX_INPUT_SIZE.toLocaleString()} chars to stay within processing limits.\n\n`);
-            session.rawRamble = userMessage.substring(0, MAX_INPUT_SIZE);
-        }
-
-        response.markdown('Analyzing your request...\n\n');
-
-        try {
-            let parsed: AnalysisResult | null;
-
-            // Use chunked analysis for large inputs
-            if (session.rawRamble.length > LARGE_INPUT_THRESHOLD) {
-                parsed = await analyzeChunkedInput(
-                    model,
-                    session.rawRamble,
-                    workspaceContext,
-                    response,
-                    token
+                response.markdown(
+                    `**Error:** ${err instanceof Error ? err.message : 'Unknown error'}\n`,
                 );
-            } else {
-                const analysisPrompt = getAnalysisPrompt(workspaceContext);
-                const analysisResult = await sendToLLM(model, analysisPrompt, session.rawRamble, token);
-                parsed = parseJSON<AnalysisResult>(analysisResult);
-
-                if (!parsed) {
-                    response.markdown('**Error:** Failed to analyze your request. Please try again.\n');
-                    response.markdown('\n*Debug info:*\n```\n' + analysisResult.substring(0, 500) + '\n```\n');
-                    return;
-                }
             }
-
-            if (!parsed) {
-                response.markdown('**Error:** Failed to analyze your request. Please try again.\n');
-                return;
-            }
-
-            session.contextPacket = parsed.contextPacket;
-
-            // Show what was extracted
-            response.markdown(formatContextPacketMarkdown(parsed.contextPacket));
-
-            // Validate missingInfo — drop entries with undefined/empty fields
-            let validMissing = (parsed.missingInfo || []).filter(
-                (q): q is PendingQuestion =>
-                    q != null &&
-                    typeof q.question === 'string' && q.question.length > 0 &&
-                    typeof q.field === 'string' && q.field.length > 0
-            ).map((q, idx) => ({
-                ...q,
-                index: typeof q.index === 'number' ? q.index : idx + 1,
-            }));
-
-            // 3-TIER RESOLUTION: Try to resolve missing info before asking user
-            if (!parsed.isComplete && validMissing.length > 0) {
-                response.markdown('\n---\n\n');
-
-                // Tier 1: Codebase analysis
-                const codebaseAttempts = await analyzeCodebaseForMissingInfo(
-                    validMissing,
-                    session.contextPacket,
-                    workspaceContext,
-                    model,
-                    token,
-                    response
-                );
-
-                // Merge resolved answers into context packet
-                const codebaseResolved = codebaseAttempts.filter(a => a.resolved);
-                if (codebaseResolved.length > 0) {
-                    response.markdown(`✓ Resolved ${codebaseResolved.length} question(s) from codebase\n\n`);
-                    session.contextPacket = await mergeResolvedAnswers(
-                        session.contextPacket,
-                        codebaseResolved,
-                        model,
-                        token
-                    );
-                }
-
-                // Tier 2: Knowledge resolution (for unresolved questions only)
-                const unresolvedAfterCodebase = codebaseAttempts
-                    .filter(a => !a.resolved)
-                    .map(a => a.question);
-
-                let stillUnresolved = unresolvedAfterCodebase;
-                if (unresolvedAfterCodebase.length > 0) {
-                    const knowledgeAttempts = await attemptKnowledgeResolution(
-                        unresolvedAfterCodebase,
-                        session.contextPacket,
-                        model,
-                        token,
-                        response
-                    );
-
-                    const knowledgeResolved = knowledgeAttempts.filter(a => a.resolved);
-                    if (knowledgeResolved.length > 0) {
-                        response.markdown(`✓ Resolved ${knowledgeResolved.length} question(s) from training knowledge\n\n`);
-                        session.contextPacket = await mergeResolvedAnswers(
-                            session.contextPacket,
-                            knowledgeResolved,
-                            model,
-                            token
-                        );
-                    }
-
-                    stillUnresolved = knowledgeAttempts
-                        .filter(a => !a.resolved)
-                        .map(a => a.question);
-                }
-
-                // Tier 3: Ask user (only for still unresolved)
-                if (stillUnresolved.length > 0) {
-                    session.pendingQuestions = stillUnresolved.map((q, idx) => ({
-                        ...q,
-                        index: idx + 1,
-                    }));
-                    session.questionRound = 1;
-                    session.state = 'WAITING_FOR_ANSWERS';
-                    await context.workspaceState.update(STATE_KEY, session);
-
-                    response.markdown('**I still need a few clarifications:**\n\n');
-                    for (const q of session.pendingQuestions) {
-                        response.markdown(`**Q${q.index}:** ${q.question}\n\n`);
-                    }
-                    response.markdown('\nJust reply with your answers - I\'ll figure out which question each answer is for.\n');
-                    return;
-                }
-
-                // All questions resolved! Continue to compilation
-                response.markdown('✓ All questions resolved automatically!\n\n');
-            }
-
-            // Complete - compile immediately
-            response.markdown('\n---\n\nCompiling your prompt...\n\n');
-
-            const compileSystemPrompt = getCompilePrompt(workspaceContext);
-            const compileUserPrompt = `Context Packet:\n${JSON.stringify(session.contextPacket, null, 2)}\n\nOriginal Request:\n${session.rawRamble}`;
-            const compiledPrompt = await sendToLLM(model, compileSystemPrompt, compileUserPrompt, token);
-
-            await context.workspaceState.update(LAST_PROMPT_KEY, compiledPrompt);
-            session.state = 'DONE';
-            await context.workspaceState.update(STATE_KEY, session);
-
-            response.markdown('## Compiled Prompt\n\n```text\n' + compiledPrompt + '\n```\n\n');
-            response.button({
-                command: 'ramble.copyLast',
-                title: '📋 Copy prompt',
-            });
-            response.button({
-                command: 'ramble.sendToJohann',
-                title: '🤖 Send to @johann',
-            });
-            response.button({
-                command: 'ramble.sendToCopilot',
-                title: '💬 Send to Copilot',
-            });
-
-            return { metadata: { compiled: true, prompt: compiledPrompt } };
-
-        } catch (err) {
-            response.markdown(`**Error:** ${err instanceof Error ? err.message : 'Unknown error'}\n`);
-        }
-    });
+        },
+    );
 
     // Note: Followup provider removed - buttons are now shown after prompt compilation instead
 
@@ -1703,7 +1855,7 @@ export function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(d);
     }
 
-    console.log('Johann orchestration agent activated');
+    console.warn('Johann orchestration agent activated');
 }
 
 export function deactivate() {

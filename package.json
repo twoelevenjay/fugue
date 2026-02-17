@@ -1,457 +1,457 @@
 {
-  "name": "fugue",
-  "displayName": "Fugue for GitHub Copilot",
-  "description": "Multi-agent AI workflow layer for GitHub Copilot with @ramble (prompt compiler) and @johann (orchestration agent)",
-  "version": "0.0.1",
-  "engines": {
-    "vscode": "^1.108.1"
-  },
-  "categories": [
-    "Chat"
-  ],
-  "keywords": [
-    "copilot",
-    "github copilot",
-    "chat",
-    "prompt",
-    "AI",
-    "productivity"
-  ],
-  "license": "MIT",
-  "publisher": "leonshelhamer",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/leonshelhamer/fugue"
-  },
-  "bugs": {
-    "url": "https://github.com/leonshelhamer/fugue/issues"
-  },
-  "homepage": "https://github.com/leonshelhamer/fugue#readme",
-  "activationEvents": [
-    "onChatParticipant:ramble",
-    "onChatParticipant:johann"
-  ],
-  "main": "./out/extension.js",
-  "contributes": {
-    "chatParticipants": [
-      {
-        "id": "ramble",
-        "name": "ramble",
-        "fullName": "Fugue — Prompt Compiler",
-        "description": "Converts rough requests into structured, high-context prompts",
-        "isSticky": true
-      },
-      {
-        "id": "johann",
-        "name": "johann",
-        "fullName": "Johann — Orchestration Agent",
-        "description": "Orchestration agent for GitHub Copilot. Decomposes tasks, selects models, spawns subagents, and manages long-running workflows.",
-        "isSticky": true
-      }
+    "name": "fugue",
+    "displayName": "Fugue for GitHub Copilot",
+    "description": "Multi-agent AI workflow layer for GitHub Copilot with @ramble (prompt compiler) and @johann (orchestration agent)",
+    "version": "0.0.1",
+    "engines": {
+        "vscode": "^1.108.1"
+    },
+    "categories": [
+        "Chat"
     ],
-    "commands": [
-      {
-        "command": "ramble.copyLast",
-        "title": "Fugue: Copy Last Compiled Prompt"
-      },
-      {
-        "command": "ramble.refreshContext",
-        "title": "Fugue: Refresh Workspace Context"
-      },
-      {
-        "command": "johann.showMemory",
-        "title": "Johann: Show Memory Files"
-      },
-      {
-        "command": "johann.clearMemory",
-        "title": "Johann: Clear Memory"
-      },
-      {
-        "command": "johann.showLog",
-        "title": "Johann: Show Log Output"
-      },
-      {
-        "command": "johann.showDebugLog",
-        "title": "Johann: Open Debug Log"
-      },
-      {
-        "command": "johann.showModelDiagnostics",
-        "title": "Johann: Show Model Diagnostics"
-      },
-      {
-        "command": "johann.disableModelPicker",
-        "title": "Johann: Disable Model Picker (Use Fixed Model)"
-      },
-      {
-        "command": "johann.enableModelPicker",
-        "title": "Johann: Enable Model Picker"
-      },
-      {
-        "command": "johann.showBackgroundTasks",
-        "title": "Johann: Show Background Tasks"
-      },
-      {
-        "command": "johann.showTaskStatus",
-        "title": "Johann: Show Task Status"
-      },
-      {
-        "command": "johann.cancelTask",
-        "title": "Johann: Cancel Background Task"
-      },
-      {
-        "command": "johann.clearCompletedTasks",
-        "title": "Johann: Clear Completed Tasks"
-      }
+    "keywords": [
+        "copilot",
+        "github copilot",
+        "chat",
+        "prompt",
+        "AI",
+        "productivity"
     ],
-    "configuration": {
-      "title": "Fugue — Johann Orchestration Settings",
-      "properties": {
-        "johann.maxSubtasks": {
-          "type": "number",
-          "default": 10,
-          "minimum": 1,
-          "maximum": 50,
-          "order": 10,
-          "description": "Maximum number of subtasks per orchestration plan.",
-          "markdownDescription": "Maximum number of subtasks Johann can create per orchestration plan. Lower values reduce request volume; higher values improve decomposition for large tasks."
-        },
-        "johann.maxAttempts": {
-          "type": "number",
-          "default": 3,
-          "minimum": 1,
-          "maximum": 10,
-          "order": 20,
-          "description": "Maximum attempts per subtask before giving up.",
-          "markdownDescription": "Retry/escalation attempts per subtask before Johann marks it failed."
-        },
-        "johann.allowParallel": {
-          "type": "boolean",
-          "default": true,
-          "order": 30,
-          "description": "Allow parallel execution of independent subtasks."
-        },
-        "johann.useWorktrees": {
-          "type": "boolean",
-          "default": true,
-          "order": 40,
-          "description": "Use git worktrees to isolate parallel subtasks. Each parallel subtask gets its own working directory on a temporary branch, preventing file conflicts. Changes are merged back sequentially after execution. Requires git and a git repository. Falls back gracefully if unavailable."
-        },
-        "johann.backgroundModeEnabled": {
-          "type": "boolean",
-          "default": false,
-          "order": 50,
-          "description": "Enable background execution mode.",
-          "markdownDescription": "Run orchestrations asynchronously without blocking chat. Recommended for large jobs."
-        },
-        "johann.toolInvocationTimeoutMs": {
-          "type": "number",
-          "default": 120000,
-          "minimum": 5000,
-          "maximum": 900000,
-          "order": 60,
-          "description": "Timeout for each subagent tool invocation (milliseconds).",
-          "markdownDescription": "Prevents hangs when tools block indefinitely. Applies to tool calls like terminal and wait operations."
-        },
-        "johann.autoBackgroundLongRunningCommands": {
-          "type": "boolean",
-          "default": true,
-          "order": 70,
-          "description": "Auto-run likely long-running terminal commands in background mode.",
-          "markdownDescription": "When enabled, Johann rewrites likely long-running `run_in_terminal` calls to `isBackground: true` to avoid blocking the orchestration loop."
-        },
-        "johann.yoloMaxRequests": {
-          "type": "number",
-          "default": 200,
-          "minimum": 30,
-          "maximum": 1000,
-          "order": 80,
-          "description": "Target Copilot maxRequests value when `/yolo on` is used.",
-          "markdownDescription": "When you run `/yolo on`, Johann sets `github.copilot.chat.agent.maxRequests` to this value."
-        },
-        "johann.memoryDir": {
-          "type": "string",
-          "default": ".vscode/johann",
-          "order": 90,
-          "description": "Memory directory relative to workspace root."
-        },
-        "johann.maxBootstrapChars": {
-          "type": "number",
-          "default": 15000,
-          "minimum": 2000,
-          "maximum": 200000,
-          "order": 100,
-          "description": "Maximum characters for bootstrap context in system prompt."
-        },
-        "johann.maxDailyNoteEntries": {
-          "type": "number",
-          "default": 100,
-          "minimum": 10,
-          "maximum": 1000,
-          "order": 110,
-          "description": "Maximum daily-note entries before compaction."
-        },
-        "johann.maxTranscriptBytes": {
-          "type": "number",
-          "default": 1000000,
-          "minimum": 100000,
-          "maximum": 10000000,
-          "order": 120,
-          "description": "Maximum transcript file size in bytes before rotation."
-        },
-        "johann.heartbeatEnabled": {
-          "type": "boolean",
-          "default": false,
-          "order": 130,
-          "description": "Enable periodic heartbeat self-checks."
-        },
-        "johann.heartbeatIntervalMinutes": {
-          "type": "number",
-          "default": 15,
-          "minimum": 1,
-          "maximum": 1440,
-          "order": 140,
-          "description": "Heartbeat interval in minutes."
-        },
-        "johann.transcriptsEnabled": {
-          "type": "boolean",
-          "default": true,
-          "order": 150,
-          "description": "Record session transcripts as JSONL files."
-        },
-        "johann.logLevel": {
-          "type": "string",
-          "enum": [
-            "debug",
-            "info",
-            "warn",
-            "error"
-          ],
-          "default": "info",
-          "order": 160,
-          "description": "Log level for the Johann output channel."
-        },
-        "johann.onboardingEnabled": {
-          "type": "boolean",
-          "default": true,
-          "order": 170,
-          "description": "Show onboarding on first run."
-        },
-        "johann.autoDistill": {
-          "type": "boolean",
-          "default": true,
-          "order": 180,
-          "description": "Auto-distill daily notes into MEMORY.md during heartbeats."
-        },
-        "johann.promptMode": {
-          "type": "string",
-          "enum": [
-            "full",
-            "minimal",
-            "none"
-          ],
-          "default": "full",
-          "order": 190,
-          "description": "System prompt assembly mode. Full = all sections, minimal = reduced for subagents, none = bare."
-        },
-        "johann.largeInputChunkSize": {
-          "type": "number",
-          "default": 8000,
-          "minimum": 1000,
-          "maximum": 100000,
-          "order": 200,
-          "description": "Character count threshold for chunking large inputs. Inputs exceeding this size are processed in chunks to prevent information loss."
-        },
-        "johann.maxInputSize": {
-          "type": "number",
-          "default": 100000,
-          "minimum": 10000,
-          "maximum": 1000000,
-          "order": 210,
-          "description": "Maximum input size in characters. Inputs exceeding this are truncated with a warning."
-        },
-        "johann.debugConversationLog": {
-          "type": "boolean",
-          "default": true,
-          "order": 220,
-          "description": "Write full LLM conversation logs to .vscode/johann/debug/ for debugging hangs and errors."
-        },
-        "johann.modelPickerEnabled": {
-          "type": "boolean",
-          "default": true,
-          "order": 230,
-          "description": "Enable intelligent model picker. When disabled, Johann uses the fixed model specified in johann.fixedModel."
-        },
-        "johann.fixedModel": {
-          "type": "string",
-          "default": "",
-          "enum": [
-            "",
-            "gpt-5-mini",
-            "gpt-4.1",
-            "gpt-4o",
-            "raptor-mini",
-            "grok-fast",
-            "claude-haiku",
-            "gemini-flash",
-            "gpt-5.1-codex-mini",
-            "claude-sonnet-4.5",
-            "claude-sonnet-4",
-            "gemini-2.5-pro",
-            "gemini-3-pro",
-            "gpt-5.3-codex",
-            "gpt-5.2-codex",
-            "gpt-5.1-codex",
-            "gpt-5.2",
-            "gpt-5.1",
-            "gpt-5",
-            "gpt-5-codex",
-            "claude-opus-4.6",
-            "claude-opus-4.5",
-            "claude-opus-4.1",
-            "o1-pro"
-          ],
-          "order": 240,
-          "description": "Model to use when model picker is disabled. Leave empty to use first available model.",
-          "markdownEnumDescriptions": [
-            "Auto-select first available model",
-            "GPT-5 Mini",
-            "GPT-4.1",
-            "GPT-4o",
-            "Raptor Mini",
-            "Grok Fast",
-            "Claude Haiku",
-            "Gemini Flash",
-            "GPT-5.1 Codex Mini",
-            "Claude Sonnet 4.5",
-            "Claude Sonnet 4",
-            "Gemini 2.5 Pro",
-            "Gemini 3 Pro",
-            "GPT-5.3 Codex",
-            "GPT-5.2 Codex",
-            "GPT-5.1 Codex",
-            "GPT-5.2",
-            "GPT-5.1",
-            "GPT-5",
-            "GPT-5 Codex",
-            "Claude Opus 4.6",
-            "Claude Opus 4.5",
-            "Claude Opus 4.1",
-            "O1 Pro"
-          ]
-        },
-        "johann.blockedModels": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "gpt-5-mini",
-              "gpt-4.1",
-              "gpt-4o",
-              "raptor-mini",
-              "grok-fast",
-              "claude-haiku",
-              "gemini-flash",
-              "gpt-5.1-codex-mini",
-              "claude-sonnet-4.5",
-              "claude-sonnet-4",
-              "gemini-2.5-pro",
-              "gemini-3-pro",
-              "gpt-5.3-codex",
-              "gpt-5.2-codex",
-              "gpt-5.1-codex",
-              "gpt-5.2",
-              "gpt-5.1",
-              "gpt-5",
-              "gpt-5-codex",
-              "claude-opus-4.6",
-              "claude-opus-4.5",
-              "claude-opus-4.1",
-              "o1-pro"
-            ]
-          },
-          "default": [],
-          "order": 250,
-          "description": "List of blocked models. If empty, all discovered models are allowed.",
-          "markdownDescription": "Select models to block from Johann. Any selected item is treated as a pattern and excluded. If this list is empty, Johann allows all discovered models."
-        },
-        "johann.allowOpusEscalation": {
-          "type": "boolean",
-          "default": false,
-          "order": 270,
-          "description": "Allow Opus and O1-Pro models (3× or higher cost). When disabled (default), these models are completely hidden — they won't appear in model lists, won't be selected for any task, and won't be escalated to.",
-          "markdownDescription": "**Allow expensive Opus models (3× or higher cost).**\n\nWhen **disabled** (default):\n- Claude Opus 4.1/4.5/4.6 and O1-Pro are completely hidden\n- They won't appear in model lists or diagnostics\n- They won't be selected for any task complexity\n- They won't be escalated to when cheaper models fail\n\nWhen **enabled**:\n- Opus models become available for selection and escalation\n- Johann may use them for `expert` complexity tasks or when all cheaper models fail\n\n⚠️ Only enable if you explicitly want to use premium-tier models."
-        },
-        "johann.delegationMode": {
-          "type": "string",
-          "enum": [
-            "johann-only",
-            "allow-model",
-            "no-delegation"
-          ],
-          "default": "johann-only",
-          "order": 280,
-          "description": "Delegation policy mode. Controls how subagent spawning is managed.",
-          "markdownDescription": "**Delegation policy mode** — controls how Johann manages subagent spawning.\n\n- **johann-only** (default): Only Johann delegates. Subagents are pure leaf executors that MUST NOT spawn further agents. Safest mode.\n- **allow-model**: The underlying LLM may use its own subagent features. Johann still enforces depth and parallelism limits.\n- **no-delegation**: No subagents at all. All tasks run serially in a single pass. Budget-safe mode.",
-          "markdownEnumDescriptions": [
-            "Only Johann delegates. Subagents are leaf executors. (Default, safest)",
-            "LLM may use native delegation, but Johann enforces limits.",
-            "No subagents at all. Serial execution only. Budget-safe."
-          ]
-        },
-        "johann.delegationMaxDepth": {
-          "type": "number",
-          "default": 1,
-          "minimum": 0,
-          "maximum": 5,
-          "order": 290,
-          "description": "Maximum delegation recursion depth. 1 = subagents only (default), 2 = sub-subagents allowed.",
-          "markdownDescription": "Maximum delegation recursion depth.\n\n- **1** (default): Johann spawns subagents, but subagents cannot spawn further agents.\n- **2**: Sub-subagents are allowed (power-user mode).\n- **0**: No delegation (same as `no-delegation` mode).\n\nClamped to 1 in `johann-only` mode."
-        },
-        "johann.delegationMaxParallel": {
-          "type": "number",
-          "default": 3,
-          "minimum": 0,
-          "maximum": 20,
-          "order": 300,
-          "description": "Maximum concurrent subagents. Caps how many subagents can run in parallel.",
-          "markdownDescription": "Maximum number of concurrent subagents.\n\n- **3** (default): Up to 3 subagents run in parallel per wave.\n- **0**: No parallel execution (serial only).\n- Higher values increase throughput but also LLM request volume.\n\nWorks in conjunction with `johann.allowParallel`."
-        },
-        "johann.delegationRunawayThreshold": {
-          "type": "number",
-          "default": 5,
-          "minimum": 1,
-          "maximum": 50,
-          "order": 310,
-          "description": "Runaway detection threshold. Number of delegation-signal phrases in subagent output before freezing delegation.",
-          "markdownDescription": "**Runaway detection threshold.**\n\nIn `johann-only` mode, Johann monitors subagent output for phrases that indicate the model is trying to self-delegate (e.g., \"spawn subagent\", \"delegate task\"). If this threshold is exceeded, delegation is **frozen** for the remainder of the session.\n\n- **5** (default): Freeze after 5 delegation signals.\n- Lower values are stricter. Higher values are more tolerant."
+    "license": "MIT",
+    "publisher": "leonshelhamer",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/leonshelhamer/fugue"
+    },
+    "bugs": {
+        "url": "https://github.com/leonshelhamer/fugue/issues"
+    },
+    "homepage": "https://github.com/leonshelhamer/fugue#readme",
+    "activationEvents": [
+        "onChatParticipant:ramble",
+        "onChatParticipant:johann"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "chatParticipants": [
+            {
+                "id": "ramble",
+                "name": "ramble",
+                "fullName": "Fugue — Prompt Compiler",
+                "description": "Converts rough requests into structured, high-context prompts",
+                "isSticky": true
+            },
+            {
+                "id": "johann",
+                "name": "johann",
+                "fullName": "Johann — Orchestration Agent",
+                "description": "Orchestration agent for GitHub Copilot. Decomposes tasks, selects models, spawns subagents, and manages long-running workflows.",
+                "isSticky": true
+            }
+        ],
+        "commands": [
+            {
+                "command": "ramble.copyLast",
+                "title": "Fugue: Copy Last Compiled Prompt"
+            },
+            {
+                "command": "ramble.refreshContext",
+                "title": "Fugue: Refresh Workspace Context"
+            },
+            {
+                "command": "johann.showMemory",
+                "title": "Johann: Show Memory Files"
+            },
+            {
+                "command": "johann.clearMemory",
+                "title": "Johann: Clear Memory"
+            },
+            {
+                "command": "johann.showLog",
+                "title": "Johann: Show Log Output"
+            },
+            {
+                "command": "johann.showDebugLog",
+                "title": "Johann: Open Debug Log"
+            },
+            {
+                "command": "johann.showModelDiagnostics",
+                "title": "Johann: Show Model Diagnostics"
+            },
+            {
+                "command": "johann.disableModelPicker",
+                "title": "Johann: Disable Model Picker (Use Fixed Model)"
+            },
+            {
+                "command": "johann.enableModelPicker",
+                "title": "Johann: Enable Model Picker"
+            },
+            {
+                "command": "johann.showBackgroundTasks",
+                "title": "Johann: Show Background Tasks"
+            },
+            {
+                "command": "johann.showTaskStatus",
+                "title": "Johann: Show Task Status"
+            },
+            {
+                "command": "johann.cancelTask",
+                "title": "Johann: Cancel Background Task"
+            },
+            {
+                "command": "johann.clearCompletedTasks",
+                "title": "Johann: Clear Completed Tasks"
+            }
+        ],
+        "configuration": {
+            "title": "Fugue — Johann Orchestration Settings",
+            "properties": {
+                "johann.maxSubtasks": {
+                    "type": "number",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 50,
+                    "order": 10,
+                    "description": "Maximum number of subtasks per orchestration plan.",
+                    "markdownDescription": "Maximum number of subtasks Johann can create per orchestration plan. Lower values reduce request volume; higher values improve decomposition for large tasks."
+                },
+                "johann.maxAttempts": {
+                    "type": "number",
+                    "default": 3,
+                    "minimum": 1,
+                    "maximum": 10,
+                    "order": 20,
+                    "description": "Maximum attempts per subtask before giving up.",
+                    "markdownDescription": "Retry/escalation attempts per subtask before Johann marks it failed."
+                },
+                "johann.allowParallel": {
+                    "type": "boolean",
+                    "default": true,
+                    "order": 30,
+                    "description": "Allow parallel execution of independent subtasks."
+                },
+                "johann.useWorktrees": {
+                    "type": "boolean",
+                    "default": true,
+                    "order": 40,
+                    "description": "Use git worktrees to isolate parallel subtasks. Each parallel subtask gets its own working directory on a temporary branch, preventing file conflicts. Changes are merged back sequentially after execution. Requires git and a git repository. Falls back gracefully if unavailable."
+                },
+                "johann.backgroundModeEnabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "order": 50,
+                    "description": "Enable background execution mode.",
+                    "markdownDescription": "Run orchestrations asynchronously without blocking chat. Recommended for large jobs."
+                },
+                "johann.toolInvocationTimeoutMs": {
+                    "type": "number",
+                    "default": 120000,
+                    "minimum": 5000,
+                    "maximum": 900000,
+                    "order": 60,
+                    "description": "Timeout for each subagent tool invocation (milliseconds).",
+                    "markdownDescription": "Prevents hangs when tools block indefinitely. Applies to tool calls like terminal and wait operations."
+                },
+                "johann.autoBackgroundLongRunningCommands": {
+                    "type": "boolean",
+                    "default": true,
+                    "order": 70,
+                    "description": "Auto-run likely long-running terminal commands in background mode.",
+                    "markdownDescription": "When enabled, Johann rewrites likely long-running `run_in_terminal` calls to `isBackground: true` to avoid blocking the orchestration loop."
+                },
+                "johann.yoloMaxRequests": {
+                    "type": "number",
+                    "default": 200,
+                    "minimum": 30,
+                    "maximum": 1000,
+                    "order": 80,
+                    "description": "Target Copilot maxRequests value when `/yolo on` is used.",
+                    "markdownDescription": "When you run `/yolo on`, Johann sets `github.copilot.chat.agent.maxRequests` to this value."
+                },
+                "johann.memoryDir": {
+                    "type": "string",
+                    "default": ".vscode/johann",
+                    "order": 90,
+                    "description": "Memory directory relative to workspace root."
+                },
+                "johann.maxBootstrapChars": {
+                    "type": "number",
+                    "default": 15000,
+                    "minimum": 2000,
+                    "maximum": 200000,
+                    "order": 100,
+                    "description": "Maximum characters for bootstrap context in system prompt."
+                },
+                "johann.maxDailyNoteEntries": {
+                    "type": "number",
+                    "default": 100,
+                    "minimum": 10,
+                    "maximum": 1000,
+                    "order": 110,
+                    "description": "Maximum daily-note entries before compaction."
+                },
+                "johann.maxTranscriptBytes": {
+                    "type": "number",
+                    "default": 1000000,
+                    "minimum": 100000,
+                    "maximum": 10000000,
+                    "order": 120,
+                    "description": "Maximum transcript file size in bytes before rotation."
+                },
+                "johann.heartbeatEnabled": {
+                    "type": "boolean",
+                    "default": false,
+                    "order": 130,
+                    "description": "Enable periodic heartbeat self-checks."
+                },
+                "johann.heartbeatIntervalMinutes": {
+                    "type": "number",
+                    "default": 15,
+                    "minimum": 1,
+                    "maximum": 1440,
+                    "order": 140,
+                    "description": "Heartbeat interval in minutes."
+                },
+                "johann.transcriptsEnabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "order": 150,
+                    "description": "Record session transcripts as JSONL files."
+                },
+                "johann.logLevel": {
+                    "type": "string",
+                    "enum": [
+                        "debug",
+                        "info",
+                        "warn",
+                        "error"
+                    ],
+                    "default": "info",
+                    "order": 160,
+                    "description": "Log level for the Johann output channel."
+                },
+                "johann.onboardingEnabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "order": 170,
+                    "description": "Show onboarding on first run."
+                },
+                "johann.autoDistill": {
+                    "type": "boolean",
+                    "default": true,
+                    "order": 180,
+                    "description": "Auto-distill daily notes into MEMORY.md during heartbeats."
+                },
+                "johann.promptMode": {
+                    "type": "string",
+                    "enum": [
+                        "full",
+                        "minimal",
+                        "none"
+                    ],
+                    "default": "full",
+                    "order": 190,
+                    "description": "System prompt assembly mode. Full = all sections, minimal = reduced for subagents, none = bare."
+                },
+                "johann.largeInputChunkSize": {
+                    "type": "number",
+                    "default": 8000,
+                    "minimum": 1000,
+                    "maximum": 100000,
+                    "order": 200,
+                    "description": "Character count threshold for chunking large inputs. Inputs exceeding this size are processed in chunks to prevent information loss."
+                },
+                "johann.maxInputSize": {
+                    "type": "number",
+                    "default": 100000,
+                    "minimum": 10000,
+                    "maximum": 1000000,
+                    "order": 210,
+                    "description": "Maximum input size in characters. Inputs exceeding this are truncated with a warning."
+                },
+                "johann.debugConversationLog": {
+                    "type": "boolean",
+                    "default": true,
+                    "order": 220,
+                    "description": "Write full LLM conversation logs to .vscode/johann/debug/ for debugging hangs and errors."
+                },
+                "johann.modelPickerEnabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "order": 230,
+                    "description": "Enable intelligent model picker. When disabled, Johann uses the fixed model specified in johann.fixedModel."
+                },
+                "johann.fixedModel": {
+                    "type": "string",
+                    "default": "",
+                    "enum": [
+                        "",
+                        "gpt-5-mini",
+                        "gpt-4.1",
+                        "gpt-4o",
+                        "raptor-mini",
+                        "grok-fast",
+                        "claude-haiku",
+                        "gemini-flash",
+                        "gpt-5.1-codex-mini",
+                        "claude-sonnet-4.5",
+                        "claude-sonnet-4",
+                        "gemini-2.5-pro",
+                        "gemini-3-pro",
+                        "gpt-5.3-codex",
+                        "gpt-5.2-codex",
+                        "gpt-5.1-codex",
+                        "gpt-5.2",
+                        "gpt-5.1",
+                        "gpt-5",
+                        "gpt-5-codex",
+                        "claude-opus-4.6",
+                        "claude-opus-4.5",
+                        "claude-opus-4.1",
+                        "o1-pro"
+                    ],
+                    "order": 240,
+                    "description": "Model to use when model picker is disabled. Leave empty to use first available model.",
+                    "markdownEnumDescriptions": [
+                        "Auto-select first available model",
+                        "GPT-5 Mini",
+                        "GPT-4.1",
+                        "GPT-4o",
+                        "Raptor Mini",
+                        "Grok Fast",
+                        "Claude Haiku",
+                        "Gemini Flash",
+                        "GPT-5.1 Codex Mini",
+                        "Claude Sonnet 4.5",
+                        "Claude Sonnet 4",
+                        "Gemini 2.5 Pro",
+                        "Gemini 3 Pro",
+                        "GPT-5.3 Codex",
+                        "GPT-5.2 Codex",
+                        "GPT-5.1 Codex",
+                        "GPT-5.2",
+                        "GPT-5.1",
+                        "GPT-5",
+                        "GPT-5 Codex",
+                        "Claude Opus 4.6",
+                        "Claude Opus 4.5",
+                        "Claude Opus 4.1",
+                        "O1 Pro"
+                    ]
+                },
+                "johann.blockedModels": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "gpt-5-mini",
+                            "gpt-4.1",
+                            "gpt-4o",
+                            "raptor-mini",
+                            "grok-fast",
+                            "claude-haiku",
+                            "gemini-flash",
+                            "gpt-5.1-codex-mini",
+                            "claude-sonnet-4.5",
+                            "claude-sonnet-4",
+                            "gemini-2.5-pro",
+                            "gemini-3-pro",
+                            "gpt-5.3-codex",
+                            "gpt-5.2-codex",
+                            "gpt-5.1-codex",
+                            "gpt-5.2",
+                            "gpt-5.1",
+                            "gpt-5",
+                            "gpt-5-codex",
+                            "claude-opus-4.6",
+                            "claude-opus-4.5",
+                            "claude-opus-4.1",
+                            "o1-pro"
+                        ]
+                    },
+                    "default": [],
+                    "order": 250,
+                    "description": "List of blocked models. If empty, all discovered models are allowed.",
+                    "markdownDescription": "Select models to block from Johann. Any selected item is treated as a pattern and excluded. If this list is empty, Johann allows all discovered models."
+                },
+                "johann.allowOpusEscalation": {
+                    "type": "boolean",
+                    "default": false,
+                    "order": 270,
+                    "description": "Allow Opus and O1-Pro models (3× or higher cost). When disabled (default), these models are completely hidden — they won't appear in model lists, won't be selected for any task, and won't be escalated to.",
+                    "markdownDescription": "**Allow expensive Opus models (3× or higher cost).**\n\nWhen **disabled** (default):\n- Claude Opus 4.1/4.5/4.6 and O1-Pro are completely hidden\n- They won't appear in model lists or diagnostics\n- They won't be selected for any task complexity\n- They won't be escalated to when cheaper models fail\n\nWhen **enabled**:\n- Opus models become available for selection and escalation\n- Johann may use them for `expert` complexity tasks or when all cheaper models fail\n\n⚠️ Only enable if you explicitly want to use premium-tier models."
+                },
+                "johann.delegationMode": {
+                    "type": "string",
+                    "enum": [
+                        "johann-only",
+                        "allow-model",
+                        "no-delegation"
+                    ],
+                    "default": "johann-only",
+                    "order": 280,
+                    "description": "Delegation policy mode. Controls how subagent spawning is managed.",
+                    "markdownDescription": "**Delegation policy mode** — controls how Johann manages subagent spawning.\n\n- **johann-only** (default): Only Johann delegates. Subagents are pure leaf executors that MUST NOT spawn further agents. Safest mode.\n- **allow-model**: The underlying LLM may use its own subagent features. Johann still enforces depth and parallelism limits.\n- **no-delegation**: No subagents at all. All tasks run serially in a single pass. Budget-safe mode.",
+                    "markdownEnumDescriptions": [
+                        "Only Johann delegates. Subagents are leaf executors. (Default, safest)",
+                        "LLM may use native delegation, but Johann enforces limits.",
+                        "No subagents at all. Serial execution only. Budget-safe."
+                    ]
+                },
+                "johann.delegationMaxDepth": {
+                    "type": "number",
+                    "default": 1,
+                    "minimum": 0,
+                    "maximum": 5,
+                    "order": 290,
+                    "description": "Maximum delegation recursion depth. 1 = subagents only (default), 2 = sub-subagents allowed.",
+                    "markdownDescription": "Maximum delegation recursion depth.\n\n- **1** (default): Johann spawns subagents, but subagents cannot spawn further agents.\n- **2**: Sub-subagents are allowed (power-user mode).\n- **0**: No delegation (same as `no-delegation` mode).\n\nClamped to 1 in `johann-only` mode."
+                },
+                "johann.delegationMaxParallel": {
+                    "type": "number",
+                    "default": 3,
+                    "minimum": 0,
+                    "maximum": 20,
+                    "order": 300,
+                    "description": "Maximum concurrent subagents. Caps how many subagents can run in parallel.",
+                    "markdownDescription": "Maximum number of concurrent subagents.\n\n- **3** (default): Up to 3 subagents run in parallel per wave.\n- **0**: No parallel execution (serial only).\n- Higher values increase throughput but also LLM request volume.\n\nWorks in conjunction with `johann.allowParallel`."
+                },
+                "johann.delegationRunawayThreshold": {
+                    "type": "number",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 50,
+                    "order": 310,
+                    "description": "Runaway detection threshold. Number of delegation-signal phrases in subagent output before freezing delegation.",
+                    "markdownDescription": "**Runaway detection threshold.**\n\nIn `johann-only` mode, Johann monitors subagent output for phrases that indicate the model is trying to self-delegate (e.g., \"spawn subagent\", \"delegate task\"). If this threshold is exceeded, delegation is **frozen** for the remainder of the session.\n\n- **5** (default): Freeze after 5 delegation signals.\n- Lower values are stricter. Higher values are more tolerant."
+                }
+            }
         }
-      }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "typecheck": "tsc --noEmit -p ./",
+        "lint": "eslint src",
+        "lint:fix": "eslint src --fix",
+        "format": "prettier --write 'src/**/*.ts' '*.json' '*.md'",
+        "format:check": "prettier --check 'src/**/*.ts' '*.json' '*.md'",
+        "pretest": "npm run compile && npm run lint",
+        "test": "vscode-test",
+        "audit:security": "npm audit --omit=dev",
+        "package": "npx @vscode/vsce package --no-dependencies",
+        "package:check": "npx @vscode/vsce ls --no-dependencies"
+    },
+    "devDependencies": {
+        "@types/mocha": "^10.0.10",
+        "@types/node": "22.x",
+        "@types/vscode": "^1.108.1",
+        "@vscode/test-cli": "^0.0.12",
+        "@vscode/test-electron": "^2.5.2",
+        "eslint": "^9.39.2",
+        "prettier": "^3.8.1",
+        "typescript": "^5.9.3",
+        "typescript-eslint": "^8.52.0"
     }
-  },
-  "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./",
-    "typecheck": "tsc --noEmit -p ./",
-    "lint": "eslint src",
-    "lint:fix": "eslint src --fix",
-    "format": "prettier --write 'src/**/*.ts' '*.json' '*.md'",
-    "format:check": "prettier --check 'src/**/*.ts' '*.json' '*.md'",
-    "pretest": "npm run compile && npm run lint",
-    "test": "vscode-test",
-    "audit:security": "npm audit --omit=dev",
-    "package": "npx @vscode/vsce package --no-dependencies",
-    "package:check": "npx @vscode/vsce ls --no-dependencies"
-  },
-  "devDependencies": {
-    "@types/mocha": "^10.0.10",
-    "@types/node": "22.x",
-    "@types/vscode": "^1.108.1",
-    "@vscode/test-cli": "^0.0.12",
-    "@vscode/test-electron": "^2.5.2",
-    "eslint": "^9.39.2",
-    "prettier": "^3.8.1",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.52.0"
-  }
 }

@@ -1,6 +1,12 @@
 import * as vscode from 'vscode';
 import { searchMemory, formatSearchResults } from './memorySearch';
-import { getConfig, formatConfig, getCopilotAgentSettings, formatCopilotSettings, setCopilotAgentSettings } from './config';
+import {
+    getConfig,
+    formatConfig,
+    getCopilotAgentSettings,
+    formatCopilotSettings,
+    setCopilotAgentSettings,
+} from './config';
 import { listDailyNotes, readDailyNotes } from './dailyNotes';
 import { listSessions, getRecentSessionsSummary } from './sessionTranscript';
 import { SessionPersistence, ResumableSession } from './sessionPersistence';
@@ -46,7 +52,7 @@ export interface DirectiveResult {
  */
 export async function handleDirective(
     message: string,
-    response: vscode.ChatResponseStream
+    response: vscode.ChatResponseStream,
 ): Promise<DirectiveResult> {
     const trimmed = message.trim();
 
@@ -83,7 +89,9 @@ export async function handleDirective(
         case '/tasks':
             return await handleTasks(args, response);
         default:
-            response.markdown(`Unknown directive: \`${command}\`. Type \`/help\` for available commands.\n`);
+            response.markdown(
+                `Unknown directive: \`${command}\`. Type \`/help\` for available commands.\n`,
+            );
             return { isDirective: true, handled: false };
     }
 }
@@ -120,7 +128,10 @@ async function handleHelp(response: vscode.ChatResponseStream): Promise<Directiv
     return { isDirective: true, handled: true, output };
 }
 
-async function handleStatus(response: vscode.ChatResponseStream, args?: string): Promise<DirectiveResult> {
+async function handleStatus(
+    response: vscode.ChatResponseStream,
+    args?: string,
+): Promise<DirectiveResult> {
     // If a run is active, show a live RunState snapshot
     const runManager = RunStateManager.getInstance();
     const runState = runManager.getState();
@@ -165,14 +176,18 @@ async function handleStatus(response: vscode.ChatResponseStream, args?: string):
         if (runState.planSummary) {
             lines.push(`- **Plan:** ${runState.planSummary}`);
         }
-        lines.push(`- **Tasks:** ${runState.counters.done} done, ${runState.counters.failed} failed`);
+        lines.push(
+            `- **Tasks:** ${runState.counters.done} done, ${runState.counters.failed} failed`,
+        );
         lines.push('');
     }
 
     lines.push(`- **Memory directory:** \`${config.memoryDir}\``);
     lines.push(`- **Daily notes:** ${dailyNoteDates.length} files`);
     lines.push(`- **Sessions recorded:** ${sessions.length}`);
-    lines.push(`- **Heartbeat:** ${config.heartbeatEnabled ? `enabled (${config.heartbeatIntervalMinutes}min)` : 'disabled'}`);
+    lines.push(
+        `- **Heartbeat:** ${config.heartbeatEnabled ? `enabled (${config.heartbeatIntervalMinutes}min)` : 'disabled'}`,
+    );
     lines.push(`- **Transcripts:** ${config.transcriptsEnabled ? 'enabled' : 'disabled'}`);
     lines.push(`- **Prompt mode:** ${config.promptMode}`);
     lines.push(`- **Max subtasks:** ${config.maxSubtasks}`);
@@ -205,7 +220,7 @@ async function handleCompact(response: vscode.ChatResponseStream): Promise<Direc
     const config = getConfig();
     const dailyNoteDates = await listDailyNotes();
     const sessions = await listSessions();
-    const activeSessions = sessions.filter(s => s.active);
+    const activeSessions = sessions.filter((s) => s.active);
 
     const output = `**Johann** | Notes: ${dailyNoteDates.length} | Sessions: ${sessions.length} (${activeSessions.length} active) | Heartbeat: ${config.heartbeatEnabled ? 'on' : 'off'} | Mode: ${config.promptMode}\n`;
 
@@ -213,7 +228,10 @@ async function handleCompact(response: vscode.ChatResponseStream): Promise<Direc
     return { isDirective: true, handled: true, output };
 }
 
-async function handleMemory(args: string, response: vscode.ChatResponseStream): Promise<DirectiveResult> {
+async function handleMemory(
+    args: string,
+    response: vscode.ChatResponseStream,
+): Promise<DirectiveResult> {
     // If args provided, treat as a search
     if (args.trim()) {
         return handleSearch(args, response);
@@ -238,7 +256,10 @@ async function handleMemory(args: string, response: vscode.ChatResponseStream): 
     }
 }
 
-async function handleSearch(query: string, response: vscode.ChatResponseStream): Promise<DirectiveResult> {
+async function handleSearch(
+    query: string,
+    response: vscode.ChatResponseStream,
+): Promise<DirectiveResult> {
     if (!query.trim()) {
         response.markdown('Usage: `/search <keywords>`\n');
         return { isDirective: true, handled: true };
@@ -250,13 +271,18 @@ async function handleSearch(query: string, response: vscode.ChatResponseStream):
     return { isDirective: true, handled: true, output };
 }
 
-async function handleConfigDirective(response: vscode.ChatResponseStream): Promise<DirectiveResult> {
+async function handleConfigDirective(
+    response: vscode.ChatResponseStream,
+): Promise<DirectiveResult> {
     const output = formatConfig();
     response.markdown(output + '\n');
     return { isDirective: true, handled: true, output };
 }
 
-async function handleNotes(args: string, response: vscode.ChatResponseStream): Promise<DirectiveResult> {
+async function handleNotes(
+    args: string,
+    response: vscode.ChatResponseStream,
+): Promise<DirectiveResult> {
     const dateArg = args.trim();
 
     if (dateArg) {
@@ -301,7 +327,10 @@ async function handleSessions(response: vscode.ChatResponseStream): Promise<Dire
     return { isDirective: true, handled: true, output };
 }
 
-async function handleResume(args: string, response: vscode.ChatResponseStream): Promise<DirectiveResult> {
+async function handleResume(
+    args: string,
+    response: vscode.ChatResponseStream,
+): Promise<DirectiveResult> {
     const resumable = await SessionPersistence.findResumable();
 
     if (resumable.length === 0) {
@@ -318,7 +347,9 @@ async function handleResume(args: string, response: vscode.ChatResponseStream): 
 
     if (firstArg) {
         // Try to match it as a session ID
-        const match = resumable.find(s => s.sessionId === firstArg || s.sessionId.endsWith(firstArg));
+        const match = resumable.find(
+            (s) => s.sessionId === firstArg || s.sessionId.endsWith(firstArg),
+        );
         if (match) {
             targetSession = match;
             // Everything after the session ID is the message
@@ -347,15 +378,17 @@ async function handleResume(args: string, response: vscode.ChatResponseStream): 
     const total = completed + targetSession.pendingSubtaskIds.length;
 
     if (resumable.length > 1 && !firstArg) {
-        response.markdown(`Found ${resumable.length} interrupted sessions. Resuming the most recent:\n\n`);
+        response.markdown(
+            `Found ${resumable.length} interrupted sessions. Resuming the most recent:\n\n`,
+        );
     } else if (resumable.length === 1 && !firstArg) {
         response.markdown(`Found 1 interrupted session. Resuming automatically.\n\n`);
     }
 
     response.markdown(
         `**Session:** \`${targetSession.sessionId}\`\n` +
-        `**Request:** ${targetSession.originalRequest.substring(0, 120)}\n` +
-        `**Progress:** ${completed}/${total} subtasks completed\n`
+            `**Request:** ${targetSession.originalRequest.substring(0, 120)}\n` +
+            `**Progress:** ${completed}/${total} subtasks completed\n`,
     );
 
     if (resumeMessage) {
@@ -366,13 +399,15 @@ async function handleResume(args: string, response: vscode.ChatResponseStream): 
 
     // Show other resumable sessions if any
     if (resumable.length > 1) {
-        const others = resumable.filter(s => s.sessionId !== targetSession!.sessionId);
+        const others = resumable.filter((s) => s.sessionId !== targetSession!.sessionId);
         if (others.length > 0) {
             response.markdown('Other resumable sessions:\n');
             for (const s of others.slice(0, 4)) {
                 const c = s.completedSubtaskIds.length;
                 const t = c + s.pendingSubtaskIds.length;
-                response.markdown(`- \`/resume ${s.sessionId}\` — ${s.originalRequest.substring(0, 60)} (${c}/${t} done)\n`);
+                response.markdown(
+                    `- \`/resume ${s.sessionId}\` — ${s.originalRequest.substring(0, 60)} (${c}/${t} done)\n`,
+                );
             }
             response.markdown('\n');
         }
@@ -381,7 +416,10 @@ async function handleResume(args: string, response: vscode.ChatResponseStream): 
     return { isDirective: true, handled: true, resumeSession: targetSession };
 }
 
-async function handleYolo(args: string, response: vscode.ChatResponseStream): Promise<DirectiveResult> {
+async function handleYolo(
+    args: string,
+    response: vscode.ChatResponseStream,
+): Promise<DirectiveResult> {
     const copilot = getCopilotAgentSettings();
     const config = getConfig();
     const arg = args.trim().toLowerCase();
@@ -390,7 +428,8 @@ async function handleYolo(args: string, response: vscode.ChatResponseStream): Pr
     const target = tokens.includes('global')
         ? vscode.ConfigurationTarget.Global
         : vscode.ConfigurationTarget.Workspace;
-    const targetLabel = target === vscode.ConfigurationTarget.Global ? 'User (global)' : 'Workspace';
+    const targetLabel =
+        target === vscode.ConfigurationTarget.Global ? 'User (global)' : 'Workspace';
 
     const statusBlock = () => {
         const yoloActive = copilot.autoApprove && copilot.maxRequests >= 100;
@@ -410,9 +449,11 @@ async function handleYolo(args: string, response: vscode.ChatResponseStream): Pr
 
         const updated = getCopilotAgentSettings();
         const yoloActive = updated.autoApprove && updated.maxRequests >= 100;
-        const output = `## YOLO Mode Enabled\n\nApplied settings to **${targetLabel}** scope:\n- \`github.copilot.chat.agent.autoApprove\` = \`true\`\n- \`github.copilot.chat.agent.maxRequests\` = \`${config.yoloMaxRequests}\`\n\n${formatCopilotSettings()}\n\n### How YOLO Works\n- **Copilot settings are the autonomy gate** (approval prompts + request-limit pauses).\n- **Johann settings are runtime safeguards** (timeouts, long-command backgrounding, orchestration limits).\n\n${yoloActive
-    ? '✅ Johann should now run with minimal confirmation friction, including fewer manual "Continue" interruptions.'
-    : '⚠️ Settings were written, but YOLO does not appear fully active yet. Check for overrides in other scopes.'}\n\nTip: use \`/yolo on global\` to apply this to all workspaces.`;
+        const output = `## YOLO Mode Enabled\n\nApplied settings to **${targetLabel}** scope:\n- \`github.copilot.chat.agent.autoApprove\` = \`true\`\n- \`github.copilot.chat.agent.maxRequests\` = \`${config.yoloMaxRequests}\`\n\n${formatCopilotSettings()}\n\n### How YOLO Works\n- **Copilot settings are the autonomy gate** (approval prompts + request-limit pauses).\n- **Johann settings are runtime safeguards** (timeouts, long-command backgrounding, orchestration limits).\n\n${
+            yoloActive
+                ? '✅ Johann should now run with minimal confirmation friction, including fewer manual "Continue" interruptions.'
+                : '⚠️ Settings were written, but YOLO does not appear fully active yet. Check for overrides in other scopes.'
+        }\n\nTip: use \`/yolo on global\` to apply this to all workspaces.`;
         response.markdown(output);
         return { isDirective: true, handled: true, output };
     }
@@ -433,14 +474,19 @@ async function handleYolo(args: string, response: vscode.ChatResponseStream): Pr
     }
 
     const yoloActive = copilot.autoApprove && copilot.maxRequests >= 100;
-    const output = `${statusBlock()}\n\n### How YOLO Works\n- **Copilot settings are the autonomy gate** (approval prompts + request-limit pauses).\n- **Johann settings are runtime safeguards** (timeouts, long-command backgrounding, orchestration limits).\n\n${yoloActive
-    ? 'Copilot is configured for high-autonomy orchestration.'
-    : 'Copilot may still interrupt long runs with approval or continue prompts.'}\n\n### Usage:\n- \`/yolo\` — Show current YOLO status\n- \`/yolo on\` — Enable YOLO in workspace settings\n- \`/yolo on global\` — Enable YOLO in user settings\n- \`/yolo off\` — Disable YOLO in workspace settings\n- \`/yolo off global\` — Disable YOLO in user settings`;
+    const output = `${statusBlock()}\n\n### How YOLO Works\n- **Copilot settings are the autonomy gate** (approval prompts + request-limit pauses).\n- **Johann settings are runtime safeguards** (timeouts, long-command backgrounding, orchestration limits).\n\n${
+        yoloActive
+            ? 'Copilot is configured for high-autonomy orchestration.'
+            : 'Copilot may still interrupt long runs with approval or continue prompts.'
+    }\n\n### Usage:\n- \`/yolo\` — Show current YOLO status\n- \`/yolo on\` — Enable YOLO in workspace settings\n- \`/yolo on global\` — Enable YOLO in user settings\n- \`/yolo off\` — Disable YOLO in workspace settings\n- \`/yolo off global\` — Disable YOLO in user settings`;
     response.markdown(output);
     return { isDirective: true, handled: true, output };
 }
 
-async function handleTasks(args: string, response: vscode.ChatResponseStream): Promise<DirectiveResult> {
+async function handleTasks(
+    args: string,
+    response: vscode.ChatResponseStream,
+): Promise<DirectiveResult> {
     const taskManager = BackgroundTaskManager.getInstance();
 
     // If task ID provided, show specific task
@@ -464,11 +510,11 @@ async function handleTasks(args: string, response: vscode.ChatResponseStream): P
     lines.push('## Background Tasks\n');
 
     // Group by status
-    const running = allTasks.filter(t => t.status === 'running');
-    const paused = allTasks.filter(t => t.status === 'paused');
-    const completed = allTasks.filter(t => t.status === 'completed');
-    const failed = allTasks.filter(t => t.status === 'failed');
-    const cancelled = allTasks.filter(t => t.status === 'cancelled');
+    const running = allTasks.filter((t) => t.status === 'running');
+    const paused = allTasks.filter((t) => t.status === 'paused');
+    const completed = allTasks.filter((t) => t.status === 'completed');
+    const failed = allTasks.filter((t) => t.status === 'failed');
+    const cancelled = allTasks.filter((t) => t.status === 'cancelled');
 
     if (running.length > 0) {
         lines.push(`### $(sync~spin) Running (${running.length})\n`);
@@ -527,7 +573,9 @@ async function handleTasks(args: string, response: vscode.ChatResponseStream): P
     lines.push('---\n');
     lines.push('**Commands:**\n');
     lines.push(`- \`/tasks <task-id>\` — View details for a specific task\n`);
-    lines.push(`- Run \`Johann: Show Background Tasks\` from command palette for interactive view\n`);
+    lines.push(
+        `- Run \`Johann: Show Background Tasks\` from command palette for interactive view\n`,
+    );
     lines.push(`- Run \`Johann: Cancel Background Task\` to stop a running task\n`);
 
     const output = lines.join('\n');

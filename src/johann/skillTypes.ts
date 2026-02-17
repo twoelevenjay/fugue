@@ -18,26 +18,26 @@ import { TaskType } from './types';
 
 /** Where the skill lives and how it got there. */
 export type SkillScope =
-    | 'local'       // Created autonomously in repo's .vscode/johann/skills/
-    | 'global'      // Promoted by user to global store
-    | 'shipped'     // Bundled with the extension
+    | 'local' // Created autonomously in repo's .vscode/johann/skills/
+    | 'global' // Promoted by user to global store
+    | 'shipped' // Bundled with the extension
     | 'local-copy'; // Flattened copy of a global/shipped skill
 
 /** Lifecycle state of a skill file. */
 export type SkillStatus =
-    | 'draft'       // In-progress, not yet validated (*.draft.skill.yaml)
-    | 'published'   // Validated and immutable (*.skill.yaml)
-    | 'stale'       // Unused across N runs, candidate for deprecation
-    | 'tampered'    // Hash mismatch detected — disabled
+    | 'draft' // In-progress, not yet validated (*.draft.skill.yaml)
+    | 'published' // Validated and immutable (*.skill.yaml)
+    | 'stale' // Unused across N runs, candidate for deprecation
+    | 'tampered' // Hash mismatch detected — disabled
     | 'deprecated'; // Marked for removal
 
 /** How a skill was created. */
 export type SkillOrigin =
-    | 'autonomous'  // Created by Johann during a run
-    | 'user'        // Created via explicit user action
-    | 'shipped'     // Bundled with extension
-    | 'promoted'    // Promoted from local to global
-    | 'flattened';  // Copied from global/shipped to local
+    | 'autonomous' // Created by Johann during a run
+    | 'user' // Created via explicit user action
+    | 'shipped' // Bundled with extension
+    | 'promoted' // Promoted from local to global
+    | 'flattened'; // Copied from global/shipped to local
 
 // ============================================================================
 // Skill Document — The full YAML structure
@@ -353,16 +353,16 @@ export interface SkillSelectionContext {
 export function skillFilename(slug: string, version: string, isDraft: boolean = false): string {
     const safe = slug.replace(/[^a-z0-9._-]/gi, '-');
     const ver = version.replace(/[^0-9.]/g, '');
-    return isDraft
-        ? `${safe}__${ver}.draft.skill.yaml`
-        : `${safe}__${ver}.skill.yaml`;
+    return isDraft ? `${safe}__${ver}.draft.skill.yaml` : `${safe}__${ver}.skill.yaml`;
 }
 
 /**
  * Parse a skill filename into its components.
  * Returns undefined if the filename doesn't match the expected pattern.
  */
-export function parseSkillFilename(filename: string): { slug: string; version: string; isDraft: boolean } | undefined {
+export function parseSkillFilename(
+    filename: string,
+): { slug: string; version: string; isDraft: boolean } | undefined {
     const match = filename.match(/^(.+?)__(\d+\.\d+\.\d+)(?:\.draft)?\.skill\.yaml$/);
     if (!match) {
         return undefined;

@@ -1,12 +1,6 @@
 import * as assert from 'assert';
-import {
-    RunStateData,
-    RunTask,
-} from '../../johann/runState';
-import {
-    generateSnapshot,
-    generateDetailedSnapshot,
-} from '../../johann/statusSnapshot';
+import { RunStateData, RunTask } from '../../johann/runState';
+import { generateSnapshot, generateDetailedSnapshot } from '../../johann/statusSnapshot';
 
 // ============================================================================
 // Status Snapshot tests
@@ -83,7 +77,12 @@ suite('StatusSnapshot', () => {
     test('shows running tasks in active items', () => {
         const state = makeState({
             tasks: [
-                makeTask({ id: 'st-1', title: 'Building models', status: 'running', model: 'claude-sonnet' }),
+                makeTask({
+                    id: 'st-1',
+                    title: 'Building models',
+                    status: 'running',
+                    model: 'claude-sonnet',
+                }),
                 makeTask({ id: 'st-2', title: 'Write tests', status: 'queued' }),
             ],
             counters: { queued: 1, running: 1, done: 0, failed: 0 },
@@ -96,9 +95,7 @@ suite('StatusSnapshot', () => {
 
     test('shows queued tasks in next up', () => {
         const state = makeState({
-            tasks: [
-                makeTask({ id: 'st-1', title: 'Queued task', status: 'queued' }),
-            ],
+            tasks: [makeTask({ id: 'st-1', title: 'Queued task', status: 'queued' })],
             counters: { queued: 1, running: 0, done: 0, failed: 0 },
         });
         const snapshot = generateSnapshot(state);
@@ -109,9 +106,7 @@ suite('StatusSnapshot', () => {
 
     test('empty active items when no running or queued', () => {
         const state = makeState({
-            tasks: [
-                makeTask({ status: 'done' }),
-            ],
+            tasks: [makeTask({ status: 'done' })],
             counters: { queued: 0, running: 0, done: 1, failed: 0 },
         });
         const snapshot = generateSnapshot(state);
@@ -165,9 +160,24 @@ suite('StatusSnapshot', () => {
     test('compact Mermaid uses phase-level flowchart', () => {
         const state = makeState({
             tasks: [
-                makeTask({ id: 'st-1', title: 'Analyze codebase', status: 'done', phase: 'discovery' }),
-                makeTask({ id: 'st-2', title: 'Build API', status: 'running', phase: 'implementation' }),
-                makeTask({ id: 'st-3', title: 'Run tests', status: 'queued', phase: 'verification' }),
+                makeTask({
+                    id: 'st-1',
+                    title: 'Analyze codebase',
+                    status: 'done',
+                    phase: 'discovery',
+                }),
+                makeTask({
+                    id: 'st-2',
+                    title: 'Build API',
+                    status: 'running',
+                    phase: 'implementation',
+                }),
+                makeTask({
+                    id: 'st-3',
+                    title: 'Run tests',
+                    status: 'queued',
+                    phase: 'verification',
+                }),
             ],
             counters: { queued: 1, running: 1, done: 1, failed: 0 },
         });
@@ -181,9 +191,7 @@ suite('StatusSnapshot', () => {
 
     test('flat Mermaid when no phases assigned', () => {
         const state = makeState({
-            tasks: [
-                makeTask({ id: 'st-1', title: 'Do something', status: 'running' }),
-            ],
+            tasks: [makeTask({ id: 'st-1', title: 'Do something', status: 'running' })],
             counters: { queued: 0, running: 1, done: 0, failed: 0 },
             planSummary: 'Test plan',
         });
@@ -198,11 +206,13 @@ suite('StatusSnapshot', () => {
     test('detailed Mermaid shows per-task nodes', () => {
         const tasks: RunTask[] = [];
         for (let i = 1; i <= 5; i++) {
-            tasks.push(makeTask({
-                id: `st-${i}`,
-                title: `Task ${i}`,
-                status: i <= 2 ? 'done' : i === 3 ? 'running' : 'queued',
-            }));
+            tasks.push(
+                makeTask({
+                    id: `st-${i}`,
+                    title: `Task ${i}`,
+                    status: i <= 2 ? 'done' : i === 3 ? 'running' : 'queued',
+                }),
+            );
         }
         const state = makeState({
             tasks,
@@ -218,11 +228,13 @@ suite('StatusSnapshot', () => {
     test('detailed Mermaid empty when >30 tasks', () => {
         const tasks: RunTask[] = [];
         for (let i = 1; i <= 35; i++) {
-            tasks.push(makeTask({
-                id: `st-${i}`,
-                title: `Task ${i}`,
-                status: 'queued',
-            }));
+            tasks.push(
+                makeTask({
+                    id: `st-${i}`,
+                    title: `Task ${i}`,
+                    status: 'queued',
+                }),
+            );
         }
         const state = makeState({ tasks });
         const snapshot = generateSnapshot(state);
@@ -348,6 +360,9 @@ suite('StatusSnapshot', () => {
         // "Scan" → discovery, "Design" → planning, "Implement" → implementation,
         // "Validate" → verification, "Deploy" → packaging
         // The compact Mermaid should include at least some of these phases
-        assert.ok(snapshot.mermaidCompact.includes('Discovery') || snapshot.mermaidCompact.includes('discovery'));
+        assert.ok(
+            snapshot.mermaidCompact.includes('Discovery') ||
+                snapshot.mermaidCompact.includes('discovery'),
+        );
     });
 });

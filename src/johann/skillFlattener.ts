@@ -38,10 +38,7 @@ export class SkillFlattener {
      * @param localStore  The local skill store
      * @returns The local copy of the skill (may be the original if already local)
      */
-    async flatten(
-        skill: SkillDoc,
-        localStore: LocalSkillStore
-    ): Promise<SkillDoc> {
+    async flatten(skill: SkillDoc, localStore: LocalSkillStore): Promise<SkillDoc> {
         // Already local — nothing to do
         if (skill.metadata.scope === 'local' || skill.metadata.scope === 'local-copy') {
             // Verify it exists on disk
@@ -50,7 +47,9 @@ export class SkillFlattener {
                 return skill;
             }
             // If somehow not on disk, save it
-            this.logger.warn(`Local skill "${skill.metadata.slug}@${skill.metadata.version}" not on disk — re-saving`);
+            this.logger.warn(
+                `Local skill "${skill.metadata.slug}@${skill.metadata.version}" not on disk — re-saving`,
+            );
             await localStore.saveSkill(skill);
             return skill;
         }
@@ -58,7 +57,9 @@ export class SkillFlattener {
         // Check if a local copy already exists for this slug + version
         const existing = await localStore.loadSkill(skill.metadata.slug, skill.metadata.version);
         if (existing) {
-            this.logger.debug(`Local copy already exists: ${skill.metadata.slug}@${skill.metadata.version}`);
+            this.logger.debug(
+                `Local copy already exists: ${skill.metadata.slug}@${skill.metadata.version}`,
+            );
             return existing;
         }
 
@@ -81,7 +82,7 @@ export class SkillFlattener {
 
         this.logger.info(
             `Flattened skill "${skill.metadata.slug}@${skill.metadata.version}" ` +
-            `from ${skill.metadata.scope} to local-copy`
+                `from ${skill.metadata.scope} to local-copy`,
         );
 
         return localCopy;
@@ -95,15 +96,15 @@ export class SkillFlattener {
      * @param localStore  The local skill store
      * @returns Number of skills that were newly flattened
      */
-    async flattenAll(
-        usedSkills: SkillDoc[],
-        localStore: LocalSkillStore
-    ): Promise<number> {
+    async flattenAll(usedSkills: SkillDoc[], localStore: LocalSkillStore): Promise<number> {
         let flattenedCount = 0;
 
         for (const skill of usedSkills) {
             if (skill.metadata.scope !== 'local' && skill.metadata.scope !== 'local-copy') {
-                const existing = await localStore.exists(skill.metadata.slug, skill.metadata.version);
+                const existing = await localStore.exists(
+                    skill.metadata.slug,
+                    skill.metadata.version,
+                );
                 if (!existing) {
                     await this.flatten(skill, localStore);
                     flattenedCount++;
@@ -124,7 +125,7 @@ export class SkillFlattener {
      */
     async checkForUpdates(
         localCopy: SkillDoc,
-        globalStore: GlobalSkillStore
+        globalStore: GlobalSkillStore,
     ): Promise<{ hasUpdate: boolean; latestVersion?: string; latestHash?: string }> {
         if (localCopy.metadata.scope !== 'local-copy') {
             return { hasUpdate: false };

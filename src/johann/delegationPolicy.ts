@@ -141,7 +141,7 @@ export function getDelegationPolicy(): DelegationPolicy {
     // Validate mode
     const validModes: DelegationMode[] = ['johann-only', 'allow-model', 'no-delegation'];
     const mode: DelegationMode = validModes.includes(rawMode as DelegationMode)
-        ? rawMode as DelegationMode
+        ? (rawMode as DelegationMode)
         : DEFAULT_DELEGATION_POLICY.mode;
 
     // Read limits — enforce per-mode defaults
@@ -210,8 +210,8 @@ export class DelegationGuard {
         this.policy = policy ?? getDelegationPolicy();
         this.logger.info(
             `DelegationGuard initialized: mode=${this.policy.mode}, ` +
-            `maxDepth=${this.policy.maxDepth}, maxParallel=${this.policy.maxParallel}, ` +
-            `runawayThreshold=${this.policy.runawayThreshold}`,
+                `maxDepth=${this.policy.maxDepth}, maxParallel=${this.policy.maxParallel}, ` +
+                `runawayThreshold=${this.policy.runawayThreshold}`,
         );
     }
 
@@ -238,9 +238,7 @@ export class DelegationGuard {
 
         // ── Depth check ──
         if (depth >= this.policy.maxDepth) {
-            return this.block(
-                `Depth ${depth} exceeds max allowed depth ${this.policy.maxDepth}`,
-            );
+            return this.block(`Depth ${depth} exceeds max allowed depth ${this.policy.maxDepth}`);
         }
 
         // ── Parallel cap check ──
@@ -298,7 +296,11 @@ export class DelegationGuard {
     ): Promise<DelegationDecision> {
         // Fast path: try immediately
         const immediate = this.requestDelegation(depth);
-        if (immediate.allowed || immediate.reason !== `Active subagent count ${this._activeCount} is at parallel cap ${this.policy.maxParallel}`) {
+        if (
+            immediate.allowed ||
+            immediate.reason !==
+                `Active subagent count ${this._activeCount} is at parallel cap ${this.policy.maxParallel}`
+        ) {
             return immediate;
         }
 
@@ -323,7 +325,10 @@ export class DelegationGuard {
                     if (idx >= 0) {
                         this._waitQueue.splice(idx, 1);
                     }
-                    resolve({ allowed: false, reason: 'Cancelled while waiting for delegation slot' });
+                    resolve({
+                        allowed: false,
+                        reason: 'Cancelled while waiting for delegation slot',
+                    });
                     onCancel.dispose();
                 });
             }
@@ -343,15 +348,16 @@ export class DelegationGuard {
         }
 
         for (const pattern of DELEGATION_SIGNAL_PHRASES) {
-            const match = typeof pattern === 'string'
-                ? text.toLowerCase().includes(pattern.toLowerCase())
-                : pattern.test(text);
+            const match =
+                typeof pattern === 'string'
+                    ? text.toLowerCase().includes(pattern.toLowerCase())
+                    : pattern.test(text);
 
             if (match) {
                 this._runawaySignals++;
                 this.logger.warn(
                     `Delegation signal #${this._runawaySignals} detected in subagent output ` +
-                    `(threshold: ${this.policy.runawayThreshold})`,
+                        `(threshold: ${this.policy.runawayThreshold})`,
                 );
 
                 if (this._runawaySignals >= this.policy.runawayThreshold) {
@@ -362,7 +368,7 @@ export class DelegationGuard {
                     });
                     this.logger.warn(
                         'DELEGATION FROZEN — runaway behavior detected. ' +
-                        'Further delegation is blocked. Execution continues serially.',
+                            'Further delegation is blocked. Execution continues serially.',
                     );
                 }
                 break; // One signal per text chunk is enough

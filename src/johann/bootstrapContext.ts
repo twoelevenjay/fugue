@@ -129,7 +129,11 @@ function detectCapabilities(files: Map<string, string>): EnvironmentCapability[]
                 'ddev wp db export — Export WordPress database',
                 'ddev wp search-replace — Search and replace in database',
             );
-        } else if (projectType === 'drupal' || projectType === 'drupal9' || projectType === 'drupal10') {
+        } else if (
+            projectType === 'drupal' ||
+            projectType === 'drupal9' ||
+            projectType === 'drupal10'
+        ) {
             commands.push(
                 'ddev drush <command> — Run Drush commands',
                 'ddev drush cr — Clear Drupal cache',
@@ -150,11 +154,15 @@ function detectCapabilities(files: Map<string, string>): EnvironmentCapability[]
     }
 
     // Docker Detection (without DDEV)
-    if ((files.has('docker-compose.yml') || files.has('docker-compose.yaml')) &&
-        !files.has('.ddev/config.yaml') && !files.has('.ddev/config.yml')) {
+    if (
+        (files.has('docker-compose.yml') || files.has('docker-compose.yaml')) &&
+        !files.has('.ddev/config.yaml') &&
+        !files.has('.ddev/config.yml')
+    ) {
         caps.push({
             name: 'Docker Compose',
-            description: 'Docker Compose multi-container setup. Services are defined in docker-compose.yml.',
+            description:
+                'Docker Compose multi-container setup. Services are defined in docker-compose.yml.',
             commands: [
                 'docker compose up -d — Start all services in background',
                 'docker compose down — Stop and remove containers',
@@ -174,8 +182,11 @@ function detectCapabilities(files: Map<string, string>): EnvironmentCapability[]
             const deps = Object.keys(pkg.dependencies || {});
             const devDeps = Object.keys(pkg.devDependencies || {});
 
-            const manager = files.has('pnpm-lock.yaml') ? 'pnpm' :
-                files.has('yarn.lock') ? 'yarn' : 'npm';
+            const manager = files.has('pnpm-lock.yaml')
+                ? 'pnpm'
+                : files.has('yarn.lock')
+                  ? 'yarn'
+                  : 'npm';
 
             const commands = [
                 `${manager} install — Install dependencies`,
@@ -183,16 +194,30 @@ function detectCapabilities(files: Map<string, string>): EnvironmentCapability[]
             ];
 
             if (scripts.length > 0) {
-                commands.push(`Available scripts: ${scripts.slice(0, 10).join(', ')}${scripts.length > 10 ? '...' : ''}`);
+                commands.push(
+                    `Available scripts: ${scripts.slice(0, 10).join(', ')}${scripts.length > 10 ? '...' : ''}`,
+                );
             }
 
             const frameworks: string[] = [];
-            if (deps.includes('react') || devDeps.includes('react')) { frameworks.push('React'); }
-            if (deps.includes('next') || devDeps.includes('next')) { frameworks.push('Next.js'); }
-            if (deps.includes('vue') || devDeps.includes('vue')) { frameworks.push('Vue'); }
-            if (deps.includes('express') || devDeps.includes('express')) { frameworks.push('Express'); }
-            if (deps.includes('@angular/core') || devDeps.includes('@angular/core')) { frameworks.push('Angular'); }
-            if (deps.includes('svelte') || devDeps.includes('svelte')) { frameworks.push('Svelte'); }
+            if (deps.includes('react') || devDeps.includes('react')) {
+                frameworks.push('React');
+            }
+            if (deps.includes('next') || devDeps.includes('next')) {
+                frameworks.push('Next.js');
+            }
+            if (deps.includes('vue') || devDeps.includes('vue')) {
+                frameworks.push('Vue');
+            }
+            if (deps.includes('express') || devDeps.includes('express')) {
+                frameworks.push('Express');
+            }
+            if (deps.includes('@angular/core') || devDeps.includes('@angular/core')) {
+                frameworks.push('Angular');
+            }
+            if (deps.includes('svelte') || devDeps.includes('svelte')) {
+                frameworks.push('Svelte');
+            }
 
             caps.push({
                 name: 'Node.js',
@@ -315,13 +340,12 @@ function formatFileContents(files: Map<string, string>): string {
         return '';
     }
 
-    const lines: string[] = [
-        '=== PROJECT FILES (auto-detected) ===',
-        '',
-    ];
+    const lines: string[] = ['=== PROJECT FILES (auto-detected) ===', ''];
 
     for (const [path, content] of files) {
-        if (!content) { continue; }
+        if (!content) {
+            continue;
+        }
         lines.push(`--- ${path} ---`);
         lines.push(content);
         lines.push('');
@@ -334,9 +358,7 @@ function formatFileContents(files: Map<string, string>): string {
  * Scan the workspace for project bootstrap files and build context.
  * This is the main entry point — call this at orchestration start.
  */
-export async function scanBootstrapContext(
-    workspaceRoot?: string
-): Promise<BootstrapResult> {
+export async function scanBootstrapContext(workspaceRoot?: string): Promise<BootstrapResult> {
     const result: BootstrapResult = {
         capabilities: [],
         fileContents: new Map(),
@@ -371,7 +393,10 @@ export async function scanBootstrapContext(
                 discoveredFiles.set(pattern, truncated);
             } else {
                 // File exists but we don't read it (secrets, etc.)
-                discoveredFiles.set(pattern, `[${label} detected — contents not read for security]`);
+                discoveredFiles.set(
+                    pattern,
+                    `[${label} detected — contents not read for security]`,
+                );
             }
         } catch {
             // File doesn't exist — skip
@@ -420,7 +445,7 @@ export async function scanBootstrapContext(
 
     getLogger().info(
         `Bootstrap: detected ${capabilities.length} capabilities, ` +
-        `${discoveredFiles.size} files, ${contextBlock.length} chars context`
+            `${discoveredFiles.size} files, ${contextBlock.length} chars context`,
     );
 
     return result;

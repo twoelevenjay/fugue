@@ -40,7 +40,9 @@ function todayDateString(): string {
  */
 function getMemoryDirUri(): vscode.Uri | undefined {
     const base = getJohannWorkspaceUri();
-    if (!base) return undefined;
+    if (!base) {
+        return undefined;
+    }
     return vscode.Uri.joinPath(base, 'memory');
 }
 
@@ -49,7 +51,9 @@ function getMemoryDirUri(): vscode.Uri | undefined {
  */
 function getDailyNoteUri(date?: string): vscode.Uri | undefined {
     const memDir = getMemoryDirUri();
-    if (!memDir) return undefined;
+    if (!memDir) {
+        return undefined;
+    }
     const d = date || todayDateString();
     return vscode.Uri.joinPath(memDir, `${d}.md`);
 }
@@ -59,7 +63,9 @@ function getDailyNoteUri(date?: string): vscode.Uri | undefined {
  */
 async function ensureMemoryDir(): Promise<vscode.Uri | undefined> {
     const memDir = getMemoryDirUri();
-    if (!memDir) return undefined;
+    if (!memDir) {
+        return undefined;
+    }
     try {
         await vscode.workspace.fs.createDirectory(memDir);
     } catch {
@@ -124,7 +130,9 @@ function createDailyHeader(date: string): string {
 export async function appendDailyNote(entry: DailyNoteEntry): Promise<void> {
     await ensureMemoryDir();
     const noteUri = getDailyNoteUri();
-    if (!noteUri) return;
+    if (!noteUri) {
+        return;
+    }
 
     const date = todayDateString();
     const formattedEntry = '\n' + formatEntry(entry);
@@ -209,7 +217,9 @@ export async function logUserInfo(title: string, content: string): Promise<void>
  */
 export async function readTodayNotes(): Promise<string> {
     const noteUri = getDailyNoteUri();
-    if (!noteUri) return '';
+    if (!noteUri) {
+        return '';
+    }
     return readFileContent(noteUri);
 }
 
@@ -218,7 +228,9 @@ export async function readTodayNotes(): Promise<string> {
  */
 export async function readDailyNotes(date: string): Promise<string> {
     const noteUri = getDailyNoteUri(date);
-    if (!noteUri) return '';
+    if (!noteUri) {
+        return '';
+    }
     return readFileContent(noteUri);
 }
 
@@ -227,12 +239,17 @@ export async function readDailyNotes(date: string): Promise<string> {
  */
 export async function listDailyNotes(): Promise<string[]> {
     const memDir = getMemoryDirUri();
-    if (!memDir) return [];
+    if (!memDir) {
+        return [];
+    }
 
     try {
         const entries = await vscode.workspace.fs.readDirectory(memDir);
         return entries
-            .filter(([name, type]) => type === vscode.FileType.File && /^\d{4}-\d{2}-\d{2}\.md$/.test(name))
+            .filter(
+                ([name, type]) =>
+                    type === vscode.FileType.File && /^\d{4}-\d{2}-\d{2}\.md$/.test(name),
+            )
             .map(([name]) => name.replace('.md', ''))
             .sort()
             .reverse();
@@ -247,10 +264,12 @@ export async function listDailyNotes(): Promise<string[]> {
  */
 export async function getRecentDailyNotesContext(
     maxDays: number = 3,
-    maxChars: number = 4000
+    maxChars: number = 4000,
 ): Promise<string> {
     const dates = await listDailyNotes();
-    if (dates.length === 0) return '';
+    if (dates.length === 0) {
+        return '';
+    }
 
     const lines: string[] = ['=== Recent Daily Notes ===', ''];
     let totalChars = 0;
