@@ -190,7 +190,9 @@ suite('StatusSnapshot', () => {
         const snapshot = generateSnapshot(state);
 
         assert.ok(snapshot.mermaidCompact.includes('flowchart TD'));
-        assert.ok(snapshot.mermaidCompact.includes('PLAN'));
+        // inferPhase defaults to 'implementation' when no keywords match,
+        // so the compact Mermaid always renders phase-based (not flat).
+        assert.ok(snapshot.mermaidCompact.includes('Implementation'));
     });
 
     test('detailed Mermaid shows per-task nodes', () => {

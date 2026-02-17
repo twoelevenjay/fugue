@@ -62,7 +62,7 @@ export { SessionPersistence } from './sessionPersistence';
 export type { PersistedSubtask, PersistedSession, ResumableSession } from './sessionPersistence';
 export { RunStateManager } from './runState';
 export type {
-    RunStatus, TaskStatus, SubagentStatus, RunTask, RunSubagent,
+    RunStatus, TaskStatus, SubagentStatus as RunSubagentStatus, RunTask, RunSubagent,
     QueuedUserMessage, RunCounters, RunPhase, RunStateData,
 } from './runState';
 export { generateSnapshot, generateDetailedSnapshot } from './statusSnapshot';

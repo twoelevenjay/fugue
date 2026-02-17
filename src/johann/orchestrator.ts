@@ -43,6 +43,7 @@ import { LocalSkillStore, GlobalSkillStore } from './skillStore';
 import { SkillValidator } from './skillValidator';
 import { SkillDoc } from './skillTypes';
 import { RunStateManager, RunPhase } from './runState';
+import { scanBootstrapContext, buildCapabilitySummary, BootstrapResult } from './bootstrapContext';
 
 // ============================================================================
 // ORCHESTRATOR — The top-level controller
@@ -79,37 +80,61 @@ RULES:
 - Do NOT re-output all the code verbatim. The files already exist. Summarize what was created and highlight any issues.
 - Be thorough but organized.
 
-CRITICAL — AGENTIC OUTPUT ONLY:
-Your response must report what WAS DONE, not what the user should do.
+## OUTPUT FORMAT — MANDATORY
 
-FORBIDDEN OUTPUTS — NEVER INCLUDE THESE IN YOUR RESPONSE:
-❌ "Please run..."
-❌ "You should..."
-❌ "You need to..."
-❌ "Make sure to..."
-❌ "Ask [someone] to..."
-❌ "The user should..."
-❌ "Here's what you need to do"
-❌ "What You Need to Do"
-❌ "Manual Investigation"
-❌ "Next Steps Required"
-❌ Code blocks with commands for the user to copy-paste
-❌ "Would you like me to help...?"
-❌ "Please share any error messages..."
+Your response MUST use ONLY these sections (pick the ones that apply):
+
+### What Was Done
+[List of concrete actions taken: files created, commands run, services started, etc.]
+
+### What Was Created
+[List of artifacts: files, directories, configurations, database entries, etc.]
+
+### Issues Found
+[Any integration problems, conflicts, or gaps between subtasks. Omit if none.]
+
+### What Failed
+[ONLY if subtasks failed: describe what was attempted and what went wrong. State that Johann will retry.]
+
+DO NOT add any sections not listed above. DO NOT add "Next Steps", "Manual Steps", "Recommendations", "What You Should Do", or any section that tells the user to take action.
+
+## ABSOLUTE PROHIBITION — USER-DIRECTED CONTENT
+
+You are an EXECUTION REPORT. You do NOT give instructions. You do NOT suggest next steps. You do NOT ask questions.
+
+If you find yourself writing ANY of these, STOP and DELETE IT:
+- "Please run..." / "Run the following..."
+- "You should..." / "You need to..." / "You'll want to..."
+- "Make sure to..." / "Don't forget to..."
+- "Ask [someone] to..." / "Tell [someone] to..."
+- "Here's what you need to do" / "What You Need to Do"
+- "Manual Investigation" / "Manual Steps"
+- "Next Steps Required" / "Next Steps" / "Recommended Next Steps"
+- "Would you like me to help...?" / "Would you like me to..."
+- "Please share any error messages..."
+- "Consider..." (when suggesting the user do something)
+- "You can then..." / "After that, you can..."
+- "To fix this, run..." / "To resolve this..."
+- Any code block formatted as a command for the user to run
+- Any numbered list of actions for the user to perform
+- Any question asking the user for input
 
 If a subtask FAILED:
-- Report WHAT was attempted and WHY it failed
+- Report WHAT was attempted and WHY it failed (technical details)
 - Report what DID succeed (partial progress is still progress)
-- State that Johann will retry with a different approach
+- End with: "Johann will retry this with a different approach on the next run."
 - DO NOT give the user a to-do list. DO NOT suggest manual commands.
-- DO NOT ask the user to troubleshoot. Johann owns the problem.
 
-If a subtask SUCCEEDED but was marked failed by review:
-- Check if the subtask's output shows real tool usage (terminal commands run, files created)
-- If real work was done, report it as partially successful
-- The review system can be overly strict — use your judgment
+If ALL subtasks SUCCEEDED:
+- Report what was built/changed
+- That's it. No "next steps", no "recommendations", no suggestions.
 
-The user expects a report of completed actions and honest status, not a manual. Johann is an autonomous agent — failure means "I'll try harder next time", not "please do it yourself."`;
+If a subtask was marked failed by review but its output shows real tool usage (terminal commands run, files created):
+- Check the output for evidence of real work
+- Report it as partially successful if the work was actually done
+- The review system can be overly strict — trust the evidence
+
+The user expects a REPORT of what happened. Not a manual. Not a tutorial. Not a troubleshooting guide. A REPORT.`;
 
 export class Orchestrator {
     private modelPicker: ModelPicker;
@@ -417,6 +442,25 @@ export class Orchestrator {
         // Get memory context
         const memoryContext = await this.memory.getRecentMemoryContext();
 
+        // == BOOTSTRAP: Environment detection for background mode ==
+        let enrichedFullContext = fullContext;
+        let enrichedSubagentContext = subagentContext;
+        try {
+            const bootstrapResult = await scanBootstrapContext();
+            if (bootstrapResult.hasContext) {
+                enrichedFullContext = bootstrapResult.contextBlock + '\n\n' + fullContext;
+                const capSummary = buildCapabilitySummary(bootstrapResult.capabilities);
+                if (capSummary) {
+                    enrichedSubagentContext = capSummary + '\n\n' + subagentContext;
+                }
+                await debugLog.logEvent('other',
+                    `Bootstrap: ${bootstrapResult.capabilities.map(c => c.name).join(', ')} detected`
+                );
+            }
+        } catch {
+            // Non-critical
+        }
+
         try {
             // == PHASE 1: PLANNING ==
             reporter.phase('Planning', 'Analyzing request and creating plan');
@@ -426,7 +470,7 @@ export class Orchestrator {
 
             const plan = await this.taskDecomposer.decompose(
                 request,
-                fullContext,
+                enrichedFullContext,
                 memoryContext,
                 userModel,
                 token,
@@ -483,7 +527,7 @@ export class Orchestrator {
             try {
                 const results = await this.executePlan(
                     plan,
-                    subagentContext,
+                    enrichedSubagentContext,
                     reporter,
                     token,
                     debugLog,
@@ -677,6 +721,38 @@ export class Orchestrator {
         // Get memory context
         const memoryContext = await this.memory.getRecentMemoryContext();
 
+        // == BOOTSTRAP: Scan workspace for project environment context ==
+        // This detects DDEV, Docker, package managers, WordPress, etc.
+        // and builds capability descriptions that tell planners and subagents
+        // what tools are available (ddev wp, ddev exec, npm, etc.)
+        let bootstrapResult: BootstrapResult | undefined;
+        try {
+            bootstrapResult = await scanBootstrapContext();
+            if (bootstrapResult.hasContext) {
+                await debugLog.logEvent('other',
+                    `Bootstrap: ${bootstrapResult.capabilities.map(c => c.name).join(', ')} detected`
+                );
+            }
+        } catch (bootstrapErr) {
+            // Non-critical — proceed without bootstrap context
+            await debugLog.logEvent('other',
+                `Bootstrap scan failed: ${bootstrapErr instanceof Error ? bootstrapErr.message : String(bootstrapErr)}`
+            );
+        }
+
+        // Enrich contexts with bootstrap information
+        let enrichedFullContext = fullContext;
+        let enrichedSubagentContext = subagentContext;
+        if (bootstrapResult?.hasContext) {
+            // Planning gets full bootstrap (capabilities + file contents)
+            enrichedFullContext = bootstrapResult.contextBlock + '\n\n' + fullContext;
+            // Subagents get compact capability summary (no file contents)
+            const capSummary = buildCapabilitySummary(bootstrapResult.capabilities);
+            if (capSummary) {
+                enrichedSubagentContext = capSummary + '\n\n' + subagentContext;
+            }
+        }
+
         try {
             // == PHASE 1: PLANNING ==
             await this.hookRunner.run('on_session_start', { request, session });
@@ -689,7 +765,7 @@ export class Orchestrator {
 
             const plan = await this.taskDecomposer.decompose(
                 request,
-                fullContext,
+                enrichedFullContext,
                 memoryContext,
                 userModel,
                 token,
@@ -756,9 +832,9 @@ export class Orchestrator {
             }
 
             try {
-                // Pass subagentContext (minimal workspace context without Johann's identity)
-                // to prevent subagents from confusing themselves with Johann
-                const results = await this.executePlan(plan, subagentContext, reporter, token, debugLog, worktreeManager, persist, undefined, toolToken, ledger2Ready ? ledger2 : undefined, this.hookRunner);
+                // Pass enrichedSubagentContext (workspace context + environment capabilities,
+                // WITHOUT Johann's identity) so subagents know what tools are available
+                const results = await this.executePlan(plan, enrichedSubagentContext, reporter, token, debugLog, worktreeManager, persist, undefined, toolToken, ledger2Ready ? ledger2 : undefined, this.hookRunner);
 
                 // == PHASE 3: MERGE & RESPOND ==
                 session.status = 'reviewing';
@@ -1320,6 +1396,9 @@ export class Orchestrator {
 
         const triedModelIds: string[] = [];
 
+        // Get RunState manager reference (used throughout the escalation loop)
+        const runMgr2 = RunStateManager.getInstance();
+
         // Fire before_subtask hook (once, before any attempts)
         if (hookRunner) {
             await hookRunner.run('before_subtask', { subtask });
@@ -1363,7 +1442,6 @@ export class Orchestrator {
             subtask.status = 'in-progress';
 
             // === RunState: mark task running ===
-            const runMgr2 = RunStateManager.getInstance();
             await runMgr2.updateTask(subtask.id, {
                 status: 'running',
                 progressMessage: `Attempt ${subtask.attempts}/${subtask.maxAttempts}`,
@@ -1440,58 +1518,15 @@ export class Orchestrator {
                 });
             }
 
-            // Multi-pass execution: if the subtask opts in and has a TaskType,
-            // route through MultiPassExecutor for structured verification.
-            if (subtask.useMultiPass && subtask.taskType) {
-                const strategy = getMultiPassStrategy(subtask.taskType);
-                if (strategy) {
-                    getLogger().info(`Using multi-pass strategy "${strategy.type}" for subtask ${subtask.id}`);
-                    reporter.emit({ type: 'task-progress', id: subtask.id, message: `Multi-pass: ${strategy.type}` });
-
-                    // Mark running in ledger before execution
-                    if (ledger) {
-                        await ledger.markRunning(subtask.id, modelInfo.id, subtask.worktreePath || undefined);
-                    }
-
-                    const mpResult = await this.multiPassExecutor.execute(
-                        strategy,
-                        subtask.taskType,
-                        subtask.complexity,
-                        {
-                            taskDescription: subtask.description,
-                            relevantFiles: undefined, // TODO: gather from dependency results
-                            previousAttempts: escalation.attempts.map(a => a.reason || ''),
-                        }
-                    );
-
-                    if (mpResult.success && !mpResult.shouldEscalate) {
-                        subtask.status = 'completed';
-                        if (persist) {
-                            await persist.writeSubtaskUpdate(subtask);
-                        }
-                        reporter.emit({ type: 'task-completed', id: subtask.id, durationMs: mpResult.metadata.timeMs });
-                        return {
-                            success: true,
-                            modelUsed: mpResult.metadata.modelsUsed.join(', '),
-                            output: mpResult.finalOutput,
-                            reviewNotes: `Multi-pass (${strategy.type}): ${mpResult.metadata.totalPasses} passes`,
-                            durationMs: mpResult.metadata.timeMs,
-                            timestamp: new Date().toISOString(),
-                        };
-                    }
-
-                    // Multi-pass failed or wants escalation — fall through to next attempt
-                    getLogger().info(`Multi-pass escalation for ${subtask.id}: ${mpResult.escalationReason}`);
-                    escalation.attempts.push({
-                        modelId: modelInfo.id,
-                        tier: modelInfo.tier,
-                        success: false,
-                        reason: mpResult.escalationReason || 'Multi-pass did not converge',
-                    });
-                    continue;
-                }
-                // No strategy for this TaskType — fall through to single-pass
-            }
+            // Multi-pass execution: DISABLED for agentic subtasks.
+            // The MultiPassExecutor is text-only (no tool tokens) — it sends raw LLM
+            // requests without terminal, filesystem, or any tool access. Johann's
+            // subtasks are agentic Copilot sessions that MUST use tools (run commands,
+            // create files, etc.). Routing them through multi-pass causes:
+            //   1. Text-only hallucination (model claims work was done without doing it)
+            //   2. Safety refusals (model refuses to "generate" browser/screenshot code)
+            // Always use single-pass subagentManager execution for agentic tasks.
+            // TODO: Re-enable when MultiPassExecutor gains tool access via toolToken.
 
             // Standard single-pass execution
 
@@ -1675,7 +1710,8 @@ export class Orchestrator {
 
     /**
      * Merge results from all subtasks into a unified response.
-     * Streams the merged output directly to the response stream.
+     * Buffers the complete output, sanitizes it to remove forbidden phrases,
+     * then streams the clean version to the user.
      */
     private async mergeResults(
         originalRequest: string,
@@ -1686,7 +1722,7 @@ export class Orchestrator {
         stream?: vscode.ChatResponseStream,
         debugLog?: DebugConversationLog
     ): Promise<string> {
-        // If only one subtask, just return its output
+        // If only one subtask, just return its output (already streamed during execution)
         if (plan.subtasks.length === 1) {
             const result = results.get(plan.subtasks[0].id);
             if (result && result.success) {
@@ -1705,7 +1741,6 @@ export class Orchestrator {
                 )
             ];
 
-            const mergeStartTime = Date.now();
             const output = await withRetry(
                 async () => {
                     const callStart = Date.now();
@@ -1713,9 +1748,6 @@ export class Orchestrator {
                     let text = '';
                     for await (const chunk of response.text) {
                         text += chunk;
-                        if (stream) {
-                            stream.markdown(chunk);
-                        }
                     }
 
                     // Debug log the merge call
@@ -1736,7 +1768,24 @@ export class Orchestrator {
                 REVIEW_RETRY_POLICY,
                 token
             );
-            return output;
+
+            // Post-merge sanitization: strip forbidden phrases that the model
+            // may have emitted despite the prompt's ABSOLUTE PROHIBITION section.
+            const sanitized = this.sanitizeMergeOutput(output);
+
+            // NOW stream the clean output to the user
+            if (stream) {
+                stream.markdown(sanitized);
+            }
+
+            // Log if sanitization made changes
+            if (sanitized !== output && debugLog) {
+                await debugLog.logEvent('merge',
+                    `Post-merge sanitization removed ${output.length - sanitized.length} chars of forbidden content`
+                );
+            }
+
+            return sanitized;
         } catch {
             // Fallback: concatenate results
             const fallback = this.fallbackMerge(plan, results);
@@ -1748,7 +1797,54 @@ export class Orchestrator {
     }
 
     /**
+     * Strip forbidden user-directed phrases and sections from merge output.
+     * This is the last line of defense — even if the LLM ignores the prompt,
+     * we structurally remove the offending content before the user sees it.
+     */
+    private sanitizeMergeOutput(output: string): string {
+        let sanitized = output;
+
+        // Remove entire "Next Steps" sections (header + content until next header or end)
+        sanitized = sanitized.replace(
+            /^#{1,4}\s*(Next\s+Steps|Manual\s+Steps|Manual\s+Investigation|What\s+You\s+(Need|Should)\s+to\s+Do|Recommended\s+Next\s+Steps|Recommendations|Action\s+Items|Required\s+Actions)[^\n]*\n[\s\S]*?(?=^#{1,4}\s|\n$)/gmi,
+            ''
+        );
+
+        // Remove individual forbidden phrases and their surrounding sentence/line
+        const forbiddenPatterns = [
+            /^[^\n]*\bPlease run\b[^\n]*$/gmi,
+            /^[^\n]*\bYou should\b[^\n]*$/gmi,
+            /^[^\n]*\bYou need to\b[^\n]*$/gmi,
+            /^[^\n]*\bYou'll need to\b[^\n]*$/gmi,
+            /^[^\n]*\bYou'll want to\b[^\n]*$/gmi,
+            /^[^\n]*\bYou can then\b[^\n]*$/gmi,
+            /^[^\n]*\bMake sure to\b[^\n]*$/gmi,
+            /^[^\n]*\bDon't forget to\b[^\n]*$/gmi,
+            /^[^\n]*\bWould you like me to\b[^\n]*$/gmi,
+            /^[^\n]*\bPlease share\b[^\n]*$/gmi,
+            /^[^\n]*\bAsk the user\b[^\n]*$/gmi,
+            /^[^\n]*\bTell the user\b[^\n]*$/gmi,
+            /^[^\n]*\bThe user needs\b[^\n]*$/gmi,
+            /^[^\n]*\bThe user should\b[^\n]*$/gmi,
+            /^[^\n]*\bTo fix this,\s*run\b[^\n]*$/gmi,
+            /^[^\n]*\bTo resolve this\b[^\n]*$/gmi,
+            /^[^\n]*\bAfter that,\s*you can\b[^\n]*$/gmi,
+        ];
+
+        for (const pattern of forbiddenPatterns) {
+            sanitized = sanitized.replace(pattern, '');
+        }
+
+        // Clean up excessive blank lines left by removals
+        sanitized = sanitized.replace(/\n{4,}/g, '\n\n');
+
+        return sanitized.trim();
+    }
+
+    /**
      * Build the merge prompt.
+     * CRITICAL: Include partial output even for failed tasks so the merge model
+     * can assess whether real work was done despite a review false-negative.
      */
     private buildMergePrompt(
         originalRequest: string,
@@ -1770,7 +1866,20 @@ export class Orchestrator {
             if (result?.success) {
                 parts.push(result.output.substring(0, 8000));
             } else {
-                parts.push(`Failed: ${result?.reviewNotes || 'No output'}`);
+                parts.push(`Review notes: ${result?.reviewNotes || 'No review notes'}`);
+                // Include partial output from failed tasks — the agent may have done
+                // real work that was incorrectly rejected by the review model.
+                // The merge model should judge whether the work was actually done.
+                if (result?.output && result.output.length > 100) {
+                    // Show the LAST portion of the output where summary blocks live
+                    const maxFailedOutput = 6000;
+                    const failedOutput = result.output.length > maxFailedOutput
+                        ? '...\n' + result.output.substring(result.output.length - maxFailedOutput)
+                        : result.output;
+                    parts.push('');
+                    parts.push('PARTIAL OUTPUT (review may have been a false negative — judge for yourself):');
+                    parts.push(failedOutput);
+                }
             }
         }
 

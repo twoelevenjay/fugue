@@ -16,7 +16,9 @@ import { discoverSkills, formatSkillsForPrompt } from './skills';
 import { HeartbeatManager } from './heartbeat';
 import { createLogger, JohannLogger } from './logger';
 import { SubagentRegistry } from './subagentRegistry';
-import { BackgroundTaskManager } from './backgroundTaskManager';\nimport { RunStateManager } from './runState';\nimport { generateSnapshot } from './statusSnapshot';
+import { BackgroundTaskManager } from './backgroundTaskManager';
+import { RunStateManager } from './runState';
+import { generateSnapshot } from './statusSnapshot';
 
 // ============================================================================
 // JOHANN CHAT PARTICIPANT

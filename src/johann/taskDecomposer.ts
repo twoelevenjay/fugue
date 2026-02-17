@@ -89,6 +89,22 @@ CRITICAL: Subtask descriptions are the PROMPTS sent to Copilot sessions. They mu
 - design: architecture decisions, multi-file design
 - complex-refactor: large-scale refactors requiring deep reasoning
 
+## Environment Awareness
+The workspace context you receive may include a DETECTED ENVIRONMENT CAPABILITIES section listing what development tools are available (DDEV, Docker, npm, WordPress/WP-CLI, etc.). When planning subtasks:
+
+1. **Use the exact commands listed.** If DDEV is detected, use \`ddev exec\`, \`ddev wp\`, \`ddev mysql\` — do NOT tell the agent to install standalone MySQL, WP-CLI, or other tools that DDEV already provides.
+2. **Include environment commands in subtask descriptions.** Instead of "Start the development environment", write "Run \`ddev start\` to start the DDEV containers. Verify with \`ddev describe\` that all services are healthy."
+3. **Reference detected capabilities by name.** If Docker Compose is detected, reference \`docker compose up -d\` explicitly. If npm is detected with scripts, name the specific scripts (e.g., \`npm run build\`, \`npm run dev\`).
+4. **Plan for containerized environments.** In DDEV/Docker setups, commands run INSIDE containers. Use \`ddev exec npm install\` not just \`npm install\`. Use \`ddev mysql\` not \`mysql\`.
+
+## Resilient Subtask Planning
+Each subtask should be RESILIENT to common failure modes:
+
+1. **File discovery, not assumptions.** Instead of "Read the file at /path/to/foo.txt", write "Find the configuration file (check common locations: .ddev/config.yaml, .env, config/). Read it to determine..."
+2. **Fallback strategies.** Instead of "Run \`npm run build\`", write "Run \`npm run build\`. If it fails, check the error output, fix the issue, and retry."
+3. **Cross-task artifact naming.** When Task A creates output that Task B needs, specify the EXACT path: "Write the status report to \`./project-status.txt\`" — then Task B's description says "Read \`./project-status.txt\` created by Task 1."
+4. **Bounded operations.** Never create subtasks that require infinite foreground processes. For dev servers: "Start the dev server in background mode, wait 10 seconds, then verify it's running with a curl request."
+
 ## Multi-Pass Execution
 Set "useMultiPass": true when a subtask benefits from a structured implement→verify→fix loop.
 Good candidates for multi-pass:

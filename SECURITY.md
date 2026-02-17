@@ -12,7 +12,7 @@ If you discover a security vulnerability in Fugue, **please do not open a public
 
 Instead, report it privately:
 
-1. **Email:** [leonshelhamer@gmail.com](mailto:leonshelhamer@gmail.com)
+1. **Email:** [leon@211j.com](mailto:leon@211j.com)
 2. **Subject line:** `[SECURITY] Fugue — <brief description>`
 3. **Include:**
    - Description of the vulnerability
