@@ -273,11 +273,18 @@ export class RunStateManager {
     /**
      * Mark the run as failed.
      */
-    async failRun(_error?: string): Promise<void> {
+    async failRun(error?: string): Promise<void> {
         if (!this.state) {
             return;
         }
         this.state.status = 'failed';
+        if (error) {
+            // Store error in the plan summary if no plan summary exists,
+            // otherwise append it for visibility
+            this.state.planSummary = this.state.planSummary
+                ? `${this.state.planSummary} [Error: ${error.substring(0, 200)}]`
+                : `Error: ${error.substring(0, 200)}`;
+        }
         this.touch();
         await this.persist();
         this._onStateChange.fire(this.state);
@@ -293,6 +300,7 @@ export class RunStateManager {
         this.state.planSummary = summary;
         this.touch();
         await this.persist();
+        this._onStateChange.fire(this.state);
     }
 
     /**
@@ -495,6 +503,7 @@ export class RunStateManager {
         }
         this.touch();
         await this.persist();
+        this._onStateChange.fire(this.state);
     }
 
     // ========================================================================
@@ -545,7 +554,9 @@ export class RunStateManager {
             queued: this.state.tasks.filter((t) => t.status === 'queued').length,
             running: this.state.tasks.filter((t) => t.status === 'running').length,
             done: this.state.tasks.filter((t) => t.status === 'done').length,
-            failed: this.state.tasks.filter((t) => t.status === 'failed').length,
+            failed: this.state.tasks.filter(
+                (t) => t.status === 'failed' || t.status === 'cancelled',
+            ).length,
         };
     }
 
@@ -575,6 +586,7 @@ export class RunStateManager {
             const parsed = JSON.parse(new TextDecoder().decode(bytes)) as RunStateData;
             this.state = parsed;
             this.persistDir = sessionDir;
+            this._onStateChange.fire(this.state);
             return parsed;
         } catch {
             return null;

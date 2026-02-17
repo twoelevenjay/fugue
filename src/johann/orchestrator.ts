@@ -15,7 +15,7 @@ import { SubagentManager } from './subagentManager';
 import { MemorySystem } from './memory';
 import { getCopilotAgentSettings, getConfig } from './config';
 import { getLogger } from './logger';
-import { classifyError, withRetry, REVIEW_RETRY_POLICY, ClassifiedError } from './retry';
+import { classifyError, withRetry, REVIEW_RETRY_POLICY, ClassifiedError, extractErrorMessage } from './retry';
 import { DebugConversationLog } from './debugConversationLog';
 import { WorktreeManager } from './worktreeManager';
 import { ExecutionLedger } from './executionLedger';
@@ -25,8 +25,9 @@ import { BackgroundTaskManager } from './backgroundTaskManager';
 import { ProgressReporter } from './progressEvents';
 import { RateLimitGuard } from './rateLimitGuard';
 import { SessionPersistence, ResumableSession } from './sessionPersistence';
-import { MultiPassExecutor } from './multiPassExecutor';
-import { ToolVerifier } from './toolVerifier';
+// MultiPassExecutor and ToolVerifier are not currently wired for agentic execution.
+// import { MultiPassExecutor } from './multiPassExecutor';
+// import { ToolVerifier } from './toolVerifier';
 import { getExecutionWaves, getDownstreamTasks, validateGraph } from './graphManager';
 import { HookRunner, createDefaultHookRunner } from './hooks';
 import { FlowCorrectionManager } from './flowCorrection';
@@ -136,8 +137,6 @@ export class Orchestrator {
     private subagentManager: SubagentManager;
     private memory: MemorySystem;
     private config: OrchestratorConfig;
-    private multiPassExecutor: MultiPassExecutor;
-    private toolVerifier: ToolVerifier;
     private hookRunner: HookRunner;
     private rateLimitGuard: RateLimitGuard;
     private flowCorrection: FlowCorrectionManager;
@@ -152,8 +151,6 @@ export class Orchestrator {
         this.taskDecomposer = new TaskDecomposer();
         this.subagentManager = new SubagentManager();
         this.memory = new MemorySystem(config);
-        this.multiPassExecutor = new MultiPassExecutor(getLogger(), this.modelPicker);
-        this.toolVerifier = new ToolVerifier(getLogger());
         this.hookRunner = createDefaultHookRunner();
         this.rateLimitGuard = new RateLimitGuard();
         this.flowCorrection = new FlowCorrectionManager();
@@ -386,7 +383,12 @@ export class Orchestrator {
             userModel,
             task.cancellationToken.token,
             toolToken,
-        );
+        ).catch((err) => {
+            // Catch any uncaught rejections from the background orchestration
+            // (e.g. if BackgroundProgressReporter construction fails)
+            getLogger().error(`Background orchestration failed unexpectedly: ${err}`);
+            taskManager.updateStatus(task.id, 'failed', extractErrorMessage(err)).catch(() => {});
+        });
 
         return task.id;
     }
@@ -1580,6 +1582,9 @@ export class Orchestrator {
             subtaskId: subtask.id,
             attempts: [],
         };
+        // Track escalation on the session — MUST be done here so escalation
+        // data is available for recovery plans and memory recording.
+        // (The session is accessed via closure from the caller.)
 
         const triedModelIds: string[] = [];
 
@@ -1616,6 +1621,7 @@ export class Orchestrator {
 
         while (subtask.attempts < subtask.maxAttempts) {
             if (token.isCancellationRequested) {
+                this.delegationGuard.releaseDelegation();
                 return {
                     success: false,
                     modelUsed: 'cancelled',
@@ -1678,6 +1684,7 @@ export class Orchestrator {
                     label: subtask.title,
                 });
                 subtask.status = 'failed';
+                this.delegationGuard.releaseDelegation();
                 return {
                     success: false,
                     modelUsed: 'none',
@@ -2005,8 +2012,9 @@ export class Orchestrator {
             }
 
             return sanitized;
-        } catch {
+        } catch (mergeErr) {
             // Fallback: concatenate results
+            getLogger().warn(`Merge LLM call failed, using fallback: ${extractErrorMessage(mergeErr)}`);
             const fallback = this.fallbackMerge(plan, results);
             if (stream) {
                 stream.markdown(fallback);

@@ -85,19 +85,33 @@ export async function detectSelfReferentialTask(
         }
     }
 
-    // Check if we're in Johann's own workspace
+    // Check if we're in Johann's own workspace.
+    // Only count markers from ONE folder (the first match) to avoid
+    // accumulating false positives in multi-root or mono-repo workspaces.
     const workspaceFolders = vscode.workspace.workspaceFolders;
     if (workspaceFolders) {
+        let markersFired = false;
         for (const folder of workspaceFolders) {
+            if (markersFired) {
+                break;
+            }
+            let folderHits = 0;
             for (const marker of SELF_REPO_MARKER_FILES) {
                 try {
                     const uri = vscode.Uri.joinPath(folder.uri, marker);
                     await vscode.workspace.fs.stat(uri);
-                    signals.push(`marker file found: ${marker}`);
-                    score += 0.2;
+                    signals.push(`marker file found: ${marker} in ${folder.name}`);
+                    folderHits++;
                 } catch {
                     // File doesn't exist — not a signal
                 }
+            }
+            if (folderHits > 0) {
+                // Credit once: presence in Johann's repo scores 0.3 regardless of
+                // how many marker files match. This prevents 4 markers × 0.2 = 0.8
+                // from auto-triggering on every workspace that contains fugue/.
+                score += 0.3;
+                markersFired = true;
             }
         }
     }

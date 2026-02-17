@@ -270,3 +270,194 @@ export interface BackgroundTask {
     /** Error message (if failed) */
     error?: string;
 }
+
+// ============================================================================
+// AUTONOMOUS EXECUTION TYPES
+// ============================================================================
+
+/**
+ * Status of a project phase during autonomous execution.
+ */
+export type ProjectPhaseStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'skipped';
+
+/**
+ * A single phase within a multi-phase ProjectPlan.
+ */
+export interface ProjectPhase {
+    /** Unique id within the project */
+    readonly id: string;
+    /** Human-readable title */
+    readonly title: string;
+    /** Full description of what this phase should achieve */
+    readonly description: string;
+    /** The orchestration plan (may be generated just-in-time if missing) */
+    orchestrationPlan?: OrchestrationPlan;
+    /** IDs of phases this depends on */
+    readonly dependsOn: string[];
+    /** Current status */
+    status: ProjectPhaseStatus;
+    /** Result of the phase (if completed) */
+    result?: PhaseResult;
+    /** Start timestamp */
+    startTime?: number;
+    /** End timestamp */
+    endTime?: number;
+}
+
+/**
+ * The result of executing a project phase.
+ */
+export interface PhaseResult {
+    /** Whether the phase met its success criteria */
+    success: boolean;
+    /** Summary of output/artifacts */
+    output: string;
+    /** Paths to created/modified files */
+    artifacts: string[];
+    /** Error messages encountered */
+    errors?: string[];
+}
+
+/**
+ * A high-level plan for a multi-phase autonomous project.
+ */
+export interface ProjectPlan {
+    /** Unique project identifier */
+    readonly id: string;
+    /** Human-readable title */
+    readonly title: string;
+    /** The high-level goal of the project */
+    readonly goal: string;
+    /** Ordered or dependency-linked phases */
+    phases: ProjectPhase[];
+    /** Project metadata */
+    metadata: {
+        createdAt: number;
+        model: string;
+        totalEstimatedDuration?: number;
+    };
+}
+
+/**
+ * Configuration for the autonomous run loop.
+ */
+export interface RunLoopConfig {
+    /** Maximum parallel work streams */
+    readonly maxParallelStreams: number;
+    /** Whether to automatically proceed to next phase on success */
+    readonly autoContinue: boolean;
+    /** Whether to pause the entire loop on any phase failure */
+    readonly pauseOnFailure: boolean;
+    /** Path to the progress dashboard file */
+    readonly dashboardPath: string;
+    /** Max retries per phase before giving up or pausing */
+    readonly maxRetriesPerPhase: number;
+    /** Requirement for human review based on task complexity */
+    readonly requireReviewForComplexity: TaskComplexity[];
+    /** Heartbeat interval in milliseconds */
+    readonly heartbeatIntervalMs: number;
+}
+
+/**
+ * Current state of the autonomous execution.
+ */
+export interface AutonomousRunState {
+    /** The plan being executed */
+    plan: ProjectPlan;
+    /** Active configuration */
+    config: RunLoopConfig;
+    /** ID of the phase currently being executed */
+    activePhaseId?: string;
+    /** IDs of streams currently executing in parallel */
+    activeStreamIds: string[];
+    /** Execution history log */
+    history: Array<{
+        timestamp: number;
+        event: string;
+        details?: any;
+    }>;
+    /** Start timestamp of the run */
+    startTime: number;
+    /** Last time the state was saved */
+    lastUpdateTime: number;
+    /** Retry counts per phase */
+    retryCounts: Record<string, number>;
+}
+
+/**
+ * Represents an independent feature branch work unit.
+ */
+export interface WorkStream {
+    /** Unique stream identifier */
+    readonly id: string;
+    /** User-friendly name */
+    readonly name: string;
+    /** Associated git branch */
+    readonly branch: string;
+    /** Root directory for this stream (often a worktree) */
+    readonly rootPath: string;
+    /** Current work stream status */
+    status: 'initializing' | 'active' | 'merging' | 'completed' | 'failed' | 'aborting';
+    /** IDs of phases assigned to this stream */
+    phases: string[];
+    /** Stream dependencies (IDs of other streams) */
+    dependencies: string[];
+}
+
+/**
+ * Dependency graph of work streams.
+ */
+export interface WorkStreamGraph {
+    /** Map of stream IDs to work stream metadata */
+    streams: Map<string, WorkStream>;
+    /** Current concurrency limit */
+    concurrencyLimit: number;
+}
+
+/**
+ * Runtime status summary of all work streams.
+ */
+export interface WorkStreamStatus {
+    activeStreams: number;
+    completedStreams: number;
+    failedStreams: number;
+    pendingStreams: number;
+}
+
+/**
+ * Result of a background health check.
+ */
+export interface HealthCheck {
+    /** Timestamp of the check */
+    timestamp: number;
+    /** Status indicator */
+    status: 'healthy' | 'degraded' | 'critical';
+    /** List of issues found */
+    issues: string[];
+}
+
+/**
+ * Configuration for the self-monitoring system.
+ */
+export interface MonitorConfig {
+    /** Milliseconds of inactivity before a task is considered stalled */
+    stallThresholdMs: number;
+    /** Maximum disk usage in GB before warning */
+    maxDiskUsageGb: number;
+    /** Maximum allowed concurrent subtasks across all streams */
+    maxConcurrentSubtasks: number;
+}
+
+/**
+ * Record of a detected stall in execution.
+ */
+export interface StallDetection {
+    /** ID of the stalled task */
+    taskId: string;
+    /** ID of the work stream */
+    streamId: string;
+    /** Timestamp of last known activity */
+    lastActivity: number;
+    /** Action taken to resolve the stall */
+    actionTaken: 'none' | 'ping' | 'escalate' | 'restart';
+}

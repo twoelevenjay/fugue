@@ -69,11 +69,13 @@ export class SelfHealingDetector {
         description: string,
         reviewResult: any, // The parsed review JSON
         output: string,
-    ): DetectedFailure | undefined {
+    ): DetectedFailure[] {
         const checklist = reviewResult.checklist;
         if (!checklist) {
-            return undefined;
+            return [];
         }
+
+        const detected: DetectedFailure[] = [];
 
         // Check for non-agentic behavior
         if (checklist.noUserDirectedInstructions === false) {
@@ -86,7 +88,7 @@ export class SelfHealingDetector {
                 checklistField: 'noUserDirectedInstructions',
             };
             this.detectedFailures.push(failure);
-            return failure;
+            detected.push(failure);
         }
 
         // Check for stubs/placeholders
@@ -100,7 +102,7 @@ export class SelfHealingDetector {
                 checklistField: 'noStubs',
             };
             this.detectedFailures.push(failure);
-            return failure;
+            detected.push(failure);
         }
 
         // Check for incomplete work
@@ -113,10 +115,10 @@ export class SelfHealingDetector {
                 checklistField: 'realWorkDone',
             };
             this.detectedFailures.push(failure);
-            return failure;
+            detected.push(failure);
         }
 
-        return undefined;
+        return detected;
     }
 
     /**
@@ -124,12 +126,12 @@ export class SelfHealingDetector {
      */
     private extractUserDirectedPhrases(output: string): string[] {
         const patterns = [
-            /please run[^.!?\n]{0,100}[.!?\n]/gi,
-            /you should[^.!?\n]{0,100}[.!?\n]/gi,
-            /you need to[^.!?\n]{0,100}[.!?\n]/gi,
-            /make sure to[^.!?\n]{0,100}[.!?\n]/gi,
-            /ask (?:the )?user to[^.!?\n]{0,100}[.!?\n]/gi,
-            /tell (?:the )?user to[^.!?\n]{0,100}[.!?\n]/gi,
+            /please run[^\n]{0,100}/gi,
+            /you should[^\n]{0,100}/gi,
+            /you need to[^\n]{0,100}/gi,
+            /make sure to[^\n]{0,100}/gi,
+            /ask (?:the )?user to[^\n]{0,100}/gi,
+            /tell (?:the )?user to[^\n]{0,100}/gi,
         ];
 
         const evidence: string[] = [];
@@ -426,8 +428,14 @@ Do not return until checklist is complete.`,
         },
     }),
 
-    // Placeholders for other patterns — will be implemented when needed
-    'missing-implementation': () => ({}) as SkillDoc,
-    'incorrect-imports': () => ({}) as SkillDoc,
-    'missing-error-handling': () => ({}) as SkillDoc,
+    // Not yet implemented — throw so corrupt skills are never saved
+    'missing-implementation': () => {
+        throw new Error('Skill generator for missing-implementation not yet implemented');
+    },
+    'incorrect-imports': () => {
+        throw new Error('Skill generator for incorrect-imports not yet implemented');
+    },
+    'missing-error-handling': () => {
+        throw new Error('Skill generator for missing-error-handling not yet implemented');
+    },
 };

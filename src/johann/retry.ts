@@ -57,15 +57,19 @@ const NETWORK_PATTERNS = [
 ];
 
 // Patterns for matching rate-limit / quota errors
+// Use multi-word patterns to avoid false positives (e.g., "rate" matching "generate")
 const RATE_LIMIT_PATTERNS = [
-    'rate',
-    'limit',
+    'rate limit',
+    'rate_limit',
+    'ratelimit',
+    'too many requests',
     'too many',
+    'quota exceeded',
     'quota',
-    'exceeded',
     'throttl',
     '429',
     'slow down',
+    'request limit',
 ];
 
 // Patterns for cancellation
@@ -176,6 +180,18 @@ export function classifyError(err: unknown): ClassifiedError {
         };
     }
 
+    // Check API compatibility errors BEFORE rate limits (more specific check first)
+    // These are NOT retryable with the same model — need a different model
+    if (API_COMPAT_PATTERNS.some((p) => lower.includes(p))) {
+        return {
+            category: 'api-compat',
+            message,
+            retryable: false, // Not retryable with SAME model, but orchestrator should try DIFFERENT model
+            userGuidance:
+                'This model does not support a required API parameter. Johann will try a different model.',
+        };
+    }
+
     // Check rate limiting
     if (RATE_LIMIT_PATTERNS.some((p) => lower.includes(p))) {
         return {
@@ -196,18 +212,6 @@ export function classifyError(err: unknown): ClassifiedError {
             retryable: false,
             userGuidance:
                 'Authentication or permission error. Make sure GitHub Copilot is active and signed in.',
-        };
-    }
-
-    // Check API compatibility errors (e.g., GPT models rejecting context_management parameter)
-    // These should NOT be retried with the same model — need escalation to a different model
-    if (API_COMPAT_PATTERNS.some((p) => lower.includes(p))) {
-        return {
-            category: 'api-compat',
-            message,
-            retryable: false, // Not retryable with SAME model, but orchestrator should try DIFFERENT model
-            userGuidance:
-                'This model does not support a required API parameter. Johann will try a different model.',
         };
     }
 
@@ -290,12 +294,16 @@ function calculateDelay(attempt: number, policy: RetryPolicy): number {
  */
 async function cancellableSleep(ms: number, token?: vscode.CancellationToken): Promise<boolean> {
     return new Promise((resolve) => {
-        const timeout = setTimeout(() => resolve(true), ms);
+        let listener: vscode.Disposable | undefined;
+        const timeout = setTimeout(() => {
+            listener?.dispose();
+            resolve(true);
+        }, ms);
 
         if (token) {
-            const listener = token.onCancellationRequested(() => {
+            listener = token.onCancellationRequested(() => {
                 clearTimeout(timeout);
-                listener.dispose();
+                listener?.dispose();
                 resolve(false);
             });
         }

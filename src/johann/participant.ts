@@ -10,10 +10,9 @@ import { logEvent, getRecentDailyNotesContext } from './dailyNotes';
 import { discoverSkills, formatSkillsForPrompt } from './skills';
 import { HeartbeatManager } from './heartbeat';
 import { createLogger } from './logger';
-import { SubagentRegistry } from './subagentRegistry';
 import { BackgroundTaskManager } from './backgroundTaskManager';
 import { RunStateManager } from './runState';
-import { generateSnapshot } from './statusSnapshot';
+import { generateSnapshot, generateDetailedSnapshot } from './statusSnapshot';
 
 // ============================================================================
 // JOHANN CHAT PARTICIPANT
@@ -246,7 +245,7 @@ export function registerJohannParticipant(_context: vscode.ExtensionContext): vs
                     const state = runManager.getState();
                     if (state) {
                         const snapshot = lowerMsg.includes('detailed')
-                            ? (await import('./statusSnapshot')).generateDetailedSnapshot(state)
+                            ? generateDetailedSnapshot(state)
                             : generateSnapshot(state);
                         await runManager.recordSnapshot();
                         response.markdown(snapshot.markdown);
@@ -419,11 +418,7 @@ export function registerJohannParticipant(_context: vscode.ExtensionContext): vs
             }
 
             // === ORCHESTRATE ===
-            const registry = new SubagentRegistry(
-                transcript?.getSessionId() || `anon-${Date.now()}`,
-            );
-            await registry.initialize();
-
+            try {
             // Check if background mode is enabled
             if (config.backgroundModeEnabled) {
                 // Start background orchestration and return immediately
@@ -470,23 +465,6 @@ export function registerJohannParticipant(_context: vscode.ExtensionContext): vs
                 );
             }
 
-            // === POST-ORCHESTRATION ===
-            // Complete bootstrap if first run
-            if (isFirstRun && johannDir) {
-                await completeBootstrap(johannDir);
-                logger.info('Bootstrap completed — BOOTSTRAP.md removed.');
-            }
-
-            // Close session transcript
-            if (transcript) {
-                await transcript.recordAgent('(orchestration complete)');
-                await transcript.close(userMessage.substring(0, 100));
-            }
-
-            // Log completion
-            await logEvent('Request completed', `Finished: ${userMessage.substring(0, 100)}`);
-            logger.info(`Request completed: ${userMessage.substring(0, 80)}`);
-
             return {
                 metadata: {
                     command: 'orchestrate',
@@ -494,6 +472,32 @@ export function registerJohannParticipant(_context: vscode.ExtensionContext): vs
                     summary: userMessage.substring(0, 200),
                 },
             };
+            } finally {
+            // === POST-ORCHESTRATION CLEANUP (runs even if orchestration throws) ===
+            // Complete bootstrap if first run
+            if (isFirstRun && johannDir) {
+                try {
+                    await completeBootstrap(johannDir);
+                    logger.info('Bootstrap completed — BOOTSTRAP.md removed.');
+                } catch (bootstrapErr) {
+                    logger.warn(`Bootstrap cleanup failed: ${bootstrapErr}`);
+                }
+            }
+
+            // Close session transcript
+            if (transcript) {
+                try {
+                    await transcript.recordAgent('(orchestration complete)');
+                    await transcript.close(userMessage.substring(0, 100));
+                } catch {
+                    // Non-critical
+                }
+            }
+
+            // Log completion
+            await logEvent('Request completed', `Finished: ${userMessage.substring(0, 100)}`);
+            logger.info(`Request completed: ${userMessage.substring(0, 80)}`);
+            }
         },
     );
 
@@ -662,7 +666,7 @@ export function registerJohannParticipant(_context: vscode.ExtensionContext): vs
     </style>
 </head>
 <body>
-    <pre>${diagnostics}</pre>
+    <pre>${diagnostics.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}</pre>
 </body>
 </html>`;
         }),

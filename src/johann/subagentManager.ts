@@ -813,8 +813,11 @@ export class SubagentManager {
                         }
                         fullOutput +=
                             '\n[STOPPED: model produced only text without tool calls for multiple rounds]';
+                        break;
                     }
-                    break;
+                    // Not yet at the limit — continue the loop to give the model
+                    // another chance to produce tool calls
+                    continue;
                 }
 
                 // Reset consecutive text round counter since we got tool calls
@@ -879,6 +882,7 @@ export class SubagentManager {
                             missingCallIdWarnings.push(
                                 `Tool "${tc.name}" returned without a callId.`,
                             );
+                            // Output was already captured in fullOutput above
                             continue;
                         }
 
@@ -903,6 +907,7 @@ export class SubagentManager {
                             missingCallIdWarnings.push(
                                 `Tool "${tc.name}" failed and had no callId: ${errMsg}`,
                             );
+                            // Error info already captured in fullOutput above
                             continue;
                         }
 
@@ -1147,7 +1152,8 @@ export class SubagentManager {
         // Gather execution metadata BEFORE truncation so we count ALL tool calls
         const toolUsage = this.countToolUsage(result.output);
         const hasSummaryBlock =
-            /```summary/i.test(result.output) || /COMPLETED/i.test(result.output);
+            /```summary/i.test(result.output) ||
+            /^\s*(?:#{1,3}\s*)?(?:COMPLETED|SUMMARY|DONE)[:\s]/im.test(result.output);
         const hasFileCreation =
             /\[Tool:\s*(copilot_createFile|create_file)\]/i.test(result.output) ||
             /\[Tool:\s*run_in_terminal\].*?(cat|echo|tee|>>|>)\s/i.test(result.output);
