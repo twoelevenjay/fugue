@@ -76,7 +76,7 @@ export default [
             'prefer-const': 'warn',
             '@typescript-eslint/no-unused-vars': [
                 'warn',
-                { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+                { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
             ],
         },
     },

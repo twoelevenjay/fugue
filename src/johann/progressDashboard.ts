@@ -122,7 +122,9 @@ export class ProgressDashboard {
 
     private renderStreams(state: AutonomousRunStateLike): string {
         const streams: any[] = (state?.workStreams as any[]) ?? [];
-        if (!streams.length) {return '## Work Streams\n\n_No active work streams_';}
+        if (!streams.length) {
+            return '## Work Streams\n\n_No active work streams_';
+        }
 
         const rows = streams.map((s) => {
             const name = s?.name ?? s?.id ?? 'unknown';
@@ -152,7 +154,9 @@ export class ProgressDashboard {
 
     private renderEvents(): string {
         const recent = this.events.slice(-20);
-        if (!recent.length) {return '## Recent Events\n\n_No recent events_';}
+        if (!recent.length) {
+            return '## Recent Events\n\n_No recent events_';
+        }
         const lines = recent
             .map((e) => `- ${new Date(e.timestamp).toLocaleString()} — ${e.type}: ${e.message}`)
             .join('\n');
@@ -162,7 +166,9 @@ export class ProgressDashboard {
     private renderErrors(state: AutonomousRunStateLike): string {
         const failures: any[] = (state?.recentFailures as any[]) ?? (state?.errors as any[]) ?? [];
         const escalations: any[] = (state?.recentEscalations as any[]) ?? [];
-        if (!failures.length && !escalations.length) {return '## Errors & Escalations\n\n_None_';}
+        if (!failures.length && !escalations.length) {
+            return '## Errors & Escalations\n\n_None_';
+        }
 
         const lines: string[] = [];
         for (const f of failures.slice(-20)) {
@@ -178,7 +184,9 @@ export class ProgressDashboard {
 
     private renderNextUp(state: AutonomousRunStateLike): string {
         const queue: any[] = (state?.queuedSubtasks as any[]) ?? [];
-        if (!queue.length) {return '## Next Up\n\n_Idle or waiting for events_';}
+        if (!queue.length) {
+            return '## Next Up\n\n_Idle or waiting for events_';
+        }
         const lines = queue
             .slice(0, 10)
             .map((q) => `- ${q?.title ?? q?.id ?? 'subtask'} (${q?.streamId ?? 'global'})`);

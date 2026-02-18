@@ -113,6 +113,41 @@ Good candidates for multi-pass:
 - Any task where "write it, then check it compiles, then fix issues" is the natural workflow
 Do NOT enable multi-pass for: documentation, spec writing, small edits, or trivial tasks.
 
+## Examples — Good vs. Bad Subtask Descriptions
+
+### BAD (vague, missing context, no verification):
+\`\`\`json
+{
+  "id": "task-2",
+  "title": "Add user authentication",
+  "description": "Implement authentication for the app using JWT tokens.",
+  "complexity": "moderate",
+  "dependsOn": ["task-1"],
+  "successCriteria": ["Authentication works"]
+}
+\`\`\`
+Problems: No file paths. No framework context. No specific files to create. No verification step. "Authentication works" is unmeasurable.
+
+### GOOD (self-contained, path-specific, verifiable):
+\`\`\`json
+{
+  "id": "task-2",
+  "title": "Add JWT authentication middleware",
+  "description": "Create an Express.js authentication middleware at \`src/middleware/auth.ts\`. The project uses Express 5 with TypeScript (strict mode). The middleware should:\\n\\n1. Extract the Bearer token from the Authorization header\\n2. Verify it using jsonwebtoken (already in package.json)\\n3. Attach the decoded payload to \`req.user\` (type \`AuthUser\` from \`src/types/auth.ts\` created by task-1)\\n4. Return 401 with \`{ error: 'Unauthorized' }\` on invalid/missing tokens\\n\\nThe \`AuthUser\` interface (from task-1):\\n\`\`\`typescript\\ninterface AuthUser { id: string; email: string; role: 'admin' | 'user'; }\\n\`\`\`\\n\\nAfter creating the middleware, add it to the protected routes in \`src/routes/api.ts\` (the router is exported as \`apiRouter\`). Then run \`npx tsc --noEmit\` to verify it compiles.",
+  "taskType": "generate",
+  "complexity": "moderate",
+  "dependsOn": ["task-1"],
+  "successCriteria": ["src/middleware/auth.ts exists and exports authMiddleware", "TypeScript compiles with no errors", "Protected routes in src/routes/api.ts use the middleware"]
+}
+\`\`\`
+Why it works: Exact file paths. Inline type definitions so the agent doesn't need to guess. Specific verification command. Measurable success criteria.
+
+### BAD (over-decomposed, trivial work spread across tasks):
+5 subtasks for "Add a button component" — scanning, creating, styling, testing, documenting separately.
+
+### GOOD (right-sized):
+1 subtask: "Create \`src/components/SubmitButton.tsx\` — a React button component that accepts \`onClick\`, \`disabled\`, and \`children\` props. Style it with the existing Tailwind classes used in \`src/components/CancelButton.tsx\` for consistency. Add a test in \`src/components/__tests__/SubmitButton.test.tsx\`. Run \`npm test -- --testPathPattern=SubmitButton\` to verify."
+
 Return a JSON object with this EXACT structure:
 {
   "summary": "Brief summary of the overall plan",

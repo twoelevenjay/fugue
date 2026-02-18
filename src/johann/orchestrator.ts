@@ -31,9 +31,6 @@ import { BackgroundTaskManager } from './backgroundTaskManager';
 import { ProgressReporter } from './progressEvents';
 import { RateLimitGuard } from './rateLimitGuard';
 import { SessionPersistence, ResumableSession } from './sessionPersistence';
-// MultiPassExecutor and ToolVerifier are not currently wired for agentic execution.
-// import { MultiPassExecutor } from './multiPassExecutor';
-// import { ToolVerifier } from './toolVerifier';
 import { getExecutionWaves, getDownstreamTasks, validateGraph } from './graphManager';
 import { HookRunner, createDefaultHookRunner } from './hooks';
 import { FlowCorrectionManager } from './flowCorrection';
@@ -55,17 +52,11 @@ import { detectSelfReferentialTask, SelfAwarenessResult } from './selfAwareness'
 // 1. User sends request to @johann
 // 2. Orchestrator uses user's model to create an execution plan
 // 3. For each subtask:
-//    - Detect if multi-pass should be used (based on task type + complexity)
-//    - If multi-pass: use MultiPassExecutor for structured verification
-//    - If single-pass: pick model → execute → review → escalate if needed
+//    - Pick model → execute → review → escalate if needed
+//    - Prior attempt context carried forward on retry
+//    - Flow corrections propagated upstream when downstream discovers issues
 // 4. Merge results and respond
 // 5. Write to persistent memory
-//
-// Multi-pass integration:
-// - Draft→Critique→Revise for docs/specs/plans
-// - Self-consistency voting for debugging/analysis
-// - Tool-verified loops for codegen
-// - Two-pass rubric for code review
 // ============================================================================
 
 const MERGE_SYSTEM_PROMPT = `You are Johann, collecting and synthesizing results from multiple subagents that worked on parts of a larger task.
@@ -1241,6 +1232,22 @@ export class Orchestrator {
                     }
                 }
 
+                // === Skill system: attempt autonomous creation between waves ===
+                if (this.skillSystem) {
+                    try {
+                        const newSkills = await this.skillSystem.attemptAutonomousCreation();
+                        if (newSkills.length > 0) {
+                            reporter.emit({
+                                type: 'note',
+                                message: `🛠️ Auto-created ${newSkills.length} skill(s): ${newSkills.map((s) => s.metadata.slug).join(', ')}`,
+                                style: 'success',
+                            });
+                        }
+                    } catch {
+                        // Non-critical
+                    }
+                }
+
                 const pendingSubtasks = pendingIds
                     .map((id) => plan.subtasks.find((st) => st.id === id)!)
                     .filter(Boolean);
@@ -1376,40 +1383,19 @@ export class Orchestrator {
                             });
                         }
 
-                        // ── Flow correction: check review for upstream correction signals ──
-                        if (result.success && result.reviewNotes) {
-                            const corrections = FlowCorrectionManager.parseCorrectionSignals(
-                                result.reviewNotes,
-                                subtask.id,
-                            );
-                            for (const correction of corrections) {
-                                const corrResult = this.flowCorrection.requestCorrection(
-                                    correction,
-                                    plan,
-                                    results,
-                                    completed,
-                                );
-                                if (corrResult.accepted) {
-                                    // Remove invalidated tasks from blocked set too
-                                    for (const invId of corrResult.invalidatedTasks) {
-                                        blocked.delete(invId);
-                                    }
-                                    wavesNeedRecompute = true;
-                                    reporter.emit({
-                                        type: 'note',
-                                        message:
-                                            `🔄 Flow correction: "${subtask.title}" found issue in upstream "${correction.targetTaskId}". ` +
-                                            `Re-running ${corrResult.invalidatedTasks.length} task(s).`,
-                                        style: 'warning',
-                                    });
-                                } else {
-                                    reporter.emit({
-                                        type: 'note',
-                                        message: `⚠️ Correction rejected: ${corrResult.reason}`,
-                                        style: 'warning',
-                                    });
-                                }
-                            }
+                        // ── Flow correction: check output + review for upstream correction signals ──
+                        if (
+                            this.applyFlowCorrections(
+                                subtask,
+                                result,
+                                plan,
+                                results,
+                                completed,
+                                blocked,
+                                reporter,
+                            )
+                        ) {
+                            wavesNeedRecompute = true;
                         }
                     });
 
@@ -1552,39 +1538,19 @@ export class Orchestrator {
                             }
                         }
 
-                        // ── Flow correction: check review for upstream correction signals ──
-                        if (result.success && result.reviewNotes) {
-                            const corrections = FlowCorrectionManager.parseCorrectionSignals(
-                                result.reviewNotes,
-                                subtask.id,
-                            );
-                            for (const correction of corrections) {
-                                const corrResult = this.flowCorrection.requestCorrection(
-                                    correction,
-                                    plan,
-                                    results,
-                                    completed,
-                                );
-                                if (corrResult.accepted) {
-                                    for (const invId of corrResult.invalidatedTasks) {
-                                        blocked.delete(invId);
-                                    }
-                                    wavesNeedRecompute = true;
-                                    reporter.emit({
-                                        type: 'note',
-                                        message:
-                                            `🔄 Flow correction: "${subtask.title}" found issue in upstream "${correction.targetTaskId}". ` +
-                                            `Re-running ${corrResult.invalidatedTasks.length} task(s).`,
-                                        style: 'warning',
-                                    });
-                                } else {
-                                    reporter.emit({
-                                        type: 'note',
-                                        message: `⚠️ Correction rejected: ${corrResult.reason}`,
-                                        style: 'warning',
-                                    });
-                                }
-                            }
+                        // ── Flow correction: check output + review for upstream correction signals ──
+                        if (
+                            this.applyFlowCorrections(
+                                subtask,
+                                result,
+                                plan,
+                                results,
+                                completed,
+                                blocked,
+                                reporter,
+                            )
+                        ) {
+                            wavesNeedRecompute = true;
                         }
                     }
                 }
@@ -1707,6 +1673,22 @@ export class Orchestrator {
             subtask.taskType = refinedType;
             subtask.complexity = refinedComplexity;
 
+            // === Skill routing: If planner didn't set skillHint, try intelligent selection ===
+            if (!subtask.skillHint && this.skillSystem && subtask.attempts === 1) {
+                try {
+                    const skillResult = await this.skillSystem.selectSkillForTask({
+                        taskType: refinedType,
+                        description: subtask.description,
+                        runId: escalation.subtaskId,
+                    });
+                    if (skillResult.skill) {
+                        subtask.skillHint = skillResult.skill.metadata.slug;
+                    }
+                } catch {
+                    // Non-critical — proceed without skill
+                }
+            }
+
             let modelInfo: ModelInfo | undefined;
             if (subtask.attempts === 1) {
                 modelInfo = await this.modelPicker.selectForTask(
@@ -1769,18 +1751,6 @@ export class Orchestrator {
                 });
             }
 
-            // Multi-pass execution: DISABLED for agentic subtasks.
-            // The MultiPassExecutor is text-only (no tool tokens) — it sends raw LLM
-            // requests without terminal, filesystem, or any tool access. Johann's
-            // subtasks are agentic Copilot sessions that MUST use tools (run commands,
-            // create files, etc.). Routing them through multi-pass causes:
-            //   1. Text-only hallucination (model claims work was done without doing it)
-            //   2. Safety refusals (model refuses to "generate" browser/screenshot code)
-            // Always use single-pass subagentManager execution for agentic tasks.
-            // TODO: Re-enable when MultiPassExecutor gains tool access via toolToken.
-
-            // Standard single-pass execution
-
             // Mark subtask as running in the ledger (captures model + working directory)
             if (ledger) {
                 await ledger.markRunning(
@@ -1800,12 +1770,22 @@ export class Orchestrator {
                 debugLog,
                 toolToken,
                 ledger,
-                undefined, // old skills (deprecated — using skillDocs instead)
+                undefined, // old skills parameter (unused, preserved for signature compat)
                 undefined, // messageBus
-                undefined, // hookRunner
+                hookRunner,
                 this.rateLimitGuard,
                 this.delegationGuard,
-                this.skillSystem ? [...this.skillSystem.getAllSkills()] : undefined, // skillDocs
+                this.skillSystem ? [...this.skillSystem.getAllSkills()] : undefined,
+                // Pass prior attempt context so retry models know what was already done
+                escalation.attempts.length > 0
+                    ? escalation.attempts
+                          .filter((a) => a.output && a.output.length > 0)
+                          .map((a) => ({
+                              modelId: a.modelId,
+                              output: a.output || '',
+                              reason: a.reason || 'Unknown failure',
+                          }))
+                    : undefined,
             );
 
             if (!result.success) {
@@ -1891,6 +1871,14 @@ export class Orchestrator {
                     id: subtask.id,
                     durationMs: result.durationMs,
                 });
+                // === Skill system: record execution for pattern tracking ===
+                if (this.skillSystem && subtask.taskType) {
+                    this.skillSystem.recordExecution(
+                        subtask.taskType,
+                        subtask.description,
+                        [], // file patterns — not tracked at this layer
+                    );
+                }
                 if (hookRunner) {
                     await hookRunner.run('after_subtask', { subtask, subtaskResult: result });
                 }
@@ -2448,6 +2436,58 @@ export class Orchestrator {
     /**
      * Infer a RunPhase from a subtask title using keyword heuristics.
      */
+    /**
+     * Check a subtask result for upstream correction signals and apply them.
+     * Parses both the review notes and the raw output for correction signals.
+     * Returns true if any corrections were accepted (triggering wave recomputation).
+     */
+    private applyFlowCorrections(
+        subtask: Subtask,
+        result: SubtaskResult,
+        plan: OrchestrationPlan,
+        results: Map<string, SubtaskResult>,
+        completed: Set<string>,
+        blocked: Set<string>,
+        reporter: ProgressReporter,
+    ): boolean {
+        const correctionSources = [result.reviewNotes || '', result.output || ''].join('\n');
+        const corrections = FlowCorrectionManager.parseCorrectionSignals(
+            correctionSources,
+            subtask.id,
+        );
+
+        let anyAccepted = false;
+        for (const correction of corrections) {
+            const corrResult = this.flowCorrection.requestCorrection(
+                correction,
+                plan,
+                results,
+                completed,
+            );
+            if (corrResult.accepted) {
+                for (const invId of corrResult.invalidatedTasks) {
+                    blocked.delete(invId);
+                }
+                anyAccepted = true;
+                reporter.emit({
+                    type: 'note',
+                    message:
+                        `🔄 Flow correction: "${subtask.title}" found issue in upstream "${correction.targetTaskId}". ` +
+                        `Re-running ${corrResult.invalidatedTasks.length} task(s).`,
+                    style: 'warning',
+                });
+            } else {
+                reporter.emit({
+                    type: 'note',
+                    message: `⚠️ Correction rejected: ${corrResult.reason}`,
+                    style: 'warning',
+                });
+            }
+        }
+
+        return anyAccepted;
+    }
+
     private inferRunPhase(title: string): RunPhase {
         const lower = title.toLowerCase();
         if (

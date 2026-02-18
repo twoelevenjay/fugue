@@ -256,17 +256,38 @@ const refactorExtractModule: SkillDoc = {
         ],
     },
     instruction: {
-        body: `When extracting code into a separate module:
+        body: `Module extraction — systematic refactoring workflow.
 
-1. Identify the cohesive set of functions/classes/types to extract based on the user's request.
-2. Analyze ALL imports and exports of the target symbols to build a complete dependency graph.
-3. Create the new module file with the extracted code.
-4. Update the original file to import from the new module instead.
-5. Update ALL other files that import the moved symbols to point to the new location.
-6. If the original file had a barrel/index export, update it to re-export from the new module for backward compatibility.
-7. Verify no circular dependencies are introduced.
+## Pre-Flight (do this FIRST)
+1. Run \`npx tsc --noEmit\` (or equivalent build check) — confirm the project compiles BEFORE you touch anything. If it doesn't compile now, it's not your mess to clean up.
+2. Run tests if they exist — establish a green baseline.
+3. Identify EXACTLY which symbols (functions, classes, types, constants) are being extracted.
 
-CRITICAL: Every import reference must be updated. Missing even one causes a build break.`,
+## Dependency Mapping
+1. Search the ENTIRE codebase for imports of each symbol: \`grep -rn "symbolName" src/\`
+2. Build a list of every file that imports from the source file.
+3. Check for re-exports (barrel files, index.ts) that reference the symbols.
+4. Check for circular dependencies — if A imports B and B imports A, the extraction may need to break the cycle by moving shared types to a third file.
+
+## Extraction
+1. Create the new module file.
+2. MOVE (not copy) the extracted code to the new file.
+3. Add proper exports to the new file.
+4. In the ORIGINAL file: replace the moved code with an import from the new file.
+5. Add a re-export in the original file for backward compatibility: \`export { symbol } from './newModule'\`
+
+## Update All Importers
+1. For EVERY file in your dependency list: update the import path.
+2. Update barrel/index files to re-export from the new location.
+3. If the project uses path aliases (tsconfig paths, webpack aliases), update those too.
+
+## Verification (non-negotiable)
+1. \`npx tsc --noEmit\` — MUST compile with zero errors.
+2. Run the full test suite — MUST pass with zero failures.
+3. \`git diff --stat\` — review the change set, confirm it's only the files you intended.
+4. Check for circular dependency warnings in the build output.
+
+## CRITICAL: Missing even ONE import update causes a build break. Be exhaustive.`,
         steps: [
             'Map all symbols to extract and their dependents across the codebase',
             'Create the new module with the extracted code and proper exports',
@@ -325,24 +346,44 @@ const testGenerateUnit: SkillDoc = {
         ],
     },
     instruction: {
-        body: `When generating unit tests:
+        body: `Unit test generation — opinionated workflow.
 
-1. Detect the test framework (jest, mocha, vitest, pytest, go test, etc.) from project configuration.
-2. Follow the project's test file naming convention (*.test.ts, *.spec.ts, *_test.go, test_*.py, etc.).
-3. Follow the project's test organization (describe/it blocks, test suites, etc.).
-4. Generate tests for:
-   - Happy path (normal expected behavior)
-   - Edge cases (empty inputs, boundary values, null/undefined)
-   - Error conditions (invalid inputs, thrown errors)
-   - Type-specific behavior (if TypeScript/typed language)
-5. Use the project's existing mocking patterns (jest.mock, sinon, testdouble, etc.).
-6. Include meaningful assertion messages.
-7. Group related tests logically.
+## Discovery (do this FIRST, before writing any tests)
+1. Run \`ls\` on the test directory to find existing test files and naming conventions.
+2. Read 1-2 existing test files to learn: framework (jest/mocha/vitest/pytest), assertion style, mock patterns, describe/it structure.
+3. Read the source file you're testing — identify ALL public exports (functions, classes, types).
+4. Check package.json or config for test scripts and framework config.
 
-Do NOT:
-- Test implementation details (private methods, internal state)
-- Create brittle snapshot tests unless specifically asked
-- Import test utilities not already in the project`,
+## Test Structure
+- One test file per source file. Mirror the source path: \`src/foo/bar.ts\` → \`src/foo/__tests__/bar.test.ts\` (or whatever the project convention is).
+- Group tests by function/method using describe blocks.
+- Name tests as behaviors: "should return empty array when input is null" not "test function".
+
+## What to Test (prioritized)
+1. **Happy path** — normal expected input → expected output.
+2. **Edge cases** — empty string, empty array, zero, negative numbers, null/undefined, boundary values (MAX_SAFE_INTEGER, empty object).
+3. **Error cases** — invalid input types, missing required fields, thrown exceptions.
+4. **State transitions** — if the function modifies state, test before/after.
+
+## Mocking Rules
+- Mock EXTERNAL dependencies (network, file system, database, third-party APIs).
+- Do NOT mock the thing you're testing.
+- Do NOT mock internal project modules unless they have side effects.
+- Use the project's existing mock patterns (jest.mock, sinon, vi.mock, etc.).
+- Reset mocks between tests (beforeEach/afterEach).
+
+## Verification (do this LAST)
+1. Run the tests: \`npm test -- --testPathPattern=<your-test-file>\` (or equivalent).
+2. If tests fail, READ THE ERROR, fix the test or the mock, re-run.
+3. Run the full suite: \`npm test\` — confirm no regressions.
+4. Check coverage if available: \`npm test -- --coverage --collectCoverageFrom='src/foo/bar.ts'\`
+
+## Anti-patterns to AVOID
+- Snapshot tests (brittle, low signal) — unless explicitly asked.
+- Testing implementation details (private methods, internal state).
+- Tests that pass with ANY input (useless assertions).
+- Tests that depend on execution order.
+- Hardcoded file paths or environment-specific values.`,
         steps: [
             'Read the source file to understand all public APIs',
             'Detect test framework and conventions from existing tests',
@@ -402,28 +443,49 @@ const debugRootCauseAnalysis: SkillDoc = {
         ],
     },
     instruction: {
-        body: `When performing root cause analysis:
+        body: `Root cause analysis — systematic debugging workflow.
 
-1. REPRODUCE: Understand the symptoms. What is the expected vs. actual behavior?
-2. ISOLATE: Narrow down which file/function/line is responsible.
-   - Check error messages, stack traces, and logs.
-   - Use binary search on recent changes if applicable.
-3. TRACE: Follow the data flow from input to the point of failure.
-   - What values are unexpected? Where do they come from?
-   - Are there race conditions, stale caches, or order-of-operations issues?
-4. ROOT CAUSE: Identify the fundamental cause (not just the symptom).
-   - Is it a logic error, type mismatch, missing null check, stale data, etc.?
-5. FIX: Apply the minimal targeted fix.
-   - Do not rewrite unrelated code.
-   - Preserve existing behavior for non-buggy paths.
-6. VERIFY: Confirm the fix resolves the issue.
-   - Add a test case that would have caught this bug.
+## The Process (follow this order, do NOT skip steps)
 
-Report your findings in this structure:
-- Symptom: [what the user observed]
-- Root Cause: [what actually went wrong]
-- Fix: [what was changed and why]
-- Prevention: [test or guard added]`,
+### Step 1: REPRODUCE
+- Read the error message/stack trace/symptoms CAREFULLY.
+- If you can run the failing code, DO IT to see the error firsthand.
+- Run: the test suite, the build, the failing command — whatever triggers the bug.
+- Capture the EXACT error output.
+
+### Step 2: ISOLATE
+- Trace the stack trace from top to bottom — find the FIRST frame in project code (not library code).
+- Read that file and function. Understand what it's trying to do.
+- Check: What are the inputs to this function when it fails? Log them or inspect them.
+- Use git log/git diff to check recent changes to the failing file — was it recently modified?
+
+### Step 3: TRACE THE DATA
+- Follow the data flow BACKWARDS from the crash point.
+- Where does the bad value come from? Trace it through function calls, imports, configs.
+- Common culprits: null/undefined passed where object expected, wrong type, stale cache, race condition, missing await, wrong import path.
+
+### Step 4: IDENTIFY ROOT CAUSE
+- The root cause is NOT the line that throws. It's the line that produces the wrong value.
+- Ask: "Why is this value wrong?" and keep asking until you hit the actual source.
+- Common root causes: missing null check, wrong variable name, off-by-one, stale closure, missing dependency, wrong config.
+
+### Step 5: FIX (minimal, targeted)
+- Fix ONLY the root cause. Do not refactor surrounding code.
+- If the fix touches a type, check all callers for compatibility.
+- If the fix changes behavior, check all tests that depend on the old behavior.
+
+### Step 6: VERIFY
+- Run the failing test/command again — confirm it passes.
+- Run the FULL test suite — confirm no regressions.
+- Run the build/typecheck — confirm no type errors.
+- If no test existed for this bug, ADD ONE that would have caught it.
+
+### Step 7: REPORT
+Format your findings:
+- **Symptom**: What the user observed
+- **Root Cause**: What actually went wrong (specific file, line, value)
+- **Fix**: What was changed and why (minimal diff)
+- **Prevention**: Test or guard added to prevent recurrence`,
         steps: [
             'Reproduce or understand the symptom from the bug description',
             'Locate the relevant code paths (errors, stack traces, logs)',
@@ -860,18 +922,39 @@ const langTypescript = shipped({
         'declaration',
         'tsconfig',
     ],
-    body: `TypeScript conventions for all generated and refactored code:
+    body: `TypeScript — opinionated workflow procedures.
 
-1. Always use strict mode (strict: true in tsconfig.json).
-2. Prefer interfaces over type aliases for object shapes.
-3. Use discriminated unions for state machines and tagged types.
-4. Never use \`any\` — use \`unknown\` and narrow with type guards.
-5. Use \`readonly\` for properties that should not be mutated.
-6. Prefer \`const\` assertions for literal types.
-7. Use barrel exports (index.ts) for public API surfaces.
-8. Import types with \`import type { ... }\` when only used in type position.
-9. Use \`satisfies\` operator for type-safe object literals.
-10. Handle nullability explicitly — never use non-null assertions (!).`,
+## Code Quality Rules (non-negotiable)
+- strict: true ALWAYS. If tsconfig doesn't have it, add it.
+- NEVER use \`any\`. Use \`unknown\` + type guards, or specific types.
+- NEVER use non-null assertions (\`!\`). Handle nullability explicitly with narrowing.
+- Import types with \`import type { ... }\` when only used in type position.
+- Use \`readonly\` for properties/arrays that shouldn't be mutated.
+
+## Type Design
+- Prefer interfaces over type aliases for object shapes (interfaces are extensible, have better error messages).
+- Use discriminated unions for state: \`type Result = { ok: true; value: T } | { ok: false; error: Error }\`
+- Use \`satisfies\` for type-safe object literals that need inference: \`const x = { ... } satisfies Config\`
+- Use const assertions for literal types: \`const MODES = ['fast', 'safe'] as const\`
+- Use template literal types for string patterns: \`type EventName = \\\`on\${string}\\\`\`
+
+## Error Handling
+- Functions that can fail should return \`Result<T, E>\` or throw typed errors — pick one per module and be consistent.
+- Always catch at the boundary (API handler, event handler, CLI entry) — never swallow errors silently.
+- Use \`Error\` subclasses with descriptive messages, not bare strings.
+
+## Verification Workflow
+1. After writing code: \`npx tsc --noEmit\` — fix ALL type errors before proceeding.
+2. After fixing types: \`npx eslint src/ --quiet\` — fix lint errors.
+3. After lint passes: run tests if they exist.
+4. If the project has a build step: \`npm run build\` — confirm it succeeds.
+
+## Common Pitfalls to Prevent
+- Forgetting \`await\` on async functions (returns Promise instead of value).
+- Using \`Object.keys()\` which returns \`string[]\` not \`(keyof T)[]\` — cast or use a typed helper.
+- Enum values used as types without \`typeof\` — \`typeof MyEnum[keyof typeof MyEnum]\` for the value type.
+- Module resolution: use relative paths for project imports, package names for dependencies.
+- Circular imports: if A imports B and B imports A, extract shared types to a third file.`,
     allowed_file_patterns: ['**/*.ts', '**/*.tsx', '**/tsconfig*.json'],
 });
 
@@ -1191,18 +1274,45 @@ const fwReact = shipped({
         'remix',
     ],
     dependencies: ['lang.typescript'],
-    body: `React conventions:
+    body: `React — opinionated workflow procedures.
 
-1. Use functional components with hooks. No class components unless migrating.
-2. Custom hooks for shared stateful logic — prefix with "use" (useAuth, useFetch).
-3. Use React.memo() only for measured performance issues.
-4. Keep useEffect dependencies accurate — never suppress ESLint warnings.
-5. Co-locate state close to where it's used. Lift only when necessary.
-6. Use Suspense and lazy() for code splitting.
-7. Handle loading, error, and empty states for all async data.
-8. Use forwardRef only when the component needs to expose a DOM node.
-9. Key prop must be stable and unique — never use array index for dynamic lists.
-10. Prefer controlled components for forms.`,
+## Component Creation Workflow
+1. Check existing components for conventions: naming (PascalCase), file structure, export style.
+2. Create component file with typed props interface.
+3. Functional components ONLY — no class components.
+4. Co-locate: component + test + styles (if CSS modules) in same directory.
+5. Export from nearest barrel/index file.
+6. Verify: \`npx tsc --noEmit\` then run relevant tests.
+
+## Hooks Rules (non-negotiable)
+- Custom hooks for shared stateful logic — ALWAYS prefix with "use" (useAuth, useFetch).
+- useEffect dependencies MUST be accurate — NEVER suppress the exhaustive-deps lint rule.
+- If useEffect cleanup is needed (subscriptions, timers), ALWAYS return a cleanup function.
+- useState for simple values, useReducer for complex state or state machines.
+- useMemo/useCallback ONLY for measured performance issues — premature memoization adds complexity.
+
+## State Management
+- Co-locate state close to where it's used. Lift only when 2+ siblings need it.
+- For global state: check what the project already uses (Redux, Zustand, Jotai, Context) — use THAT, don't add another.
+- React Context is for dependency injection (themes, auth, i18n) — NOT for frequently-changing state (causes full subtree re-renders).
+
+## Data Fetching
+- EVERY async data path must handle THREE states: loading, error, success.
+- Show meaningful error messages — not just "Something went wrong."
+- Use Suspense boundaries for code splitting: React.lazy() + \`<Suspense fallback={...}>\`.
+- Cancel in-flight requests on unmount (AbortController in useEffect cleanup).
+
+## Performance
+- Key prop: stable + unique. NEVER use array index for dynamic/reorderable lists.
+- React.memo(): only when you've MEASURED a re-render problem. Profile first with React DevTools.
+- Large lists: use virtualization (react-window, @tanstack/virtual) for 100+ items.
+
+## Common Pitfalls to Prevent
+- Missing key prop on mapped elements (causes subtle bugs).
+- Stale closures in useEffect/useCallback — add ALL referenced variables to deps array.
+- Direct state mutation: \`setState(prev => [...prev, newItem])\` not \`state.push(newItem)\`.
+- Conditional hooks: hooks CANNOT be inside if/for/early returns — React enforces call order.
+- Forgetting to handle the empty state (no data yet, but also not loading/error).`,
     allowed_file_patterns: [
         '**/*.tsx',
         '**/*.jsx',
@@ -1539,19 +1649,49 @@ const platformWordpress = shipped({
         'wp-cli',
     ],
     dependencies: ['lang.php', 'lang.html', 'lang.css'],
-    body: `WordPress conventions:
+    body: `WordPress development — opinionated workflow procedures.
 
-1. Use actions and filters (hooks) — never modify core files.
-2. Prefix all functions, classes, and constants with a unique namespace.
-3. Use wp_enqueue_script/wp_enqueue_style for asset loading. Never hardcode URLs.
-4. Use WP-CLI (or ddev wp) for database operations, plugin management, and content tasks.
-5. Sanitize all input (sanitize_text_field, etc.), escape all output (esc_html, esc_attr, esc_url).
-6. Use nonces for form security (wp_nonce_field, wp_verify_nonce).
-7. Use register_post_type/register_taxonomy for custom content types.
-8. Use the Settings API for admin configuration pages.
-9. Use Gutenberg block development with @wordpress/scripts for modern editor blocks.
-10. Use transients for cached data, options API for persistent settings.
-11. In DDEV environments, use ddev exec, ddev wp, ddev mysql for all commands.`,
+## Core Rules
+- NEVER modify core files. Use hooks (actions/filters) exclusively.
+- Prefix ALL functions, classes, constants with a unique namespace (e.g., myplugin_).
+- Sanitize ALL input (sanitize_text_field, absint, etc.), escape ALL output (esc_html, esc_attr, esc_url).
+- In DDEV environments, ALL commands go through ddev: ddev wp, ddev exec, ddev mysql.
+
+## Plugin Management Workflow
+1. List outdated: \`ddev wp plugin list --update=available --format=table\`
+2. Update all: \`ddev wp plugin update --all\`
+3. Verify: \`ddev wp plugin list\` — confirm all show update: none
+4. If a plugin fails to update, check \`ddev wp plugin status <name>\` and resolve manually.
+
+## Theme Development Workflow
+1. Scaffold: \`ddev wp scaffold _s <theme-name> --theme_name="Display Name"\`
+2. Enqueue assets in functions.php via wp_enqueue_script/wp_enqueue_style — NEVER hardcode URLs.
+3. Use template hierarchy: index.php → archive.php → single.php → page.php → 404.php
+4. Test: \`ddev wp theme activate <name>\` then verify frontend renders correctly.
+
+## Custom Post Type Workflow
+1. Register in functions.php or plugin via register_post_type() on init hook.
+2. Register taxonomy via register_taxonomy() with show_in_rest: true for Gutenberg.
+3. Flush rewrite rules: \`ddev wp rewrite flush\`
+4. Verify: \`ddev wp post-type list --format=table\`
+
+## Database Operations
+1. Export before changes: \`ddev export-db --file=backup-$(date +%Y%m%d).sql.gz\`
+2. Run queries: \`ddev mysql -e "SELECT ..." \`
+3. Import: \`ddev import-db --file=backup.sql.gz\`
+4. Search-replace URLs: \`ddev wp search-replace 'old-url.com' 'new-url.com' --dry-run\` then without --dry-run.
+
+## Debugging Workflow
+1. Enable debug: Set WP_DEBUG, WP_DEBUG_LOG, WP_DEBUG_DISPLAY in wp-config.php
+2. Check logs: \`ddev exec tail -50 wp-content/debug.log\`
+3. Check PHP errors: \`ddev exec php -l <file.php>\` for syntax check
+4. Verify site health: \`ddev wp doctor check --all\` (if wp-cli doctor installed)
+
+## Security Checklist
+- Nonces on all forms: wp_nonce_field() / wp_verify_nonce()
+- Capability checks: current_user_can() before privileged operations
+- Prepared statements: $wpdb->prepare() for ALL custom queries
+- File upload validation: wp_check_filetype(), size limits, sanitized filenames`,
     allowed_file_patterns: [
         '**/*.php',
         '**/*.js',
@@ -1842,18 +1982,43 @@ const opsDdev = shipped({
     repo_patterns: ['**/.ddev/config.yaml', '**/.ddev/**'],
     keywords: ['ddev', 'ddev start', 'ddev exec', 'ddev wp', 'ddev mysql', 'local development'],
     dependencies: ['ops.docker'],
-    body: `DDEV conventions:
+    body: `DDEV local development — opinionated workflow procedures.
 
-1. Use ddev config to initialize projects — configure PHP version, docroot, project type.
-2. Use ddev exec <command> to run commands inside the web container.
-3. Use ddev wp for WP-CLI commands in WordPress projects.
-4. Use ddev mysql for database access (no separate MySQL client needed).
-5. Use ddev describe to check project status and URLs.
-6. Add custom DDEV commands in .ddev/commands/web/ or .ddev/commands/host/.
-7. Use .ddev/docker-compose.*.yaml for additional services.
-8. Use ddev export-db/import-db for database snapshots.
-9. Configure .ddev/config.yaml for per-project settings.
-10. Run npm/composer commands via ddev exec (ddev exec npm install).`,
+## Starting a DDEV Project
+1. Check status first: \`ddev describe\` — if already running, skip to your task.
+2. If not running: \`ddev start\` — wait for all containers to be healthy.
+3. Verify: \`ddev describe\` should show web: OK, db: OK with URLs.
+4. If start fails: \`ddev restart\` or \`docker info\` to check Docker is running.
+
+## Command Execution
+- ALL commands inside the container go through \`ddev exec\`: \`ddev exec npm install\`, \`ddev exec composer install\`.
+- WordPress CLI: \`ddev wp <command>\` (shortcut for ddev exec wp).
+- Database: \`ddev mysql\` for interactive, \`ddev mysql -e "QUERY"\` for one-shot.
+- Do NOT install tools on the host that DDEV already provides inside the container.
+
+## Database Management
+1. Export before risky changes: \`ddev export-db --file=backup-$(date +%Y%m%d).sql.gz\`
+2. Import: \`ddev import-db --file=dump.sql.gz\`
+3. Snapshot (faster than export): \`ddev snapshot --name=before-migration\`
+4. Restore: \`ddev snapshot restore before-migration\`
+
+## Troubleshooting
+1. Container won't start → \`ddev poweroff\` then \`ddev start\`
+2. Port conflict → \`ddev config --router-http-port=8080\` or stop conflicting service
+3. Mutagen sync issues → \`ddev mutagen status\`, \`ddev mutagen reset\`
+4. PHP errors → \`ddev exec tail -50 /var/log/php-fpm.log\`
+5. Permission issues → \`ddev exec chown -R www-data:www-data /var/www/html\`
+6. Config changes → edit .ddev/config.yaml then \`ddev restart\`
+
+## Custom Commands
+- Create in .ddev/commands/web/ (runs inside container) or .ddev/commands/host/ (runs on host).
+- File must be executable and have a shebang line.
+- Example: .ddev/commands/web/setup → \`#!/bin/bash\\ncomposer install && npm install\`
+
+## Multi-Service
+- Add services via .ddev/docker-compose.*.yaml files.
+- Common additions: Redis, Elasticsearch, Mailpit (usually built-in).
+- Use \`ddev describe\` to see all service URLs and ports.`,
     allowed_file_patterns: ['**/.ddev/**', '**/*.yaml', '**/*.yml'],
 });
 

@@ -81,13 +81,17 @@ export class SelfMonitor {
         const metrics: Record<string, number> = { llmRequests, totalExecutionMs: execMs };
 
         if (this.cfg.llmRequestSoftLimit && llmRequests >= this.cfg.llmRequestSoftLimit) {
-            if (!actions.includes('pause')) {actions.push('pause');}
+            if (!actions.includes('pause')) {
+                actions.push('pause');
+            }
             notes.push(
                 `LLM request count ${llmRequests} reached soft limit ${this.cfg.llmRequestSoftLimit}`,
             );
         }
         if (this.cfg.executionTimeSoftLimitMs && execMs >= this.cfg.executionTimeSoftLimitMs) {
-            if (!actions.includes('pause')) {actions.push('pause');}
+            if (!actions.includes('pause')) {
+                actions.push('pause');
+            }
             notes.push(
                 `Execution time ${execMs}ms reached soft limit ${this.cfg.executionTimeSoftLimitMs}ms`,
             );
@@ -99,7 +103,9 @@ export class SelfMonitor {
               ? 'warning'
               : 'ok';
 
-        if (!actions.length) {actions.push('continue');}
+        if (!actions.length) {
+            actions.push('continue');
+        }
 
         return {
             status,

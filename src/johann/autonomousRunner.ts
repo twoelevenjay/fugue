@@ -1,12 +1,5 @@
 import * as vscode from 'vscode';
-import {
-    ProjectPlan,
-    ProjectPhase,
-    AutonomousRunState,
-    RunLoopConfig,
-    PhaseResult,
-    ProjectPhaseStatus,
-} from './types';
+import { ProjectPlan, ProjectPhase, AutonomousRunState, RunLoopConfig } from './types';
 import { Orchestrator } from './orchestrator';
 import { getLogger } from './logger';
 import { atomicWrite } from './safeIO';
@@ -49,7 +42,9 @@ export class AutonomousRunner extends EventEmitter {
                     logger.info('AutonomousRunner: Loop is paused. Waiting for resume.');
                     this.emit('paused');
                     await this.waitForResume();
-                    if (token.isCancellationRequested) {break;}
+                    if (token.isCancellationRequested) {
+                        break;
+                    }
                 }
 
                 const nextPhase = this.getNextExecutablePhase();
@@ -182,7 +177,9 @@ export class AutonomousRunner extends EventEmitter {
 
     private getNextExecutablePhase(): ProjectPhase | undefined {
         return this.state.plan.phases.find((p) => {
-            if (p.status !== 'pending') {return false;}
+            if (p.status !== 'pending') {
+                return false;
+            }
 
             const dependenciesMet = p.dependsOn.every((depId) => {
                 const dep = this.state.plan.phases.find((phase) => phase.id === depId);
@@ -218,7 +215,9 @@ export class AutonomousRunner extends EventEmitter {
     private async persistState(): Promise<void> {
         this.state.lastUpdateTime = Date.now();
         const baseDir = SessionPersistence.prototype['getBaseDir']?.call({});
-        if (!baseDir) {return;}
+        if (!baseDir) {
+            return;
+        }
 
         const statePath = vscode.Uri.joinPath(baseDir, this.sessionId, 'run-loop-state.json');
 
@@ -241,7 +240,9 @@ export class AutonomousRunner extends EventEmitter {
 
     static async load(sessionId: string): Promise<AutonomousRunner | null> {
         const baseDir = SessionPersistence.prototype['getBaseDir']?.call({});
-        if (!baseDir) {return null;}
+        if (!baseDir) {
+            return null;
+        }
 
         const statePath = vscode.Uri.joinPath(baseDir, sessionId, 'run-loop-state.json');
 

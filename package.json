@@ -59,6 +59,14 @@
                 "title": "Fugue: Refresh Workspace Context"
             },
             {
+                "command": "ramble.sendToJohann",
+                "title": "Ramble: Send Compiled Prompt to @johann"
+            },
+            {
+                "command": "ramble.sendToCopilot",
+                "title": "Ramble: Send Compiled Prompt to Copilot"
+            },
+            {
                 "command": "johann.showMemory",
                 "title": "Johann: Show Memory Files"
             },
@@ -415,6 +423,35 @@
                     "order": 300,
                     "description": "Maximum concurrent subagents. Caps how many subagents can run in parallel.",
                     "markdownDescription": "Maximum number of concurrent subagents.\n\n- **3** (default): Up to 3 subagents run in parallel per wave.\n- **0**: No parallel execution (serial only).\n- Higher values increase throughput but also LLM request volume.\n\nWorks in conjunction with `johann.allowParallel`."
+                },
+                "johann.skillAutonomousCreation": {
+                    "type": "boolean",
+                    "default": true,
+                    "order": 320,
+                    "description": "Enable autonomous skill creation from detected patterns.",
+                    "markdownDescription": "When enabled, Johann can autonomously create reusable skill files from repeated procedural patterns detected during orchestration runs."
+                },
+                "johann.skillPromotionEnabled": {
+                    "type": "boolean",
+                    "default": true,
+                    "order": 330,
+                    "description": "Show end-of-run promotion UI for eligible local skills."
+                },
+                "johann.skillMaxLocal": {
+                    "type": "number",
+                    "default": 50,
+                    "minimum": 5,
+                    "maximum": 200,
+                    "order": 340,
+                    "description": "Maximum number of local skills per project."
+                },
+                "johann.skillMaxNewPerRun": {
+                    "type": "number",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 20,
+                    "order": 350,
+                    "description": "Maximum new skills that can be created in a single run."
                 },
                 "johann.delegationRunawayThreshold": {
                     "type": "number",

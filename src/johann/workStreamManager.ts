@@ -174,7 +174,9 @@ export class WorkStreamManager {
     async completeWorkStream(id: string): Promise<boolean> {
         this.logger.info(`Completing work stream: ${id}`);
         const stream = this.streams.get(id);
-        if (!stream) {return false;}
+        if (!stream) {
+            return false;
+        }
 
         stream.status = 'merging';
         await this.saveState();
@@ -219,7 +221,7 @@ export class WorkStreamManager {
                     this.streams.set(stream.id, stream);
                 }
             }
-        } catch (err) {
+        } catch (_err) {
             this.logger.info('No persisted work stream state found.');
         }
     }

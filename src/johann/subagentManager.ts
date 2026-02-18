@@ -32,19 +32,19 @@ import { SelfHealingDetector } from './selfHealing';
 // ============================================================================
 
 /** Default maximum number of tool-calling loop iterations to prevent runaway agents. */
-const DEFAULT_MAX_TOOL_ROUNDS = 30;
+const _DEFAULT_MAX_TOOL_ROUNDS = 30;
 
 /**
  * Default maximum consecutive text-only rounds (no tool calls) before forcing exit.
  * Prevents the model from rambling indefinitely without doing real work.
  */
-const DEFAULT_MAX_CONSECUTIVE_TEXT_ROUNDS = 3;
+const _DEFAULT_MAX_CONSECUTIVE_TEXT_ROUNDS = 3;
 
 /**
  * Default maximum total output size in characters before aborting.
  * Prevents unbounded output accumulation from hallucinating models.
  */
-const DEFAULT_MAX_TOTAL_OUTPUT_CHARS = 200_000;
+const _DEFAULT_MAX_TOTAL_OUTPUT_CHARS = 200_000;
 
 /**
  * Complexity-based execution limits.
@@ -195,6 +195,41 @@ HIVE MIND (LIVE AWARENESS):
   and responsive to the collective state.
 
 IF YOU OUTPUT INSTRUCTIONS OR PROSE INSTEAD OF MAKING ACTUAL CHANGES WITH YOUR TOOLS, YOU HAVE FAILED THE TASK.
+
+VERIFICATION LOOP (CRITICAL — THIS IS WHAT SEPARATES GOOD FROM GREAT):
+After completing your implementation work, you MUST run a verification loop before finishing.
+This is not optional. Do not emit your summary block until verification passes.
+
+The loop:
+1. **Identify the right check.** Based on what you just did, pick the appropriate verification:
+   - Code changes → run the build/typecheck: \`npx tsc --noEmit\`, \`npm run build\`, etc.
+   - Test-related work → run the tests: \`npm test\`, \`pytest\`, etc.
+   - Config/infrastructure changes → verify the service works: check endpoints, run smoke tests
+   - File creation → verify the files exist and have correct content
+   - Dependency installation → verify they resolve: import check, build, or lock file exists
+
+2. **Run the check.** Execute the verification command in the terminal.
+
+3. **If it fails → FIX IT.** Read the error output. Diagnose. Fix. Re-run. Repeat until it passes.
+   You have 30 rounds — use them. A task that "works" but doesn't pass its own verification is not done.
+
+4. **If it passes → emit your summary block and finish.**
+
+Common verification commands (use whichever apply):
+- TypeScript: \`npx tsc --noEmit\` (typecheck without emitting)
+- ESLint: \`npx eslint src/ --quiet\` (lint errors only)
+- Node tests: \`npm test\` or \`npx jest --passWithNoTests\`
+- Python: \`python -m pytest\` or \`python -c "import module"\`
+- Go: \`go build ./...\` and \`go test ./...\`
+- Rust: \`cargo check\` and \`cargo test\`
+- General: \`git diff --stat\` (confirm you actually changed files)
+
+If the project has no test/build infrastructure, at minimum verify:
+- Files you created actually exist (\`ls\` or \`cat\` them)
+- Code you wrote has no syntax errors (run interpreter/compiler if available)
+- Commands you configured actually work (run them)
+
+DO NOT SKIP VERIFICATION. A completed task without verification is an unverified guess.
 
 `;
 
@@ -586,6 +621,7 @@ export class SubagentManager {
         rateLimitGuard?: RateLimitGuard,
         delegationGuard?: DelegationGuard,
         skillDocs?: SkillDoc[],
+        priorAttempts?: Array<{ modelId: string; output: string; reason: string }>,
     ): Promise<SubtaskResult> {
         const startTime = Date.now();
 
@@ -613,6 +649,7 @@ export class SubagentManager {
                 dynamicContext,
                 skills,
                 skillDocs,
+                priorAttempts,
             );
 
             // Discover available tools
@@ -985,6 +1022,95 @@ export class SubagentManager {
                 }
 
                 // ============================================================
+                // CONTEXT COMPACTION — Compress old rounds to stay in budget
+                // When messages exceed a threshold, compress older tool
+                // call/result pairs into a compact summary, keeping the
+                // system prompt (first message) and recent rounds intact.
+                // This prevents context window exhaustion on long-running tasks.
+                // ============================================================
+                const COMPACTION_THRESHOLD = 12; // messages count to trigger compaction
+                const KEEP_RECENT = 6; // keep this many recent messages untouched
+
+                if (messages.length > COMPACTION_THRESHOLD) {
+                    // messages[0] is the system/user prompt — always keep it
+                    // Compact everything between messages[1] and messages[length - KEEP_RECENT]
+                    const compactEnd = messages.length - KEEP_RECENT;
+                    if (compactEnd > 1) {
+                        const oldMessages = messages.slice(1, compactEnd);
+
+                        // Build a compact summary of the old rounds
+                        const compactedLines: string[] = [
+                            '=== COMPACTED CONTEXT (earlier tool rounds summarized) ===',
+                        ];
+                        let toolCallCount = 0;
+                        const toolNames = new Set<string>();
+                        const keyActions: string[] = [];
+
+                        for (const msg of oldMessages) {
+                            // Extract tool call names from assistant messages
+                            if (msg.role === vscode.LanguageModelChatMessageRole.Assistant) {
+                                for (const part of msg.content) {
+                                    if (part instanceof vscode.LanguageModelToolCallPart) {
+                                        toolCallCount++;
+                                        toolNames.add(part.name);
+                                    } else if (
+                                        part instanceof vscode.LanguageModelTextPart &&
+                                        part.value.trim().length > 0
+                                    ) {
+                                        // Extract first sentence of assistant reasoning as key action
+                                        const firstSentence = part.value
+                                            .trim()
+                                            .split(/[.\n]/)[0]
+                                            .substring(0, 120);
+                                        if (firstSentence.length > 10) {
+                                            keyActions.push(firstSentence);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        compactedLines.push(
+                            `Rounds compacted: ${compactEnd - 1} messages → this summary`,
+                        );
+                        compactedLines.push(
+                            `Tool calls made: ${toolCallCount} (${[...toolNames].join(', ')})`,
+                        );
+                        if (keyActions.length > 0) {
+                            compactedLines.push('Key actions taken:');
+                            // Keep last 5 key actions to show progression
+                            for (const action of keyActions.slice(-5)) {
+                                compactedLines.push(`- ${action}`);
+                            }
+                        }
+                        compactedLines.push(
+                            'Full details are in the execution log. Continue from where you left off.',
+                        );
+
+                        // Replace old messages with a single compact summary
+                        const compactMessage = vscode.LanguageModelChatMessage.User(
+                            compactedLines.join('\n'),
+                        );
+                        const originalPrompt = messages[0]; // the system prompt
+                        const recentMessages = messages.slice(compactEnd);
+
+                        // Rebuild: [original system prompt, compact summary, recent messages]
+                        messages.length = 0;
+                        messages.push(
+                            originalPrompt, // original system prompt
+                            compactMessage, // compacted old rounds
+                            ...recentMessages, // recent rounds preserved
+                        );
+
+                        if (stream) {
+                            stream.markdown(
+                                `\n> 🗜️ Context compacted: ${compactEnd - 1} old messages → summary (${messages.length} messages now)\n`,
+                            );
+                        }
+                    }
+                }
+
+                // ============================================================
                 // CONTEXT LIMIT DETECTION — Pre-compaction flush trigger
                 // Estimate token usage and fire on_context_limit when
                 // approaching 85% of the model's context window.
@@ -1320,6 +1446,7 @@ ${outputForReview}
         workspaceContext: string,
         skills?: Skill[],
         skillDocs?: SkillDoc[],
+        priorAttempts?: Array<{ modelId: string; output: string; reason: string }>,
     ): string {
         const parts: string[] = [];
 
@@ -1413,6 +1540,38 @@ ${outputForReview}
             }
         }
 
+        // Inject prior attempt context so retry models know what was already done
+        if (priorAttempts && priorAttempts.length > 0) {
+            parts.push('=== ⚠️ PRIOR ATTEMPT (THIS IS A RETRY) ===');
+            parts.push(
+                'A previous model attempted this task but failed. Review what it did and CONTINUE from where it left off.',
+            );
+            parts.push(
+                'DO NOT duplicate work that was already completed (e.g., do not create records, files, or resources that already exist).',
+            );
+            parts.push(
+                'Instead: verify what the previous attempt accomplished, fix any issues, and complete the remaining work.',
+            );
+            parts.push('');
+            for (let i = 0; i < priorAttempts.length; i++) {
+                const attempt = priorAttempts[i];
+                parts.push(`--- Attempt ${i + 1} (${attempt.modelId}) ---`);
+                parts.push(`Failure reason: ${attempt.reason}`);
+                // Include a truncated summary of what was done (last 2000 chars most relevant)
+                if (attempt.output.length > 0) {
+                    const outputSummary =
+                        attempt.output.length > 2000
+                            ? '...\n' + attempt.output.slice(-2000)
+                            : attempt.output;
+                    parts.push('What was accomplished:');
+                    parts.push(outputSummary);
+                }
+                parts.push('');
+            }
+            parts.push('=== END PRIOR ATTEMPT ===');
+            parts.push('');
+        }
+
         parts.push('=== YOUR TASK ===');
         parts.push(`**Title:** ${subtask.title}`);
         parts.push(`**Description:** ${subtask.description}`);
@@ -1437,6 +1596,11 @@ ${outputForReview}
 
         // Append inter-agent communication instructions
         parts.push(HIVE_SIGNAL_INSTRUCTION);
+
+        // If this task has dependencies, teach the agent how to signal upstream corrections
+        if (subtask.dependsOn.length > 0) {
+            parts.push(FlowCorrectionManager.CORRECTION_SIGNAL_INSTRUCTION);
+        }
 
         return parts.join('\n');
     }
