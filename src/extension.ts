@@ -626,12 +626,34 @@ async function sendToLLM(
     systemPrompt: string,
     userPrompt: string,
     token: vscode.CancellationToken,
+    enableTools: boolean = false,
 ): Promise<string> {
     const messages = [
         vscode.LanguageModelChatMessage.User(systemPrompt + '\n\n---\n\n' + userPrompt),
     ];
 
-    const response = await model.sendRequest(messages, {}, token);
+    const options: vscode.LanguageModelChatRequestOptions = enableTools
+        ? {
+              tools: [
+                  {
+                      name: 'vscode_search',
+                      description: 'Search the web for current information',
+                      inputSchema: {
+                          type: 'object',
+                          properties: {
+                              query: {
+                                  type: 'string',
+                                  description: 'Search query',
+                              },
+                          },
+                          required: ['query'],
+                      },
+                  },
+              ],
+          }
+        : {};
+
+    const response = await model.sendRequest(messages, options, token);
 
     let result = '';
     for await (const chunk of response.text) {
@@ -941,6 +963,38 @@ CRITICAL RULES - PRESERVE ALL DISTINCT INFORMATION:
    - Remove filler: um, uh, you know, like, basically
    - Fix obvious STT artifacts: "type script" → "TypeScript", "get hub" → "GitHub" (note in suspectedTranscriptionIssues)
 7. DO NOT REMOVE: distinct facts, examples, analogies, relationships, technical concepts, or anything that adds context - even if it could be stated more briefly.
+
+WEB SEARCH - RESEARCH BEFORE ASKING:
+You have access to web search via the vscode_search tool. BEFORE asking the user a question, check if you can answer it yourself via internet research.
+
+WHEN TO SEARCH THE WEB:
+✓ External APIs, services, or libraries (documentation, capabilities, endpoints, authentication methods)
+✓ Technical specifications (browser support, system requirements, compatibility matrices)
+✓ Current versions, release status, or recent changes (e.g., "is React 19 stable?")
+✓ Public service capabilities (e.g., "does Stripe support recurring billing with variable amounts?")
+✓ Framework features or best practices (e.g., "Next.js App Router data fetching patterns")
+✓ Third-party integrations (e.g., "Twilio SMS API rate limits")
+
+WHEN NOT TO SEARCH:
+✗ Questions about the user's specific codebase, business logic, or internal systems (check workspace context instead)
+✗ Subjective preferences ("should I use X or Y?" - ask the user)
+✗ Project-specific constraints or requirements (ask the user)
+✗ Information you can confidently answer from your training data (common programming concepts, well-known patterns)
+✗ User's personal goals or priorities
+
+FORMAT SEARCH QUERIES:
+- Be specific and technical: "Stripe Checkout Session API payment methods"
+- Not generic: "how does stripe work"
+- Include version if mentioned: "Next.js 14 server actions error handling"
+- Target official docs or technical references
+
+EXAMPLE WORKFLOW:
+User says: "I want to integrate the Twilio API for SMS notifications"
+❌ DON'T immediately ask: "What Twilio features do you need?"
+✓ DO: Search "Twilio SMS API capabilities" → learn it supports sending, receiving, status callbacks
+✓ THEN ask specific questions based on findings: "Twilio supports sending SMS, receiving replies, and status webhooks. Do you need all three, or just one-way notifications?"
+
+After searching, incorporate findings into your contextPacket and only ask about aspects you couldn't resolve.
 
 CRITICAL RULES - GENERATING CLARIFYING QUESTIONS:
 Follow this SYSTEMATIC PROCESS to identify what questions to ask:
@@ -1606,7 +1660,7 @@ export function activate(context: vscode.ExtensionContext) {
                     .replace('{ANSWERS}', userMessage);
 
                 try {
-                    const mergeResult = await sendToLLM(model, mergePrompt, '', token);
+                    const mergeResult = await sendToLLM(model, mergePrompt, '', token, true); // Enable tools for follow-up research
                     const parsed = parseJSON<AnalysisResult>(mergeResult);
 
                     if (!parsed) {
@@ -1794,6 +1848,7 @@ export function activate(context: vscode.ExtensionContext) {
                         analysisPrompt,
                         session.rawRamble,
                         token,
+                        true, // Enable web search for analysis
                     );
                     parsed = parseJSON<AnalysisResult>(analysisResult);
 
@@ -1995,7 +2050,6 @@ export function activate(context: vscode.ExtensionContext) {
         dispose() {
             // Dynamic import to avoid circular dependency issues at startup
             try {
-                 
                 const { AcpWorkerManager } = require('./johann/acpWorkerManager');
                 AcpWorkerManager.cleanupAllInstances();
             } catch {
@@ -2003,7 +2057,6 @@ export function activate(context: vscode.ExtensionContext) {
                 try {
                     const { execSync } = require('child_process');
                     execSync('pkill -f "copilot.*--acp.*--stdio" 2>/dev/null || true');
-                     
                 } catch (_e) {
                     // Best effort
                 }
@@ -2019,7 +2072,6 @@ export function deactivate() {
     // Primary cleanup happens via context.subscriptions disposables above.
     // This is a fallback for any edge cases.
     try {
-         
         const { AcpWorkerManager } = require('./johann/acpWorkerManager');
         AcpWorkerManager.cleanupAllInstances();
     } catch {
