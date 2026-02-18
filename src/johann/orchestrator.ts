@@ -2201,6 +2201,9 @@ export class Orchestrator {
             /^[^\n]*\bTo fix this,\s*run\b[^\n]*$/gim,
             /^[^\n]*\bTo resolve this\b[^\n]*$/gim,
             /^[^\n]*\bAfter that,\s*you can\b[^\n]*$/gim,
+            /^[^\n]*\bJohann will retry\b[^\n]*$/gim,
+            /^[^\n]*\bwill retry.*on.*next\s+run\b[^\n]*$/gim,
+            /^[^\n]*\bdifferent approach.*next\s+run\b[^\n]*$/gim,
         ];
 
         for (const pattern of forbiddenPatterns) {
