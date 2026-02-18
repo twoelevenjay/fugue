@@ -3,7 +3,7 @@ import { Readable, Writable } from 'stream';
 import * as vscode from 'vscode';
 import * as acp from '@agentclientprotocol/sdk';
 import { execSync } from 'child_process';
-import { Subtask, SubtaskResult, ModelInfo } from './types';
+import { Subtask, SubtaskResult, ModelInfo, ToolResult } from './types';
 import { DebugConversationLog } from './debugConversationLog';
 import { getConfig } from './config';
 import { ExecutionLedger, JournalEntry } from './executionLedger';
@@ -1151,19 +1151,41 @@ export class AcpWorkerManager {
                 await ledger.appendJournal(subtask.id, journalEntry);
             }
 
+            // Parse tool responses for ground-truth verification
+            const toolResults = this.parseToolResponses(result.output);
+
+            // Check for command failures based on exit codes
+            const failedCommands = toolResults.filter(
+                (t) => t.tool === 'run_in_terminal' && t.exitCode !== undefined && t.exitCode !== 0,
+            );
+
+            // If we have exit codes, use them to determine success
+            // Otherwise, default to true (will be reviewed)
+            const hadCommandFailures = failedCommands.length > 0;
+
+            if (hadCommandFailures && debugLog) {
+                await debugLog.logEvent(
+                    'subtask-execution',
+                    `[ACP] Detected ${failedCommands.length} failed command(s) via exit codes`,
+                );
+            }
+
             panel.finishWorker(
                 workerId,
-                'completed',
+                hadCommandFailures ? 'failed' : 'completed',
                 `${result.toolCallCount} tool calls in ${(durationMs / 1000).toFixed(1)}s`,
             );
 
             return {
-                success: true, // Preliminary — will be reviewed by orchestrator
+                success: !hadCommandFailures, // Ground truth from exit codes
                 modelUsed: cliModel,
                 output: result.output,
-                reviewNotes: '',
+                reviewNotes: hadCommandFailures
+                    ? `${failedCommands.length} command(s) failed with non-zero exit codes`
+                    : '',
                 durationMs,
                 timestamp: new Date().toISOString(),
+                toolResults, // Include for orchestrator verification
             };
         } catch (err) {
             const durationMs = Date.now() - startTime;
@@ -1548,6 +1570,62 @@ ${outputForReview}
         }
 
         return '';
+    }
+
+    /**
+     * Parse tool responses from ACP worker output.
+     * Extracts exit codes, commands, and file paths for ground-truth verification.
+     */
+    private parseToolResponses(output: string): ToolResult[] {
+        const results: ToolResult[] = [];
+
+        // Pattern: [Tool: tool_name] ... exit code X / Created: file.ts
+        // Look for tool invocation markers and extract context
+        const toolPattern = /\[Tool:\s*(\S+)\]([^\[]*?)(?=\[Tool:|$)/gs;
+        let match: RegExpExecArray | null;
+
+        while ((match = toolPattern.exec(output)) !== null) {
+            const toolName = match[1];
+            const toolContext = match[2];
+
+            const toolResult: ToolResult = {
+                tool: toolName,
+            };
+
+            // Extract exit code from terminal commands
+            if (toolName === 'run_in_terminal') {
+                const exitCodeMatch = toolContext.match(/exit\s+code[:\s]+(\d+)/i);
+                if (exitCodeMatch) {
+                    toolResult.exitCode = parseInt(exitCodeMatch[1], 10);
+                }
+
+                // Extract command
+                const commandMatch = toolContext.match(/(?:Command|Running)[:\s]+`([^`]+)`/i);
+                if (commandMatch) {
+                    toolResult.command = commandMatch[1];
+                }
+
+                // Capture output
+                toolResult.output = toolContext.trim();
+            }
+
+            // Extract file paths from file operations
+            if (
+                toolName === 'create_file' ||
+                toolName === 'write' ||
+                toolName === 'edit' ||
+                toolName === 'replace_string_in_file'
+            ) {
+                const fileMatch = toolContext.match(/(?:file|path)[:\s]+`?([^\s`\n]+\.[a-z]+)`?/i);
+                if (fileMatch) {
+                    toolResult.filePath = fileMatch[1];
+                }
+            }
+
+            results.push(toolResult);
+        }
+
+        return results;
     }
 
     /**

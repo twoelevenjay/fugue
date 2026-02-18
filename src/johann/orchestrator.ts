@@ -44,6 +44,7 @@ import { SHIPPED_SKILLS } from './shippedSkills';
 import { RunStateManager, RunPhase } from './runState';
 import { scanBootstrapContext, buildCapabilitySummary, BootstrapResult } from './bootstrapContext';
 import { detectSelfReferentialTask, SelfAwarenessResult } from './selfAwareness';
+import { verifySubtaskResult } from './verification';
 
 // ============================================================================
 // ORCHESTRATOR — The top-level controller
@@ -1788,6 +1789,65 @@ export class Orchestrator {
                     : undefined,
             );
 
+            // === GROUND TRUTH VERIFICATION ===
+            // Before review, verify actual filesystem state and exit codes
+            // This prevents false negatives from LLM review
+            const verification = await verifySubtaskResult(subtask, result);
+
+            if (debugLog && verification.warnings.length > 0) {
+                await debugLog.logEvent(
+                    'subtask-execution',
+                    `[Verification Warnings] ${verification.warnings.join('; ')}`,
+                );
+            }
+
+            // If exit codes show failure, that's ground truth — mark as failed
+            if (!verification.passed) {
+                if (debugLog) {
+                    await debugLog.logEvent(
+                        'subtask-execution',
+                        `[Verification Failed] ${verification.issues.join('; ')}`,
+                    );
+                }
+
+                reporter.emit({
+                    type: 'task-progress',
+                    id: subtask.id,
+                    message: 'Verification failed (exit codes/filesystem)',
+                });
+
+                result.success = false;
+                result.reviewNotes = `Verification failed: ${verification.issues.join('; ')}`;
+
+                escalation.attempts.push({
+                    modelId: modelInfo.id,
+                    tier: modelInfo.tier,
+                    success: false,
+                    reason: result.reviewNotes,
+                    output: result.output,
+                    durationMs: result.durationMs,
+                });
+                continue;
+            }
+
+            // If worker marked as failed but verification passed, trust exit codes
+            if (!result.success && verification.passed) {
+                if (debugLog) {
+                    await debugLog.logEvent(
+                        'subtask-execution',
+                        `[Verification Override] Worker marked failed but verification passed - trusting exit codes`,
+                    );
+                }
+
+                reporter.emit({
+                    type: 'note',
+                    message: `✅ Verification passed despite worker failure — trusting exit codes`,
+                });
+
+                result.success = true;
+                result.reviewNotes = 'Verification passed (exit codes show success)';
+            }
+
             if (!result.success) {
                 // Check if this is an API compatibility error (e.g., GPT model rejecting context_management).
                 // These should NOT count as a real attempt — the model never even started executing.
@@ -1830,35 +1890,78 @@ export class Orchestrator {
                 continue;
             }
 
-            // Review
+            // Review (or skip if verification passed conclusively)
             subtask.status = 'reviewing';
             // PERSIST — subtask entering review
             if (persist) {
                 await persist.writeSubtaskUpdate(subtask);
             }
-            const review = await this.subagentManager.reviewSubtaskOutput(
-                subtask,
-                result,
-                modelInfo.model, // Use the same model for review
-                token,
-                reporter.stream,
-                debugLog,
-                this.selfHealing, // Pass self-healing detector
+
+            // If verification passed with exit codes, trust that over LLM review
+            // (prevents false negatives like Leon's PNPM install bug)
+            const hasExitCodeEvidence = result.toolResults?.some(
+                (t) => t.tool === 'run_in_terminal' && t.exitCode !== undefined,
             );
 
-            result.success = review.success;
-            result.reviewNotes = review.reason;
+            if (verification.passed && hasExitCodeEvidence) {
+                if (debugLog) {
+                    await debugLog.logEvent(
+                        'subtask-execution',
+                        `[Review Skipped] Verification passed with exit code evidence - skipping LLM review to prevent false negatives`,
+                    );
+                }
 
-            escalation.attempts.push({
-                modelId: modelInfo.id,
-                tier: modelInfo.tier,
-                success: review.success,
-                reason: review.reason,
-                output: result.output, // ALWAYS preserve the output — even on review failure
-                durationMs: result.durationMs,
-            });
+                reporter.emit({
+                    type: 'note',
+                    message: `✅ Skipping review — verification passed with exit code 0`,
+                });
 
-            if (review.success) {
+                // Mark as success based on ground truth
+                result.success = true;
+                result.reviewNotes =
+                    'Verification passed (exit codes show success) - review skipped';
+
+                escalation.attempts.push({
+                    modelId: modelInfo.id,
+                    tier: modelInfo.tier,
+                    success: true,
+                    reason: result.reviewNotes,
+                    output: result.output,
+                    durationMs: result.durationMs,
+                });
+            } else {
+                // No conclusive exit code evidence — fall back to LLM review
+                if (debugLog && verification.warnings.length > 0) {
+                    await debugLog.logEvent(
+                        'subtask-execution',
+                        `[Review Fallback] ${verification.warnings.join('; ')}`,
+                    );
+                }
+
+                const review = await this.subagentManager.reviewSubtaskOutput(
+                    subtask,
+                    result,
+                    modelInfo.model, // Use the same model for review
+                    token,
+                    reporter.stream,
+                    debugLog,
+                    this.selfHealing, // Pass self-healing detector
+                );
+
+                result.success = review.success;
+                result.reviewNotes = review.reason;
+
+                escalation.attempts.push({
+                    modelId: modelInfo.id,
+                    tier: modelInfo.tier,
+                    success: review.success,
+                    reason: review.reason,
+                    output: result.output, // ALWAYS preserve the output — even on review failure
+                    durationMs: result.durationMs,
+                });
+            }
+
+            if (result.success) {
                 subtask.status = 'completed';
                 // === RunState: mark task done ===
                 await runMgr2.updateTask(subtask.id, { status: 'done', model: modelInfo.name });
@@ -1924,7 +2027,7 @@ export class Orchestrator {
             reporter.emit({
                 type: 'task-progress',
                 id: subtask.id,
-                message: `Escalating: ${review.reason}`,
+                message: `Escalating: ${result.reviewNotes}`,
             });
         }
 

@@ -93,6 +93,23 @@ export interface Subtask {
 /**
  * The result of executing a single subtask.
  */
+/**
+ * Parsed result from a tool invocation by an ACP worker.
+ * Used for ground-truth verification.
+ */
+export interface ToolResult {
+    /** Tool name (e.g., 'run_in_terminal', 'create_file') */
+    tool: string;
+    /** Exit code from terminal commands */
+    exitCode?: number;
+    /** Command that was executed */
+    command?: string;
+    /** Tool output */
+    output?: string;
+    /** File path for file operations */
+    filePath?: string;
+}
+
 export interface SubtaskResult {
     /** Whether the subtask met its success criteria */
     success: boolean;
@@ -106,6 +123,8 @@ export interface SubtaskResult {
     durationMs: number;
     /** Timestamp */
     timestamp: string;
+    /** Parsed tool invocations (for ground-truth verification) */
+    toolResults?: ToolResult[];
 }
 
 /**
