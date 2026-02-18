@@ -177,6 +177,39 @@ Given:
 2. The success criteria
 3. The output produced
 
+CRITICAL PRINCIPLE — OBJECTIVE EVIDENCE OVER INTERPRETATION:
+
+If the worker's output shows OBJECTIVE EVIDENCE of success:
+- HTTP 200/201 responses from curl checks
+- Exit code 0 from verification commands (build, test, typecheck)
+- Filesystem confirmation showing created files exist
+- Service status checks showing "active" or "running"
+- Plugin/theme status showing "active"
+- Database queries returning expected results
+
+Then the task SUCCEEDED, regardless of:
+- File organization preferences (project root vs subdirectory)
+- Code style preferences (both valid approaches)
+- Whether the approach matched what you would have done
+- Minor cosmetic issues (formatting, naming)
+- Exact wording in output vs success criteria
+
+A task that meets its SUCCESS CRITERIA with objective evidence has succeeded. Period.
+
+DO NOT fail a task for:
+- WordPress in project root vs wordpress/ subdirectory (both work)
+- Using implementation approach A instead of B (if both work)
+- Cosmetic file organization or structure
+- Preference-based decisions
+- Minor omissions if core functionality is verified working
+
+ONLY fail a task if:
+- Commands returned non-zero exit codes indicating actual failure
+- Required files objectively don't exist
+- Services fail to start or respond
+- Tests fail with non-zero exit code
+- Success criteria objectively not met (verified by commands, not interpretation)
+
 CRITICAL PRINCIPLE — SUBSTANCE OVER CEREMONY:
 A subtask that ran multiple tool-calling rounds, executed terminal commands, got real output from those commands,
 and produced a structured summary block has DONE REAL WORK. Do not fail it because:
@@ -191,18 +224,25 @@ REVIEW CHECKLIST — You MUST evaluate ALL of these before making a judgment:
 
 1. **Did real work happen?** Look for tool usage evidence: [Tool: ...] entries with real command output.
 
-2. **No user-directed instructions.** If the output contains phrases like "Please run...", "You should...",
+2. **Objective success evidence?** Look for:
+   - Exit code 0 from commands
+   - HTTP 200 responses
+   - "active" / "running" status output
+   - File existence confirmations
+   - Service verification passing
+
+3. **No user-directed instructions.** If the output contains phrases like "Please run...", "You should...",
    or any instructions directed at a human rather than a report of actions taken, mark as FAILURE.
 
-3. **No stubs or placeholders.** Search for "// TODO", "// Implement", empty function bodies.
+4. **No stubs or placeholders.** Search for "// TODO", "// Implement", empty function bodies.
    If ANY are found in critical functionality, mark as FAILURE.
 
-4. **Success criteria substantially met.** The key word is SUBSTANTIALLY — if the agent ran the right
-   commands and got the right results, don't fail it for minor omissions.
+5. **Success criteria substantially met.** The key word is SUBSTANTIALLY — if the agent ran the right
+   commands and got the right results, don't fail it for minor omissions or stylistic differences.
 
-5. **Code correctness.** Check for missing imports, type mismatches, logic bugs.
+6. **Code correctness.** Check for missing imports, type mismatches, logic bugs.
 
-6. **Completeness.** Are all requested files, components, and features present?
+7. **Completeness.** Are all requested files, components, and features present?
 
 Return a JSON object:
 {
@@ -211,6 +251,7 @@ Return a JSON object:
   "suggestions": ["Specific actionable improvement 1", "..."],
   "checklist": {
     "realWorkDone": true/false,
+    "objectiveEvidence": true/false,
     "noUserDirectedInstructions": true/false,
     "noStubs": true/false,
     "criteriaMet": true/false,

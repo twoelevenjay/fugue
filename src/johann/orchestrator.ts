@@ -117,7 +117,10 @@ If you find yourself writing ANY of these, STOP and DELETE IT:
 If a subtask FAILED:
 - Report WHAT was attempted and WHY it failed (technical details)
 - Report what DID succeed (partial progress is still progress)
-- End with: "Johann will retry this with a different approach on the next run."
+- If all retry attempts were exhausted, state: "Task failed after {N} attempts with escalating model tiers."
+- If downstream tasks were blocked by this failure, mention them
+- DO NOT tell the user to run Johann again
+- DO NOT say "retry on next run" or "different approach on next run"
 - DO NOT give the user a to-do list. DO NOT suggest manual commands.
 
 If ALL subtasks SUCCEEDED:
