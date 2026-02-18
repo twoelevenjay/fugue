@@ -269,22 +269,81 @@ export class AcpWorkerManager {
 
     /**
      * Find the copilot CLI executable.
+     * Checks: env override → PATH → common Node version manager locations.
      */
     private findCopilotExecutable(): string {
         if (process.env.COPILOT_CLI_PATH) {
             return process.env.COPILOT_CLI_PATH;
         }
 
+        // Try PATH first (works when nvm/volta/fnm is loaded in shell)
         try {
-            const result = execSync('which copilot', { encoding: 'utf-8' }).trim();
+            const whichCmd = process.platform === 'win32' ? 'where copilot' : 'which copilot';
+            const result = execSync(whichCmd, { encoding: 'utf-8', timeout: 5000 }).trim();
             if (result) {
-                return result;
+                return result.split('\n')[0]; // First match on Windows
             }
         } catch {
-            // Continue to fallback
+            // Not in PATH — check version manager locations
         }
 
-        // Fallback — will fail with a clear error if not in PATH
+        // Check common Node version manager install locations
+        // VS Code's extension host often doesn't inherit shell nvm/volta/fnm setup
+        const home = process.env.HOME || process.env.USERPROFILE || '';
+        if (home) {
+            const fs = require('fs') as typeof import('fs');
+            const path = require('path') as typeof import('path');
+
+            const candidates: string[] = [];
+
+            // nvm (macOS/Linux): ~/.nvm/versions/node/*/bin/copilot
+            const nvmDir = process.env.NVM_DIR || path.join(home, '.nvm');
+            const nvmVersionsDir = path.join(nvmDir, 'versions', 'node');
+            try {
+                const versions = fs.readdirSync(nvmVersionsDir).sort().reverse();
+                for (const v of versions) {
+                    candidates.push(path.join(nvmVersionsDir, v, 'bin', 'copilot'));
+                }
+            } catch {
+                // nvm not installed
+            }
+
+            // volta: ~/.volta/bin/copilot
+            candidates.push(path.join(home, '.volta', 'bin', 'copilot'));
+
+            // fnm: ~/.local/share/fnm/node-versions/*/installation/bin/copilot
+            const fnmDir = path.join(home, '.local', 'share', 'fnm', 'node-versions');
+            try {
+                const versions = fs.readdirSync(fnmDir).sort().reverse();
+                for (const v of versions) {
+                    candidates.push(path.join(fnmDir, v, 'installation', 'bin', 'copilot'));
+                }
+            } catch {
+                // fnm not installed
+            }
+
+            // Global npm: /usr/local/bin/copilot, /opt/homebrew/bin/copilot
+            candidates.push('/usr/local/bin/copilot');
+            candidates.push('/opt/homebrew/bin/copilot');
+
+            // Windows: %APPDATA%/npm/copilot.cmd
+            if (process.platform === 'win32' && process.env.APPDATA) {
+                candidates.push(path.join(process.env.APPDATA, 'npm', 'copilot.cmd'));
+            }
+
+            for (const candidate of candidates) {
+                try {
+                    fs.accessSync(candidate, fs.constants.X_OK);
+                    const logger = getLogger();
+                    logger.info(`[ACP] Found copilot CLI at: ${candidate}`);
+                    return candidate;
+                } catch {
+                    // Not here, try next
+                }
+            }
+        }
+
+        // Last resort — will fail with a clear error when spawned
         return 'copilot';
     }
 
@@ -306,27 +365,67 @@ export class AcpWorkerManager {
      * The CLI uses model names like 'gpt-4o', 'claude-sonnet-4', etc.
      */
     private mapModelToCliName(modelInfo: ModelInfo): string {
-        // The family field is usually the best match for CLI model names
-        // e.g., 'gpt-4o', 'claude-3.5-sonnet', 'claude-sonnet-4'
+        // The family field from VS Code's model API (e.g., 'gpt-4o', 'claude-3.5-sonnet')
+        // needs to be mapped to Copilot CLI's accepted model names.
         const family = modelInfo.family.toLowerCase();
+        const id = (modelInfo.id || '').toLowerCase();
 
-        // Direct mappings for common Copilot models
+        // Copilot CLI accepted models (from `copilot --acp --stdio --model <invalid>` error):
+        // claude-sonnet-4.6, claude-sonnet-4.5, claude-haiku-4.5, claude-opus-4.6,
+        // claude-opus-4.6-fast, claude-opus-4.5, claude-sonnet-4, gemini-3-pro-preview,
+        // gpt-5.3-codex, gpt-5.2-codex, gpt-5.2, gpt-5.1-codex-max, gpt-5.1-codex,
+        // gpt-5.1, gpt-5, gpt-5.1-codex-mini, gpt-5-mini, gpt-4.1
         const familyMap: Record<string, string> = {
-            'gpt-4o': 'gpt-4o',
-            'gpt-4o-mini': 'gpt-4o-mini',
-            'gpt-4.1': 'gpt-4.1',
-            'gpt-4.1-mini': 'gpt-4.1-mini',
-            'gpt-4.1-nano': 'gpt-4.1-nano',
-            'o3-mini': 'o3-mini',
-            'o4-mini': 'o4-mini',
-            'claude-3.5-sonnet': 'claude-3.5-sonnet',
+            // Claude models
+            'claude-sonnet-4.6': 'claude-sonnet-4.6',
+            'claude-sonnet-4.5': 'claude-sonnet-4.5',
+            'claude-haiku-4.5': 'claude-haiku-4.5',
+            'claude-opus-4.6': 'claude-opus-4.6',
+            'claude-opus-4.5': 'claude-opus-4.5',
             'claude-sonnet-4': 'claude-sonnet-4',
-            'claude-opus-4': 'claude-opus-4',
-            'gemini-2.0-flash': 'gemini-2.0-flash',
-            'gemini-2.5-pro': 'gemini-2.5-pro',
+            // Claude family aliases (VS Code API uses different naming)
+            'claude-3.5-sonnet': 'claude-sonnet-4',
+            'claude-3.5-haiku': 'claude-haiku-4.5',
+            // GPT models
+            'gpt-5.3-codex': 'gpt-5.3-codex',
+            'gpt-5.2-codex': 'gpt-5.2-codex',
+            'gpt-5.2': 'gpt-5.2',
+            'gpt-5.1-codex-max': 'gpt-5.1-codex-max',
+            'gpt-5.1-codex': 'gpt-5.1-codex',
+            'gpt-5.1-codex-mini': 'gpt-5.1-codex-mini',
+            'gpt-5.1': 'gpt-5.1',
+            'gpt-5': 'gpt-5',
+            'gpt-5-mini': 'gpt-5-mini',
+            'gpt-4.1': 'gpt-4.1',
+            // Legacy model aliases → map to closest available
+            'gpt-4o': 'gpt-4.1',
+            'gpt-4o-mini': 'gpt-4.1',
+            'gpt-4.1-mini': 'gpt-4.1',
+            'gpt-4.1-nano': 'gpt-4.1',
+            'o3-mini': 'gpt-5-mini',
+            'o4-mini': 'gpt-5-mini',
+            // Gemini
+            'gemini-3-pro-preview': 'gemini-3-pro-preview',
+            'gemini-2.5-pro': 'gemini-3-pro-preview',
+            'gemini-2.0-flash': 'gemini-3-pro-preview',
         };
 
-        return familyMap[family] || family;
+        // Try direct family match first
+        if (familyMap[family]) {
+            return familyMap[family];
+        }
+
+        // Try matching from the full model ID (sometimes more specific)
+        for (const [key, value] of Object.entries(familyMap)) {
+            if (id.includes(key) || family.includes(key)) {
+                return value;
+            }
+        }
+
+        // Default to gpt-4.1 as the cheapest/fastest available
+        const logger = getLogger();
+        logger.warn(`[ACP] Unknown model family "${family}" (id: "${id}"), defaulting to gpt-4.1`);
+        return 'gpt-4.1';
     }
 
     /**
@@ -343,10 +442,16 @@ export class AcpWorkerManager {
         stream?: vscode.ChatResponseStream,
         timeoutMs: number = 300_000,
     ): Promise<{ output: string; toolCallCount: number; stopReason: string }> {
+        const logger = getLogger();
+
         // Pre-flight check: is the CLI available?
         const { checkCopilotCli, showCliMissingError } = await import('./copilotCliStatus');
         const cliStatus = checkCopilotCli();
+        logger.info(
+            `[ACP:spawnWorker] CLI status: available=${cliStatus.available}, path="${cliStatus.path || 'none'}", version="${cliStatus.version || 'unknown'}"`,
+        );
         if (!cliStatus.available) {
+            logger.error(`[ACP:spawnWorker] CLI NOT AVAILABLE — aborting spawn`);
             showCliMissingError(); // fire-and-forget notification
             throw new Error(
                 'Copilot CLI is not installed. Run "Johann: Setup Copilot CLI" from the command palette to get started.',
@@ -354,8 +459,10 @@ export class AcpWorkerManager {
         }
 
         const executable = this.findCopilotExecutable();
-        const logger = getLogger();
 
+        logger.info(`[ACP:spawnWorker] Executable resolved to: "${executable}"`);
+        logger.info(`[ACP:spawnWorker] Args: --acp --stdio --model ${modelName}`);
+        logger.info(`[ACP:spawnWorker] CWD: ${projectDir}`);
         logger.info(
             `[ACP] Spawning worker ${workerId}: ${executable} --acp --stdio --model ${modelName}`,
         );
@@ -373,11 +480,51 @@ export class AcpWorkerManager {
 
         workerProcess.unref();
 
+        logger.info(
+            `[ACP:spawnWorker] Process spawned — PID: ${workerProcess.pid}, stdin: ${!!workerProcess.stdin}, stdout: ${!!workerProcess.stdout}, stderr: ${!!workerProcess.stderr}`,
+        );
+
         if (!workerProcess.stdin || !workerProcess.stdout) {
             throw new Error('Failed to spawn copilot CLI process with piped stdio');
         }
 
         logger.info(`[ACP] Worker ${workerId} spawned with PID ${workerProcess.pid}`);
+
+        // Track early exit — if the process dies before ACP connection is established,
+        // we need to surface the error instead of hanging forever
+        let earlyExitReject: ((err: Error) => void) | undefined;
+        const earlyExitPromise = new Promise<never>((_resolve, reject) => {
+            earlyExitReject = reject;
+        });
+
+        workerProcess.on('error', (err) => {
+            logger.error(`[ACP:${workerId}] Process error: ${err.message}`);
+            getActivityPanel().logStderr(workerId, `Process error: ${err.message}`);
+            if (earlyExitReject) {
+                earlyExitReject(new Error(`Copilot CLI process error: ${err.message}`));
+                earlyExitReject = undefined;
+            }
+        });
+
+        workerProcess.on('exit', (code, signal) => {
+            if (earlyExitReject) {
+                const stderrLogs = this.activeWorkers.get(workerId)?.logs.join('') || '';
+                const detail = stderrLogs ? `\nStderr: ${stderrLogs.substring(0, 500)}` : '';
+                logger.error(
+                    `[ACP:${workerId}] Process exited early (code=${code}, signal=${signal})${detail}`,
+                );
+                getActivityPanel().logStderr(
+                    workerId,
+                    `Process exited early (code=${code}, signal=${signal})${detail}`,
+                );
+                earlyExitReject(
+                    new Error(
+                        `Copilot CLI exited unexpectedly (code=${code}, signal=${signal})${detail}`,
+                    ),
+                );
+                earlyExitReject = undefined;
+            }
+        });
 
         // Capture stderr for diagnostics
         workerProcess.stderr?.on('data', (data) => {
@@ -391,12 +538,27 @@ export class AcpWorkerManager {
         });
 
         // Create ACP streams
+        logger.info(`[ACP:spawnWorker] Creating ACP ndJsonStream...`);
         const output = Writable.toWeb(workerProcess.stdin) as WritableStream<Uint8Array>;
         const input = Readable.toWeb(workerProcess.stdout) as ReadableStream<Uint8Array>;
         const acpStream = acp.ndJsonStream(output, input);
+        logger.info(`[ACP:spawnWorker] ACP stream created successfully`);
 
         // Collected agent messages
         const messages: string[] = [];
+
+        // Terminal management for this worker
+        let terminalCounter = 0;
+        const terminals = new Map<
+            string,
+            {
+                process: ChildProcess;
+                output: string;
+                exitStatus: { exitCode?: number | null; signal?: string | null } | null;
+                outputByteLimit: number;
+                exitPromise: Promise<{ exitCode?: number | null; signal?: string | null }>;
+            }
+        >();
         let toolCallCount = 0;
         let lastActivityTime = Date.now();
 
@@ -438,8 +600,8 @@ export class AcpWorkerManager {
                             outcome: { outcome: 'selected', optionId: params.options[0].optionId },
                         };
                     }
-                    // No options means just approve
-                    return { outcome: { outcome: 'selected', optionId: '' } };
+                    // No options array — use standard 'allow' optionId
+                    return { outcome: { outcome: 'selected', optionId: 'allow' } };
                 }
 
                 logger.warn(
@@ -482,10 +644,209 @@ export class AcpWorkerManager {
                     logger.info(`[ACP:${workerId}] Tool call: ${update.title} (${update.status})`);
                 }
             },
+
+            async readTextFile(params) {
+                lastActivityTime = Date.now();
+                const fs = require('fs') as typeof import('fs');
+                const filePath = params.path;
+                logger.info(`[ACP:${workerId}] readTextFile: ${filePath}`);
+                toolCallCount++;
+
+                getActivityPanel().logTool(workerId, 'read', filePath, true);
+
+                try {
+                    const content = fs.readFileSync(filePath, 'utf-8');
+                    return { content };
+                } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    logger.error(`[ACP:${workerId}] readTextFile failed: ${msg}`);
+                    getActivityPanel().logTool(workerId, 'read', `FAILED: ${filePath}`, false);
+                    return { content: `Error reading file: ${msg}` };
+                }
+            },
+
+            async writeTextFile(params) {
+                lastActivityTime = Date.now();
+                const fs = require('fs') as typeof import('fs');
+                const path = require('path') as typeof import('path');
+                const filePath = params.path;
+                const content = params.content;
+                logger.info(
+                    `[ACP:${workerId}] writeTextFile: ${filePath} (${content.length} chars)`,
+                );
+                toolCallCount++;
+
+                getActivityPanel().logTool(workerId, 'write', filePath, true);
+
+                try {
+                    // Ensure parent directory exists
+                    const dir = path.dirname(filePath);
+                    fs.mkdirSync(dir, { recursive: true });
+                    fs.writeFileSync(filePath, content, 'utf-8');
+                    return {};
+                } catch (err) {
+                    const msg = err instanceof Error ? err.message : String(err);
+                    logger.error(`[ACP:${workerId}] writeTextFile failed: ${msg}`);
+                    getActivityPanel().logTool(workerId, 'write', `FAILED: ${filePath}`, false);
+                    throw new Error(`Failed to write file: ${msg}`);
+                }
+            },
+
+            async createTerminal(params) {
+                lastActivityTime = Date.now();
+                const cp = require('child_process') as typeof import('child_process');
+                const termId = `term-${++terminalCounter}`;
+                const cmd = params.command;
+                const args = params.args || [];
+                const cwd = params.cwd || projectDir;
+                const byteLimit = params.outputByteLimit || 1024 * 1024; // 1MB default
+
+                logger.info(
+                    `[ACP:${workerId}] createTerminal[${termId}]: ${cmd} ${args.join(' ')} (cwd: ${cwd})`,
+                );
+                toolCallCount++;
+                getActivityPanel().logTool(workerId, 'terminal', `${cmd} ${args.join(' ')}`, true);
+
+                // Build env with any extra vars
+                const env = { ...process.env };
+                if (params.env) {
+                    for (const v of params.env) {
+                        env[v.name] = v.value;
+                    }
+                }
+
+                const child = cp.spawn(cmd, args, {
+                    cwd,
+                    env,
+                    shell: true,
+                    stdio: ['ignore', 'pipe', 'pipe'],
+                });
+
+                const exitPromise = new Promise<{
+                    exitCode?: number | null;
+                    signal?: string | null;
+                }>((resolve) => {
+                    child.on('exit', (code, sig) => {
+                        const status = { exitCode: code, signal: sig?.toString() || null };
+                        const termState = terminals.get(termId);
+                        if (termState) {
+                            termState.exitStatus = status;
+                        }
+                        resolve(status);
+                    });
+                    child.on('error', (err) => {
+                        logger.error(`[ACP:${workerId}] terminal[${termId}] error: ${err.message}`);
+                        const status = { exitCode: -1, signal: null };
+                        const termState = terminals.get(termId);
+                        if (termState) {
+                            termState.exitStatus = status;
+                        }
+                        resolve(status);
+                    });
+                });
+
+                const appendOutput = (chunk: Buffer) => {
+                    const text = chunk.toString();
+                    const termState = terminals.get(termId);
+                    if (termState) {
+                        termState.output += text;
+                        // Truncate from beginning if over limit
+                        if (termState.output.length > byteLimit) {
+                            termState.output = termState.output.slice(-byteLimit);
+                        }
+                    }
+                };
+
+                child.stdout?.on('data', appendOutput);
+                child.stderr?.on('data', appendOutput);
+
+                terminals.set(termId, {
+                    process: child,
+                    output: '',
+                    exitStatus: null,
+                    outputByteLimit: byteLimit,
+                    exitPromise,
+                });
+
+                logger.info(`[ACP:${workerId}] terminal[${termId}] spawned PID=${child.pid}`);
+                return { terminalId: termId };
+            },
+
+            async terminalOutput(params) {
+                lastActivityTime = Date.now();
+                const termState = terminals.get(params.terminalId);
+                if (!termState) {
+                    logger.warn(
+                        `[ACP:${workerId}] terminalOutput: unknown terminal ${params.terminalId}`,
+                    );
+                    return { output: '', truncated: false };
+                }
+                const truncated = termState.output.length >= termState.outputByteLimit;
+                return {
+                    output: termState.output,
+                    truncated,
+                    exitStatus: termState.exitStatus || undefined,
+                };
+            },
+
+            async waitForTerminalExit(params) {
+                lastActivityTime = Date.now();
+                const termState = terminals.get(params.terminalId);
+                if (!termState) {
+                    logger.warn(
+                        `[ACP:${workerId}] waitForTerminalExit: unknown terminal ${params.terminalId}`,
+                    );
+                    return { exitCode: -1, signal: null };
+                }
+                const result = await termState.exitPromise;
+                logger.info(
+                    `[ACP:${workerId}] terminal[${params.terminalId}] exited: code=${result.exitCode}, signal=${result.signal}`,
+                );
+                return result;
+            },
+
+            async killTerminal(params) {
+                lastActivityTime = Date.now();
+                const termState = terminals.get(params.terminalId);
+                if (!termState) {
+                    return {};
+                }
+                logger.info(
+                    `[ACP:${workerId}] killing terminal ${params.terminalId} (PID=${termState.process.pid})`,
+                );
+                termState.process.kill('SIGTERM');
+                // Force kill after 3s
+                setTimeout(() => {
+                    try {
+                        termState.process.kill('SIGKILL');
+                    } catch {
+                        // already dead
+                    }
+                }, 3000);
+                return {};
+            },
+
+            async releaseTerminal(params) {
+                lastActivityTime = Date.now();
+                const termState = terminals.get(params.terminalId);
+                if (!termState) {
+                    return {};
+                }
+                logger.info(`[ACP:${workerId}] releasing terminal ${params.terminalId}`);
+                try {
+                    termState.process.kill('SIGTERM');
+                } catch {
+                    // already dead
+                }
+                terminals.delete(params.terminalId);
+                return {};
+            },
         };
 
         // Create ACP connection
+        logger.info(`[ACP:spawnWorker] Creating ClientSideConnection...`);
         const connection = new acp.ClientSideConnection((_agent) => acpClient, acpStream);
+        logger.info(`[ACP:spawnWorker] ClientSideConnection created`);
 
         // Register worker runtime
         const runtime: WorkerRuntime = {
@@ -556,7 +917,13 @@ export class AcpWorkerManager {
                 }, timeoutMs);
             });
 
-            const promptResult = await Promise.race([promptPromise, timeoutPromise]);
+            const promptResult = await Promise.race([
+                promptPromise,
+                timeoutPromise,
+                earlyExitPromise,
+            ]);
+            // If we got here, the prompt completed — clear the early exit handler
+            earlyExitReject = undefined;
             logger.info(`[ACP:${workerId}] Completed with stopReason: ${promptResult.stopReason}`);
 
             // Mark worker as idle (persistent graph node)
@@ -574,6 +941,16 @@ export class AcpWorkerManager {
         } finally {
             clearInterval(healthCheck);
             cancelDisposable.dispose();
+            // Clean up any lingering terminals
+            for (const [termId, termState] of terminals) {
+                try {
+                    termState.process.kill('SIGTERM');
+                } catch {
+                    // already dead
+                }
+                logger.info(`[ACP:${workerId}] cleaned up terminal ${termId}`);
+            }
+            terminals.clear();
         }
     }
 
@@ -663,6 +1040,16 @@ export class AcpWorkerManager {
             const cliModel = this.mapModelToCliName(modelInfo);
             const projectDir = this.getProjectDir(subtask);
             const workerId = `${subtask.id}-${Date.now()}`;
+
+            const logger = getLogger();
+            logger.info(`[ACP:executeSubtask] === STARTING SUBTASK: "${subtask.title}" ===`);
+            logger.info(
+                `[ACP:executeSubtask] Model from picker: family="${modelInfo.family}", id="${modelInfo.id}", name="${modelInfo.name}"`,
+            );
+            logger.info(`[ACP:executeSubtask] Mapped CLI model: "${cliModel}"`);
+            logger.info(`[ACP:executeSubtask] Project dir: "${projectDir}"`);
+            logger.info(`[ACP:executeSubtask] Worker ID: "${workerId}"`);
+            logger.info(`[ACP:executeSubtask] Preprompt length: ${preprompt.length} chars`);
 
             // Determine timeout from complexity
             const timeoutMs =
@@ -781,6 +1168,13 @@ export class AcpWorkerManager {
         } catch (err) {
             const durationMs = Date.now() - startTime;
             const errorMsg = err instanceof Error ? err.message : String(err);
+            const errorStack = err instanceof Error ? err.stack : '';
+
+            const logger = getLogger();
+            logger.error(`[ACP:executeSubtask] === SUBTASK FAILED: "${subtask.title}" ===`);
+            logger.error(`[ACP:executeSubtask] Error: ${errorMsg}`);
+            logger.error(`[ACP:executeSubtask] Stack: ${errorStack}`);
+            logger.error(`[ACP:executeSubtask] Duration: ${durationMs}ms`);
 
             if (debugLog) {
                 await debugLog.logLLMCall({

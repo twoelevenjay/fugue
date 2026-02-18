@@ -73,13 +73,14 @@ export function checkCopilotCli(forceRefresh = false): CliStatus {
     // 2. Check PATH
     if (!status.available) {
         try {
-            const whichResult = execSync(
-                process.platform === 'win32' ? 'where copilot' : 'which copilot',
-                { encoding: 'utf-8', timeout: 5000 },
-            ).trim();
+            const whichCmd = process.platform === 'win32' ? 'where copilot' : 'which copilot';
+            const whichResult = execSync(whichCmd, {
+                encoding: 'utf-8',
+                timeout: 5000,
+            }).trim();
 
             if (whichResult) {
-                status.path = whichResult.split('\n')[0]; // Take first result on Windows
+                status.path = whichResult.split('\n')[0];
                 status.available = true;
 
                 try {
@@ -92,7 +93,72 @@ export function checkCopilotCli(forceRefresh = false): CliStatus {
                 }
             }
         } catch {
-            // Not in PATH
+            // Not in PATH — check version manager locations
+        }
+    }
+
+    // 3. Check common Node version manager install locations
+    if (!status.available) {
+        const fs = require('fs') as typeof import('fs');
+        const path = require('path') as typeof import('path');
+        const home = process.env.HOME || process.env.USERPROFILE || '';
+
+        if (home) {
+            const candidates: string[] = [];
+
+            // nvm
+            const nvmDir = process.env.NVM_DIR || path.join(home, '.nvm');
+            const nvmVersionsDir = path.join(nvmDir, 'versions', 'node');
+            try {
+                const versions = fs.readdirSync(nvmVersionsDir).sort().reverse();
+                for (const v of versions) {
+                    candidates.push(path.join(nvmVersionsDir, v, 'bin', 'copilot'));
+                }
+            } catch {
+                // nvm not installed
+            }
+
+            // volta
+            candidates.push(path.join(home, '.volta', 'bin', 'copilot'));
+
+            // fnm
+            const fnmDir = path.join(home, '.local', 'share', 'fnm', 'node-versions');
+            try {
+                const versions = fs.readdirSync(fnmDir).sort().reverse();
+                for (const v of versions) {
+                    candidates.push(path.join(fnmDir, v, 'installation', 'bin', 'copilot'));
+                }
+            } catch {
+                // fnm not installed
+            }
+
+            // Global npm
+            candidates.push('/usr/local/bin/copilot');
+            candidates.push('/opt/homebrew/bin/copilot');
+
+            // Windows
+            if (process.platform === 'win32' && process.env.APPDATA) {
+                candidates.push(path.join(process.env.APPDATA, 'npm', 'copilot.cmd'));
+            }
+
+            for (const candidate of candidates) {
+                try {
+                    fs.accessSync(candidate, fs.constants.X_OK);
+                    status.available = true;
+                    status.path = candidate;
+                    try {
+                        status.version = execSync(`"${candidate}" --version 2>/dev/null`, {
+                            encoding: 'utf-8',
+                            timeout: 5000,
+                        }).trim();
+                    } catch {
+                        // Found but --version failed
+                    }
+                    break;
+                } catch {
+                    // Not here
+                }
+            }
         }
     }
 
