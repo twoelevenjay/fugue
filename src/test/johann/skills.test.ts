@@ -612,8 +612,8 @@ suite('shippedSkills', () => {
         assert.ok(slugs.includes('test.generate.unit'));
     });
 
-    test('10 shipped skills are defined', () => {
-        assert.strictEqual(SHIPPED_SKILLS.length, 10);
+    test('shipped skills are defined', () => {
+        assert.strictEqual(SHIPPED_SKILLS.length, 46);
     });
 });
 
