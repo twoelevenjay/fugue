@@ -13,28 +13,28 @@
 5. [Orchestration Flow](#orchestration-flow)
 6. [Memory & Internal Communication](#memory--internal-communication)
 7. [Model Selection & Escalation](#model-selection--escalation)
-8. [Subagent System](#subagent-system)
+8. [ACP Worker System](#acp-worker-system)
 9. [Bootstrap & Self-Evolution](#bootstrap--self-evolution)
 10. [Skills System](#skills-system)
 11. [Execution Ledger & Hive Mind](#execution-ledger--hive-mind)
 12. [Session Transcripts](#session-transcripts)
-12. [Heartbeat System](#heartbeat-system)
-13. [Directives (Slash Commands)](#directives-slash-commands)
-14. [Configuration Reference](#configuration-reference)
-15. [YOLO Mode](#yolo-mode)
-16. [Handling Large Inputs](#handling-large-inputs)
-17. [OpenClaw Inspirations](#openclaw-inspirations)
+13. [Heartbeat System](#heartbeat-system)
+14. [Directives (Slash Commands)](#directives-slash-commands)
+15. [Configuration Reference](#configuration-reference)
+16. [YOLO Mode](#yolo-mode)
+17. [Handling Large Inputs](#handling-large-inputs)
+18. [OpenClaw Inspirations](#openclaw-inspirations)
 
 ---
 
 ## Overview
 
-**Johann** is an orchestration agent that runs inside VS Code as a GitHub Copilot Chat participant (`@johann`). It transforms complex, multi-step tasks into structured execution plans, delegates subtasks to specialized subagents (each powered by an LLM), reviews their outputs, escalates between models when needed, and merges everything into a coherent response.
+**Johann** is an orchestration agent that runs inside VS Code as a GitHub Copilot Chat participant (`@johann`). It transforms complex, multi-step tasks into structured execution plans, delegates subtasks to specialized ACP workers (each a full Copilot CLI agent), reviews their outputs, escalates between models when needed, and merges everything into a coherent response.
 
 Johann is designed around a key insight: **Copilot itself is an orchestrator**, and Johann operates as a **meta-orchestrator on top of Copilot**, creating a layered orchestration system. This means:
 
 - **Layer 1 — GitHub Copilot:** Provides access to language models, tool use, and the VS Code integration surface. Copilot manages its own internal orchestration (model routing, tool calls, context window management).
-- **Layer 2 — Johann:** Sits on top of Copilot as a chat participant. Johann decomposes tasks, selects models, spawns subagents (each a separate LLM invocation), reviews results, handles escalation, and maintains persistent memory across sessions.
+- **Layer 2 — Johann:** Sits on top of Copilot as a chat participant. Johann decomposes tasks, selects models, spawns ACP workers (each a separate Copilot CLI process), reviews results, handles escalation, and maintains persistent memory across sessions.
 
 This layered design means Johann doesn't replace Copilot — it enhances it by adding task decomposition, multi-model orchestration, persistent memory, and self-evolving identity.
 
@@ -96,17 +96,21 @@ Johann doesn't directly call OpenAI or Anthropic APIs. Instead, it uses VS Code'
 ## Core Components
 
 ### Orchestrator (`orchestrator.ts`)
+
 The top-level controller. Coordinates the full lifecycle:
+
 1. Receives user request via `@johann` chat participant
 2. Creates a `JohannSession` with unique ID
 3. Delegates planning to `TaskDecomposer`
-4. Delegates execution to `SubagentManager` (with model selection from `ModelPicker`)
+4. Delegates execution to `AcpWorkerManager` (with model selection from `ModelPicker`)
 5. Reviews and escalates results
 6. Merges outputs into final response
 7. Persists to `MemorySystem`
 
 ### Task Decomposer (`taskDecomposer.ts`)
+
 Analyzes user requests and produces an `OrchestrationPlan`:
+
 - Determines if the task needs single or multi-agent execution
 - Breaks complex tasks into subtasks with dependencies
 - Assigns complexity ratings (`trivial` → `expert`) to each subtask
@@ -114,7 +118,9 @@ Analyzes user requests and produces an `OrchestrationPlan`:
 - Chooses execution strategy: `serial`, `parallel`, or `mixed`
 
 ### Model Picker (`modelPicker.ts`)
+
 Intelligent model selection and escalation:
+
 - Discovers all available models via `vscode.lm.selectChatModels()`
 - Classifies models into 5 capability tiers
 - Maps task complexity to ideal model tier
@@ -130,16 +136,25 @@ Intelligent model selection and escalation:
 | 2 | Standard | GPT-4o-Mini, O1-Mini, Haiku |
 | 1 | Basic | GPT-3 variants |
 
-### Subagent Manager (`subagentManager.ts`)
-Spawns and manages individual subagent executions:
-- Each subagent is a single LLM invocation with its own model
+### ACP Worker Manager (`acpWorkerManager.ts`)
+
+Spawns and manages ACP worker processes:
+
+- Each worker is a `copilot --acp --stdio` child process with full tool access
+- Workers are persistent (stay alive as idle graph nodes after completion)
+- Process-isolated (cannot block the extension host)
+- Auto-approve safe tool kinds, deny unknown ones
+- Complexity-based timeouts (2–15 minutes)
+- Refusal detection, prior attempt carry-forward, skill injection
 - Builds self-contained prompts including dependency context
 - Streams output live to the chat response
 - Reviews output against success criteria using a separate LLM call
 - Produces `SubtaskResult` objects for the orchestrator
 
 ### Memory System (`memory.ts`)
+
 Persistent memory stored in `.vscode/johann/`:
+
 - Timestamped markdown files organized by category
 - Categories: `task`, `decision`, `learning`, `context`, `error`
 - Records task completions, decisions, learnings, and errors
@@ -174,7 +189,7 @@ User sends request to @johann
 │     best model for       │
 │     complexity level     │
 │                          │
-│  2. SubagentManager      │
+│  2. AcpWorkerManager     │
 │     executes subtask     │
 │     with selected model  │
 │                          │
@@ -241,21 +256,21 @@ Johann documents its actions in text files to enable **internal communication an
 
 ### Memory Categories
 
-| Category | File | Purpose | Editable |
-|----------|------|---------|----------|
-| Identity | `SOUL.md` | Agent personality, tone, values | Yes — evolves over time |
-| Identity | `IDENTITY.md` | Structured name/emoji/vibe | Yes |
-| User Profile | `USER.md` | Human's preferences and info | Yes — updated as learned |
-| Instructions | `AGENTS.md` | Operating manual and safety rules | Yes (with care) |
-| Environment | `TOOLS.md` | Device and tool notes | Yes |
-| Long-Term Memory | `MEMORY.md` | Curated, distilled knowledge | Yes — maintained actively |
-| Working Memory | `memory/*.md` | Raw daily logs (append-only) | Yes |
-| Heartbeat Tasks | `HEARTBEAT.md` | Periodic check list | Yes |
-| Sessions | `sessions/*.jsonl` | Conversation transcripts | Read-only (auto-generated) |
-| Registry | `registry/*.json` | Subagent tracking | Read-only (auto-generated) |
-| Execution Ledger | `sessions/<id>/ledger.json` | Real-time orchestration state | Read-only (auto-generated) |
-| Agent Journals | `sessions/<id>/journal/*.md` | Per-agent action logs (hive mind) | Read-only (auto-generated) |
-| Skills | `skills/*/SKILL.md` | Discoverable skill definitions | Yes |
+| Category         | File                         | Purpose                           | Editable                   |
+| ---------------- | ---------------------------- | --------------------------------- | -------------------------- |
+| Identity         | `SOUL.md`                    | Agent personality, tone, values   | Yes — evolves over time    |
+| Identity         | `IDENTITY.md`                | Structured name/emoji/vibe        | Yes                        |
+| User Profile     | `USER.md`                    | Human's preferences and info      | Yes — updated as learned   |
+| Instructions     | `AGENTS.md`                  | Operating manual and safety rules | Yes (with care)            |
+| Environment      | `TOOLS.md`                   | Device and tool notes             | Yes                        |
+| Long-Term Memory | `MEMORY.md`                  | Curated, distilled knowledge      | Yes — maintained actively  |
+| Working Memory   | `memory/*.md`                | Raw daily logs (append-only)      | Yes                        |
+| Heartbeat Tasks  | `HEARTBEAT.md`               | Periodic check list               | Yes                        |
+| Sessions         | `sessions/*.jsonl`           | Conversation transcripts          | Read-only (auto-generated) |
+| Registry         | `registry/*.json`            | Subagent tracking                 | Read-only (auto-generated) |
+| Execution Ledger | `sessions/<id>/ledger.json`  | Real-time orchestration state     | Read-only (auto-generated) |
+| Agent Journals   | `sessions/<id>/journal/*.md` | Per-agent action logs (hive mind) | Read-only (auto-generated) |
+| Skills           | `skills/*/SKILL.md`          | Discoverable skill definitions    | Yes                        |
 
 ---
 
@@ -275,6 +290,7 @@ Given task complexity (e.g., "complex"):
 ### Escalation Algorithm
 
 When a subtask fails review:
+
 ```
   1. Analyze the failure reason
   2. Decide escalation direction:
@@ -286,6 +302,7 @@ When a subtask fails review:
 ```
 
 **Down-escalation triggers** (heuristic):
+
 - Output too verbose
 - Over-engineered solution
 - Hallucination detected
@@ -295,40 +312,119 @@ When a subtask fails review:
 
 ---
 
-## Subagent System
+## ACP Worker System
 
-### Subagent Lifecycle
+> **Architecture change (February 2026):** Johann's execution backend was migrated from in-process `LanguageModelChat` API calls to persistent ACP (Agent Client Protocol) workers. Each worker is a full Copilot CLI agent with native tool access.
+
+### Why ACP?
+
+The previous `SubagentManager` executed subtasks as in-process LLM calls via VS Code's `LanguageModelChat` API. This required threading `toolToken` for tool access, manual tool schema sanitization, an in-process agentic loop with corruption detection, and context compaction — all reimplementing what Copilot already does natively.
+
+ACP workers are strictly superior:
+
+| Capability         | Old (LanguageModelChat)          | New (ACP Workers)                      |
+| ------------------ | -------------------------------- | -------------------------------------- |
+| Tool access        | Requires `toolToken` threading   | Native (file edit, terminal, search)   |
+| Process isolation  | In-process (can block extension) | Separate child process                 |
+| Context management | Manual compaction at 12 messages | Handled natively by Copilot CLI        |
+| Persistence        | Ephemeral per request            | Workers stay alive as idle graph nodes |
+| Parallelism        | Sequential (shared event loop)   | True parallel (separate processes)     |
+| Crash resilience   | Crashes extension host           | Worker dies, extension survives        |
+
+### Worker Lifecycle
 
 ```
-Spawned → Running → [Review] → Completed/Failed → [Escalated]
+Spawned → Running → [Review] → Completed/Failed → [Escalated] → Cleaned Up
 ```
 
-1. **Spawned:** SubagentManager receives a subtask with a model selection
-2. **Running:** LLM invocation begins, output streams live
-3. **Review:** A separate LLM call evaluates output against success criteria
-4. **Completed:** Output accepted, results stored
-5. **Failed:** Review rejected output — may trigger escalation
-6. **Escalated:** New model selected, subtask re-executed
+1. **Pre-flight check:** Verifies Copilot CLI is installed. If missing, shows an actionable notification with install options.
+2. **Spawned:** `AcpWorkerManager` spawns `copilot --acp --stdio --model <model>` as a child process. Worker is registered in the activity panel.
+3. **Running:** Worker receives a preprompt (system context + task description + skill instructions + verification loops) and executes autonomously using native Copilot tools. Tool calls are auto-approved for safe kinds (file edit, terminal, search).
+4. **Streamed:** Tool calls and agent messages stream to both the Copilot chat (via `ChatResponseStream`) and a dedicated `LogOutputChannel` visible in the Output panel.
+5. **Review:** A separate LLM call (via VS Code `LanguageModelChat` API — review doesn't need tools) evaluates the worker's output against success criteria.
+6. **Completed/Failed:** Results stored. If failed, may trigger model escalation.
+7. **Escalated:** New model selected, fresh worker spawned with prior attempt context carried forward.
+8. **Cleaned up:** Worker process killed, activity panel updated, channel auto-disposed after 5 minutes.
 
-### Subagent Isolation
+### Worker Isolation
 
-Each subagent:
+Each ACP worker:
+
 - Gets its own prompt (self-contained with all needed context)
-- Gets reduced bootstrap files (only `AGENTS.md` + `TOOLS.md`)
-- Participates in the **hive mind** — receives pre-execution context from the ledger and periodic mid-round updates showing what other agents have done, are doing, and have created
-- Cannot initiate heartbeats, memory maintenance, or proactive actions
-- Is ephemeral — may be terminated after completion
+- Runs in a separate child process (cannot access extension host memory)
+- Cannot see Johann's system prompt, memory files, or other workers' prompts
+- Participates in the **hive mind** via preprompt context injection (not live inter-process communication)
+- Has complexity-based timeouts: trivial=2min, simple=3min, moderate=5min, complex=10min, expert=15min
 
-See [Execution Ledger & Hive Mind](#execution-ledger--hive-mind) for full details on inter-agent coordination.
+### Worker Activity Panel
+
+Each worker gets a dedicated `LogOutputChannel` in the VS Code Output panel, showing:
+
+```
+═══════════════════════════════════════════════════════
+Worker: task-1-1708214400000
+Task:   Set up DDEV WordPress project
+Model:  claude-sonnet-4-5
+Started: 10:15:32 PM
+═══════════════════════════════════════════════════════
+
+✅ [file_create] Created .ddev/config.yaml
+✅ [terminal] ddev start
+💬 DDEV is running. Now I'll install WordPress...
+✅ [terminal] ddev wp core install --url=...
+⚠️ Warning: wp-config.php already exists
+
+═══════════════════════════════════════════════════════
+✅ Worker COMPLETED
+Duration:   45.2s
+Tool calls: 12
+Summary:    12 tool calls in 45.2s
+═══════════════════════════════════════════════════════
+```
+
+Access via:
+
+- **Chat button:** Each subtask renders a "📋 View Worker Logs" button in the Copilot chat
+- **Command palette:** `Johann: Show Worker Activity` shows a picker of all active/recent workers
+- **Output panel:** Worker channels appear as `Johann Worker: <task title>`
+
+### Process Lifecycle & Cleanup
+
+Johann ensures no orphaned processes survive:
+
+| Event                         | What happens                                                                                  |
+| ----------------------------- | --------------------------------------------------------------------------------------------- |
+| **Task completes**            | Worker process killed via SIGTERM (SIGKILL after 2s fallback)                                 |
+| **User cancels**              | Cancellation token fires → worker killed immediately                                          |
+| **VS Code closes**            | `deactivate()` + disposable calls `AcpWorkerManager.cleanupAllInstances()`                    |
+| **VS Code crashes**           | Orphaned workers detected on next startup via `pgrep -f "copilot.*--acp.*--stdio"` and killed |
+| **Manual stop**               | `Johann: Stop All Workers` command with confirmation dialog                                   |
+| **Disposable teardown fails** | Fallback `pkill -f "copilot.*--acp.*--stdio"` catches anything missed                         |
+
+Cross-platform: macOS/Linux use `pgrep`/`pkill`, Windows uses `wmic`/PowerShell fallback.
+
+### Copilot CLI Setup
+
+If the CLI is not installed, Johann provides multiple paths:
+
+1. **On activation:** Non-blocking warning notification with "Setup Guide" button
+2. **On task execution:** Error notification with "Setup Now" and "Set Custom Path" options
+3. **Command palette:** `Johann: Setup Copilot CLI` — QuickPick with:
+    - Install via npm (`npm install -g @githubnext/github-copilot-cli`)
+    - Open GitHub install docs
+    - Set custom path (for non-standard installs)
+    - Re-check (verify after installation)
+4. **Environment variable:** `COPILOT_CLI_PATH` overrides PATH-based detection
 
 ### Dependency Resolution
 
 Subtasks can declare dependencies via `dependsOn`:
+
 ```json
 {
-  "id": "task-2",
-  "dependsOn": ["task-1"],
-  "description": "Using the output from task-1..."
+    "id": "task-2",
+    "dependsOn": ["task-1"],
+    "description": "Using the output from task-1..."
 }
 ```
 
@@ -341,6 +437,7 @@ The orchestrator ensures task-1's output is available before task-2 executes. Th
 ### First Run
 
 On first run in a workspace, Johann:
+
 1. Creates `.vscode/johann/` directory structure
 2. Copies template files (SOUL.md, IDENTITY.md, USER.md, etc.)
 3. Creates `BOOTSTRAP.md` — a first-run onboarding guide
@@ -351,10 +448,11 @@ On first run in a workspace, Johann:
 ### Self-Evolution
 
 Johann's files are **designed to be evolved by the agent itself**:
+
 - As Johann learns about the user, it updates `USER.md`
 - As Johann discovers its own style preferences, it updates `SOUL.md`
 - As decisions are made, they're recorded in `MEMORY.md`
-- The system prompt explicitly instructs: *"These files are YOURS to evolve."*
+- The system prompt explicitly instructs: _"These files are YOURS to evolve."_
 
 This creates a feedback loop where Johann becomes more personalized and effective over time, without requiring the user to manually configure anything.
 
@@ -379,10 +477,13 @@ Use the `createSkill()` API or manually create a directory under `skills/`:
 
 ```markdown
 # my-skill
+
 > Short description of what this skill does
 
 ## Instructions
+
 When this skill is triggered:
+
 1. Do step one
 2. Do step two
 ```
@@ -393,17 +494,17 @@ When this skill is triggered:
 
 ### The Problem
 
-Without coordination, subagents are "deaf and blind" once they start their tool loop. Agent A might create `frontend/` while Agent B, running in parallel, creates its own `frontend/` — resulting in triple-nested directories, conflicting files, and wasted work. Even sequential agents suffered: they received a workspace snapshot from the *start* of the session, not the current state after prior agents had modified the filesystem.
+Without coordination, subagents are "deaf and blind" once they start their tool loop. Agent A might create `frontend/` while Agent B, running in parallel, creates its own `frontend/` — resulting in triple-nested directories, conflicting files, and wasted work. Even sequential agents suffered: they received a workspace snapshot from the _start_ of the session, not the current state after prior agents had modified the filesystem.
 
 ### The Solution: Shared Execution Ledger
 
 The Execution Ledger is a **file-based coordination layer** that gives every subagent real-time awareness of the orchestration state. It stores its data at `.vscode/johann/sessions/<sessionId>/`:
 
-| File | Purpose |
-|------|---------|
-| `ledger.json` | Global state: all subtask statuses, file manifests, worktree mappings, global notes |
-| `workspace-snapshot.txt` | Refreshable directory tree, captured fresh before each subtask |
-| `journal/<subtask-id>.md` | Per-agent chronological log of every tool call and action taken |
+| File                      | Purpose                                                                             |
+| ------------------------- | ----------------------------------------------------------------------------------- |
+| `ledger.json`             | Global state: all subtask statuses, file manifests, worktree mappings, global notes |
+| `workspace-snapshot.txt`  | Refreshable directory tree, captured fresh before each subtask                      |
+| `journal/<subtask-id>.md` | Per-agent chronological log of every tool call and action taken                     |
 
 ### Design Principles
 
@@ -420,6 +521,7 @@ The hive mind operates through three coordinated layers:
 #### Layer 1: Pre-Execution Briefing
 
 Before each subagent starts, it receives:
+
 - A **fresh workspace snapshot** — the actual current directory tree, not a stale copy
 - **Completed subtask summaries** — what previous agents did, including file manifests
 - **Parallel agent awareness** — which other agents are running, in which worktrees
@@ -428,6 +530,7 @@ Before each subagent starts, it receives:
 #### Layer 2: Outbound Signals (Every Round)
 
 Every tool-loop round, each agent's actions are logged to its shared journal:
+
 - Files created, edited, or deleted
 - Terminal commands run
 - Directories created
@@ -437,6 +540,7 @@ Other agents (and the orchestrator) can read these journals to understand what e
 #### Layer 3: Inbound Updates (Every N Rounds)
 
 Every `HIVE_MIND_REFRESH_INTERVAL` rounds (default: 5), the agent receives a **🐝 Hive Mind Update** injected into its conversation:
+
 1. The ledger is re-read from disk (the orchestrator may have updated it as other agents complete)
 2. A compact update is built showing: newly completed subtasks, files created by others, failures, running agents
 3. **Conflict warnings** flag files recently touched by other agents in the same directory
@@ -445,6 +549,7 @@ Every `HIVE_MIND_REFRESH_INTERVAL` rounds (default: 5), the agent receives a **�
 ### Conflict Detection
 
 The hive mind includes basic conflict detection:
+
 - If two agents share a working directory, each agent's mid-round refresh lists files recently created/modified by the other
 - Agents are instructed to read (not overwrite) files flagged in conflict warnings
 - Worktree isolation (git worktrees) provides a hard boundary for truly parallel execution
@@ -479,14 +584,14 @@ The hive mind includes basic conflict detection:
 
 ### Implementation Details
 
-| Component | File | Key Methods |
-|-----------|------|-------------|
-| Ledger class | `executionLedger.ts` | `initialize()`, `markRunning()`, `markCompleted()`, `markFailed()` |
-| Pre-execution context | `executionLedger.ts` | `buildContextForSubagent()`, `captureWorkspaceSnapshot()` |
-| Mid-round refresh | `executionLedger.ts` | `reloadFromDisk()`, `buildMidRoundRefresh()` |
-| Outbound journaling | `executionLedger.ts` | `buildToolRoundJournalEntry()`, `appendJournal()` |
-| Tool loop integration | `subagentManager.ts` | Injected after tool results in the `while` loop |
-| Orchestrator hookup | `orchestrator.ts` | Created in `orchestrate()`, passed through `executePlan()` |
+| Component             | File                 | Key Methods                                                        |
+| --------------------- | -------------------- | ------------------------------------------------------------------ |
+| Ledger class          | `executionLedger.ts` | `initialize()`, `markRunning()`, `markCompleted()`, `markFailed()` |
+| Pre-execution context | `executionLedger.ts` | `buildContextForSubagent()`, `captureWorkspaceSnapshot()`          |
+| Mid-round refresh     | `executionLedger.ts` | `reloadFromDisk()`, `buildMidRoundRefresh()`                       |
+| Outbound journaling   | `executionLedger.ts` | `buildToolRoundJournalEntry()`, `appendJournal()`                  |
+| Tool loop integration | `subagentManager.ts` | Injected after tool results in the `while` loop                    |
+| Orchestrator hookup   | `orchestrator.ts`    | Created in `orchestrate()`, passed through `executePlan()`         |
 
 ---
 
@@ -500,13 +605,14 @@ Every conversation is recorded as a JSONL file in `.vscode/johann/sessions/`:
 ```
 
 Each session also gets a `.meta.json` file with summary info:
+
 ```json
 {
-  "sessionId": "s-abc123",
-  "startedAt": "2026-02-14T10:00:00Z",
-  "endedAt": "2026-02-14T10:05:00Z",
-  "summary": "Build a REST API",
-  "active": false
+    "sessionId": "s-abc123",
+    "startedAt": "2026-02-14T10:00:00Z",
+    "endedAt": "2026-02-14T10:05:00Z",
+    "summary": "Build a REST API",
+    "active": false
 }
 ```
 
@@ -527,16 +633,16 @@ Enable/disable via `johann.heartbeatEnabled` setting.
 
 ## Directives (Slash Commands)
 
-| Directive | Description |
-|-----------|-------------|
-| `/help` | Show available commands |
-| `/status` | Show Johann's state, memory count, sessions |
-| `/compact` | Minimal one-line status |
-| `/memory` | Show MEMORY.md content |
-| `/search <query>` | Keyword search across all memory |
-| `/config` | Show current configuration |
-| `/notes [date]` | Show daily notes (today or specific date) |
-| `/sessions` | List recent session transcripts |
+| Directive         | Description                                 |
+| ----------------- | ------------------------------------------- |
+| `/help`           | Show available commands                     |
+| `/status`         | Show Johann's state, memory count, sessions |
+| `/compact`        | Minimal one-line status                     |
+| `/memory`         | Show MEMORY.md content                      |
+| `/search <query>` | Keyword search across all memory            |
+| `/config`         | Show current configuration                  |
+| `/notes [date]`   | Show daily notes (today or specific date)   |
+| `/sessions`       | List recent session transcripts             |
 
 ---
 
@@ -544,29 +650,29 @@ Enable/disable via `johann.heartbeatEnabled` setting.
 
 All settings are under the `johann.*` namespace in VS Code:
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `johann.maxSubtasks` | number | 10 | Maximum subtasks per plan |
-| `johann.maxAttempts` | number | 3 | Max attempts per subtask |
-| `johann.allowParallel` | boolean | true | Allow parallel subtask execution |
-| `johann.memoryDir` | string | `.vscode/johann` | Memory directory path |
-| `johann.maxBootstrapChars` | number | 15000 | Max chars for bootstrap context |
-| `johann.heartbeatEnabled` | boolean | false | Enable periodic heartbeat |
-| `johann.heartbeatIntervalMinutes` | number | 15 | Heartbeat interval |
-| `johann.transcriptsEnabled` | boolean | true | Record session transcripts |
-| `johann.logLevel` | string | `info` | Logging level |
-| `johann.onboardingEnabled` | boolean | true | Show first-run onboarding |
-| `johann.autoDistill` | boolean | true | Auto-distill daily notes |
-| `johann.promptMode` | string | `full` | System prompt mode (full/minimal/none) |
-| `johann.largeInputChunkSize` | number | 8000 | Character threshold for chunking large inputs |
-| `johann.maxInputSize` | number | 100000 | Maximum input size before truncation |
+| Setting                           | Type    | Default          | Description                                   |
+| --------------------------------- | ------- | ---------------- | --------------------------------------------- |
+| `johann.maxSubtasks`              | number  | 10               | Maximum subtasks per plan                     |
+| `johann.maxAttempts`              | number  | 3                | Max attempts per subtask                      |
+| `johann.allowParallel`            | boolean | true             | Allow parallel subtask execution              |
+| `johann.memoryDir`                | string  | `.vscode/johann` | Memory directory path                         |
+| `johann.maxBootstrapChars`        | number  | 15000            | Max chars for bootstrap context               |
+| `johann.heartbeatEnabled`         | boolean | false            | Enable periodic heartbeat                     |
+| `johann.heartbeatIntervalMinutes` | number  | 15               | Heartbeat interval                            |
+| `johann.transcriptsEnabled`       | boolean | true             | Record session transcripts                    |
+| `johann.logLevel`                 | string  | `info`           | Logging level                                 |
+| `johann.onboardingEnabled`        | boolean | true             | Show first-run onboarding                     |
+| `johann.autoDistill`              | boolean | true             | Auto-distill daily notes                      |
+| `johann.promptMode`               | string  | `full`           | System prompt mode (full/minimal/none)        |
+| `johann.largeInputChunkSize`      | number  | 8000             | Character threshold for chunking large inputs |
+| `johann.maxInputSize`             | number  | 100000           | Maximum input size before truncation          |
 
 ### Copilot Settings (Not Johann's — Read for Awareness)
 
-| Setting | What It Controls |
-|---------|-----------------|
+| Setting                                 | What It Controls                                        |
+| --------------------------------------- | ------------------------------------------------------- |
 | `github.copilot.chat.agent.autoApprove` | Whether Copilot skips "Allow" confirmation for commands |
-| `github.copilot.chat.agent.maxRequests` | Max LLM requests per session before Copilot pauses |
+| `github.copilot.chat.agent.maxRequests` | Max LLM requests per session before Copilot pauses      |
 
 Johann reads these settings via `/yolo` and pre-orchestration checks but does not own or override them.
 
@@ -587,10 +693,10 @@ When these fire mid-orchestration, Johann appears to freeze.
 
 ### The Settings (Copilot's, Not Johann's)
 
-| Setting | What It Controls | Recommended Value |
-|---------|-----------------|-------------------|
-| `github.copilot.chat.agent.autoApprove` | Skips "Allow" confirmation for commands | `true` |
-| `github.copilot.chat.agent.maxRequests` | Max LLM requests per session before pausing | `200` |
+| Setting                                 | What It Controls                            | Recommended Value |
+| --------------------------------------- | ------------------------------------------- | ----------------- |
+| `github.copilot.chat.agent.autoApprove` | Skips "Allow" confirmation for commands     | `true`            |
+| `github.copilot.chat.agent.maxRequests` | Max LLM requests per session before pausing | `200`             |
 
 These are GitHub Copilot settings in VS Code — Johann reads them for awareness but does not own or override them.
 
@@ -604,10 +710,10 @@ These are GitHub Copilot settings in VS Code — Johann reads them for awareness
 
 These settings ARE Johann's and affect orchestration complexity:
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `johann.maxSubtasks` | `10` | Max subtasks per plan (each = 1+ LLM calls) |
-| `johann.maxAttempts` | `3` | Max retries per subtask (each retry = 1+ LLM calls) |
+| Setting              | Default | Description                                         |
+| -------------------- | ------- | --------------------------------------------------- |
+| `johann.maxSubtasks` | `10`    | Max subtasks per plan (each = 1+ LLM calls)         |
+| `johann.maxAttempts` | `3`     | Max retries per subtask (each retry = 1+ LLM calls) |
 
 Raising these increases the total LLM requests needed. Make sure Copilot's `maxRequests` is high enough to accommodate.
 
@@ -616,11 +722,13 @@ See [YOLO-MODE.md](YOLO-MODE.md) for the full guide.
 ### Safety Notes
 
 YOLO mode disables certain Copilot safety guardrails. Recommended only when:
+
 - You trust the workspace and project
 - You're actively monitoring the output
 - The task is well-defined and non-destructive
 
 Even in YOLO mode, Johann still:
+
 - Logs all actions to daily notes and session transcripts
 - Records decisions and learnings to memory
 - Follows the safety rules in AGENTS.md (no secret exposure, no fabrication)
@@ -641,20 +749,20 @@ When users paste large feature lists (e.g., 50+ features from another project), 
 ### Solutions Implemented
 
 1. **Input chunking:** Fugue's analysis phase automatically detects inputs exceeding a threshold and processes them in chunks:
-   - Each chunk is analyzed independently to extract features
-   - Results are merged, deduplicated, and organized
-   - No information is lost because each chunk is small enough for reliable extraction
+    - Each chunk is analyzed independently to extract features
+    - Results are merged, deduplicated, and organized
+    - No information is lost because each chunk is small enough for reliable extraction
 
 2. **Streaming responses:** All LLM interactions stream output live to the chat window, providing immediate feedback and preventing apparent freezes.
 
 3. **Progressive context building:** Instead of sending the entire input in one message, context is built progressively:
-   - First pass: extract high-level structure
-   - Second pass: fill in details for each section
-   - This keeps each individual LLM call within comfortable token limits
+    - First pass: extract high-level structure
+    - Second pass: fill in details for each section
+    - This keeps each individual LLM call within comfortable token limits
 
 4. **Configurable limits:** Key limits can be adjusted:
-   - `johann.maxBootstrapChars`: Max chars for bootstrap context (default: 15000)
-   - Memory context and daily notes are auto-truncated to fit
+    - `johann.maxBootstrapChars`: Max chars for bootstrap context (default: 15000)
+    - Memory context and daily notes are auto-truncated to fit
 
 5. **YOLO mode:** For long orchestrations, YOLO mode prevents confirmation prompts from freezing the process (see [YOLO Mode](#yolo-mode)).
 
@@ -666,16 +774,16 @@ Johann's architecture draws significant inspiration from [OpenClaw](https://gith
 
 ### From OpenClaw's Architecture
 
-| Concept | OpenClaw | Johann Implementation |
-|---------|----------|----------------------|
-| **Bootstrap files** | Workspace persona files loaded into system prompt | `.vscode/johann/` directory with SOUL.md, IDENTITY.md, etc. |
-| **System prompt assembly** | Multi-section system prompt builder | `systemPrompt.ts` — Identity, Safety, Tools, Memory, Skills, Runtime sections |
-| **Skills system** | Discoverable skill directories with instructions | `.vscode/johann/skills/` with SKILL.md metadata |
-| **Daily notes** | Append-only daily log files | `memory/YYYY-MM-DD.md` with categorized entries |
-| **Heartbeat** | Periodic self-check timer | `heartbeat.ts` — configurable maintenance pulse |
-| **Announce flow** | Subagent completion notifications | `announceFlow.ts` — structured result reporting |
-| **Subagent registry** | Agent tracking with status, timing, escalation | `subagentRegistry.ts` — persistent JSON snapshots |
-| **Self-evolution** | Agent updates its own configuration files | SOUL.md, USER.md, MEMORY.md are agent-writable |
+| Concept                    | OpenClaw                                          | Johann Implementation                                                         |
+| -------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| **Bootstrap files**        | Workspace persona files loaded into system prompt | `.vscode/johann/` directory with SOUL.md, IDENTITY.md, etc.                   |
+| **System prompt assembly** | Multi-section system prompt builder               | `systemPrompt.ts` — Identity, Safety, Tools, Memory, Skills, Runtime sections |
+| **Skills system**          | Discoverable skill directories with instructions  | `.vscode/johann/skills/` with SKILL.md metadata                               |
+| **Daily notes**            | Append-only daily log files                       | `memory/YYYY-MM-DD.md` with categorized entries                               |
+| **Heartbeat**              | Periodic self-check timer                         | `heartbeat.ts` — configurable maintenance pulse                               |
+| **Announce flow**          | Subagent completion notifications                 | `announceFlow.ts` — structured result reporting                               |
+| **Subagent registry**      | Agent tracking with status, timing, escalation    | `subagentRegistry.ts` — persistent JSON snapshots                             |
+| **Self-evolution**         | Agent updates its own configuration files         | SOUL.md, USER.md, MEMORY.md are agent-writable                                |
 
 ### Layered Orchestration Insight
 
@@ -684,6 +792,7 @@ The most critical insight from the OpenClaw author's video:
 > **"Johann is an orchestrator that can spin up Copilot sessions. Copilot itself acts as an orchestrator, creating a layered orchestration system."**
 
 This layered model means:
+
 - Johann delegates to Copilot's language models (Layer 1)
 - Johann handles the meta-orchestration: planning, model selection, review, escalation (Layer 2)
 - The communication between layers happens through VS Code's `vscode.lm` API
@@ -694,6 +803,7 @@ This layered model means:
 > **"Johann documents its actions in text files to enable internal communication and programming awareness among agents."**
 
 This principle drives the entire memory architecture:
+
 - Actions are logged to daily notes
 - Decisions are recorded to MEMORY.md
 - Session transcripts capture full conversations

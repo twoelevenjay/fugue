@@ -23,16 +23,18 @@
 
 ### @johann — Orchestration Agent
 
-`@johann` is a higher-order orchestration layer built on top of GitHub Copilot's Language Model API. It embeds structured pre-prompts, execution constraints, and task decomposition logic — inspired by the architectural patterns of [OpenClaw](https://github.com/OpenClaw). Key capabilities:
+`@johann` is a higher-order orchestration layer built on top of GitHub Copilot. It spawns persistent **ACP (Agent Client Protocol) workers** — each a full Copilot CLI agent with native file editing, terminal access, and search capabilities. Key capabilities:
 
 - **Large task decomposition** — breaks complex requests into subtasks with dependencies
 - **Multi-step execution planning** — creates orchestration plans with ordered phases
-- **Structured reasoning flows** — plan → execute → review → merge lifecycle
+- **ACP worker backend** — each subtask runs as an isolated Copilot CLI process via `copilot --acp --stdio`
+- **Live worker activity** — real-time Output channels show tool calls, agent reasoning, and errors per worker
 - **Multi-model routing** — selects the best available model per subtask via a 5-tier system, with automatic escalation on failure
-- **Prompt-level subtask isolation** — each subagent receives its own focused prompt and context
+- **Prompt-level subtask isolation** — each worker receives its own focused prompt and context
 - **Persistent memory** — stores decisions, learnings, and context in `.vscode/johann/` across sessions
+- **Clean process lifecycle** — workers are killed on VS Code exit, orphans cleaned up on startup
 
-Johann makes multiple LLM API calls within a single Copilot chat session to orchestrate work. It does not spawn separate Copilot chat windows or manage external processes.
+Johann spawns Copilot CLI child processes to execute subtasks. Each worker has full agentic capabilities (file I/O, terminal commands, codebase search) without requiring tool tokens or in-process tool routing.
 
 ### System Model
 
@@ -50,6 +52,9 @@ Together they create a structured AI workflow layer that upgrades GitHub Copilot
 
 - **VS Code** 1.108.1 or later
 - **GitHub Copilot** extension installed and active
+- **GitHub Copilot CLI** — required for Johann's task execution backend ([install guide](https://docs.github.com/en/copilot/managing-copilot/configure-personal-settings/installing-github-copilot-in-the-cli))
+
+> **First time?** If Copilot CLI isn't installed, Johann will show a setup notification on activation. You can also run `Johann: Setup Copilot CLI` from the command palette anytime.
 
 ## Quick Start
 
@@ -94,6 +99,8 @@ data, oh and we need to add rate limiting before we launch next week
 
 ## @johann Commands
 
+### Chat Directives
+
 | Command                   | Description                                       |
 | ------------------------- | ------------------------------------------------- |
 | `@johann <task>`          | Send a task for orchestrated execution            |
@@ -103,6 +110,23 @@ data, oh and we need to add rate limiting before we launch next week
 | `@johann /search <query>` | Search across all memory                          |
 | `@johann /yolo on\|off`   | Show setup guide for Copilot's YOLO mode settings |
 | `@johann /config`         | Show current configuration                        |
+
+### Command Palette
+
+| Command                          | Description                                              |
+| -------------------------------- | -------------------------------------------------------- |
+| `Johann: Setup Copilot CLI`      | Guided Copilot CLI installation (npm, docs, custom path) |
+| `Johann: Stop All Workers`       | Kill all active ACP worker processes                     |
+| `Johann: Show Worker Activity`   | Pick an active/recent worker and view its live log       |
+| `Johann: Show Background Tasks`  | View all background task statuses                        |
+| `Johann: Show Task Status`       | Check status of a specific task                          |
+| `Johann: Cancel Background Task` | Cancel a running background task                         |
+| `Johann: Show Log Output`        | Open Johann's main output channel                        |
+| `Johann: Open Debug Log`         | Open the debug conversation log                          |
+| `Johann: Show Model Diagnostics` | Display model availability and routing info              |
+| `Johann: Show Memory Files`      | Browse Johann's memory files                             |
+| `Johann: Clear Memory`           | Reset Johann's memory                                    |
+| `Johann: Clear Completed Tasks`  | Remove completed tasks from the task list                |
 
 ## Workspace Context
 
@@ -145,12 +169,14 @@ Fugue uses GitHub Copilot's language model to intelligently analyze your request
 
 Fugue is designed with a minimal attack surface:
 
-- **Zero runtime dependencies** — ships no `node_modules`
-- **No network access** — cannot make HTTP requests or phone home
-- **No shell execution** — uses `execFile` only (no `exec`, no `spawn(shell:true)`)
+- **Zero runtime dependencies** — the extension itself ships no `node_modules` (ACP SDK is bundled at build time)
+- **No network access** — the extension cannot make HTTP requests or phone home
+- **Process isolation** — ACP workers run as separate child processes; a hung worker cannot block VS Code
+- **Clean process lifecycle** — workers are killed on VS Code exit; orphaned processes from crashes are cleaned up automatically on next startup
 - **Workspace trust** — refuses to operate in VS Code Restricted Mode
-- **Subagent isolation** — subagents never see Johann's system prompt or memory
+- **Worker isolation** — workers never see Johann's system prompt or memory
 - **Path validation** — all file deletions are guarded against directory traversal
+- **Tool auto-approval** — workers auto-approve safe tool kinds (file edit, terminal, search) but deny unknown tool types
 - **Automated scanning** — CodeQL, npm audit, and dependency review run in CI
 
 See [SECURITY.md](SECURITY.md) for the full security model.

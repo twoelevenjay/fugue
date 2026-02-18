@@ -107,6 +107,18 @@
                 "title": "Johann: Cancel Background Task"
             },
             {
+                "command": "johann.stopAllWorkers",
+                "title": "Johann: Stop All Workers"
+            },
+            {
+                "command": "johann.showWorkerActivity",
+                "title": "Johann: Show Worker Activity"
+            },
+            {
+                "command": "johann.setupCopilotCli",
+                "title": "Johann: Setup Copilot CLI"
+            },
+            {
                 "command": "johann.clearCompletedTasks",
                 "title": "Johann: Clear Completed Tasks"
             }
@@ -502,5 +514,8 @@
         "*.{json,md}": [
             "prettier --write"
         ]
+    },
+    "dependencies": {
+        "@agentclientprotocol/sdk": "^0.14.1"
     }
 }

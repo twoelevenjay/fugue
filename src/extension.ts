@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { registerJohannParticipant } from './johann/participant';
+import { registerSetupCommand, showCliMissingNotification } from './johann/copilotCliStatus';
+import { getActivityPanel } from './johann/workerActivityPanel';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -1344,8 +1346,121 @@ function formatContextPacketMarkdown(packet: ContextPacket): string {
 // CHAT PARTICIPANT HANDLER
 // ============================================================================
 
+// ============================================================================
+// STARTUP CLEANUP — Kill orphaned ACP workers from previous sessions
+// ============================================================================
+
+/**
+ * On activation, check for orphaned `copilot --acp --stdio` processes
+ * that survived a previous VS Code crash or force-quit.
+ * Kills them silently unless there are many, in which case it notifies.
+ */
+function cleanupOrphanedWorkers(): void {
+    try {
+        const { execSync } = require('child_process') as typeof import('child_process');
+        const platform = process.platform;
+
+        let pids: number[] = [];
+
+        if (platform === 'win32') {
+            // Windows: wmic or tasklist
+            try {
+                const out = execSync(
+                    'wmic process where "commandline like \'%copilot%--acp%--stdio%\'" get processid /format:list',
+                    { encoding: 'utf-8', timeout: 5000 },
+                );
+                pids = out
+                    .split('\n')
+                    .filter((l) => l.startsWith('ProcessId='))
+                    .map((l) => parseInt(l.split('=')[1], 10))
+                    .filter((n) => !isNaN(n));
+            } catch {
+                // wmic not available on newer Windows — try powershell
+                try {
+                    const out = execSync(
+                        'powershell -Command "Get-Process | Where-Object {$_.CommandLine -like \'*copilot*--acp*--stdio*\'} | Select-Object -ExpandProperty Id"',
+                        { encoding: 'utf-8', timeout: 5000 },
+                    );
+                    pids = out
+                        .split('\n')
+                        .map((l) => parseInt(l.trim(), 10))
+                        .filter((n) => !isNaN(n));
+                } catch {
+                    // Give up on Windows detection
+                }
+            }
+        } else {
+            // macOS / Linux: pgrep
+            try {
+                const out = execSync('pgrep -f "copilot.*--acp.*--stdio"', {
+                    encoding: 'utf-8',
+                    timeout: 5000,
+                });
+                pids = out
+                    .split('\n')
+                    .map((l) => parseInt(l.trim(), 10))
+                    .filter((n) => !isNaN(n));
+            } catch {
+                // pgrep returns exit 1 when no matches — that's fine
+            }
+        }
+
+        if (pids.length === 0) {
+            return;
+        }
+
+        // Kill them
+        let killed = 0;
+        for (const pid of pids) {
+            try {
+                process.kill(pid, 'SIGTERM');
+                killed++;
+            } catch {
+                // Process already gone or permission denied
+            }
+        }
+
+        if (killed > 0) {
+            console.warn(
+                `[Fugue] Cleaned up ${killed} orphaned ACP worker(s) from a previous session.`,
+            );
+
+            // Force-kill any that didn't respond to SIGTERM after 3s
+            setTimeout(() => {
+                for (const pid of pids) {
+                    try {
+                        // Check if still alive
+                        process.kill(pid, 0);
+                        // Still alive — SIGKILL
+                        process.kill(pid, 'SIGKILL');
+                    } catch {
+                        // Already dead — good
+                    }
+                }
+            }, 3000);
+
+            // Notify if there were many — might indicate a problem
+            if (killed >= 3) {
+                vscode.window.showWarningMessage(
+                    `Johann cleaned up ${killed} orphaned worker processes from a previous session.`,
+                );
+            }
+        }
+    } catch {
+        // Entire cleanup failed — non-critical, don't block activation
+    }
+}
+
 export function activate(context: vscode.ExtensionContext) {
     console.warn('Fugue for GitHub Copilot activated');
+
+    // Register Copilot CLI setup command and check availability
+    registerSetupCommand(context);
+    // Non-blocking — shows a warning if CLI is missing, doesn't block activation
+    showCliMissingNotification();
+
+    // Kill any orphaned ACP workers from a previous session (crash, force-quit, etc.)
+    cleanupOrphanedWorkers();
 
     // Register the copy command
     const copyCommand = vscode.commands.registerCommand('ramble.copyLast', async () => {
@@ -1855,9 +1970,59 @@ export function activate(context: vscode.ExtensionContext) {
         context.subscriptions.push(d);
     }
 
+    // Register stop-all-workers command
+    const stopAllCmd = vscode.commands.registerCommand('johann.stopAllWorkers', async () => {
+        const { AcpWorkerManager } = await import('./johann/acpWorkerManager');
+        const count = AcpWorkerManager.getActiveWorkerCount();
+        if (count === 0) {
+            vscode.window.showInformationMessage('No active Johann workers.');
+            return;
+        }
+        const confirm = await vscode.window.showWarningMessage(
+            `Stop ${count} active worker(s)? Running tasks will be lost.`,
+            { modal: true },
+            'Stop All',
+        );
+        if (confirm === 'Stop All') {
+            AcpWorkerManager.cleanupAllInstances();
+            vscode.window.showInformationMessage(`Stopped ${count} worker(s).`);
+        }
+    });
+    context.subscriptions.push(stopAllCmd);
+
+    // Ensure workers are cleaned up when VS Code closes
+    context.subscriptions.push({
+        dispose() {
+            // Dynamic import to avoid circular dependency issues at startup
+            try {
+                 
+                const { AcpWorkerManager } = require('./johann/acpWorkerManager');
+                AcpWorkerManager.cleanupAllInstances();
+            } catch {
+                // Extension already partially torn down — try brute force
+                try {
+                    const { execSync } = require('child_process');
+                    execSync('pkill -f "copilot.*--acp.*--stdio" 2>/dev/null || true');
+                     
+                } catch (_e) {
+                    // Best effort
+                }
+            }
+            getActivityPanel().dispose();
+        },
+    });
+
     console.warn('Johann orchestration agent activated');
 }
 
 export function deactivate() {
-    // Clean up if needed
+    // Primary cleanup happens via context.subscriptions disposables above.
+    // This is a fallback for any edge cases.
+    try {
+         
+        const { AcpWorkerManager } = require('./johann/acpWorkerManager');
+        AcpWorkerManager.cleanupAllInstances();
+    } catch {
+        // Already cleaned up
+    }
 }

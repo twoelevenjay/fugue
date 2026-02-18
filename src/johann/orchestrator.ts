@@ -11,7 +11,7 @@ import {
 } from './types';
 import { ModelPicker } from './modelPicker';
 import { TaskDecomposer } from './taskDecomposer';
-import { SubagentManager } from './subagentManager';
+import { AcpWorkerManager } from './acpWorkerManager';
 import { MemorySystem } from './memory';
 import { getCopilotAgentSettings, getConfig } from './config';
 import { getLogger } from './logger';
@@ -133,7 +133,7 @@ The user expects a REPORT of what happened. Not a manual. Not a tutorial. Not a 
 export class Orchestrator {
     private modelPicker: ModelPicker;
     private taskDecomposer: TaskDecomposer;
-    private subagentManager: SubagentManager;
+    private subagentManager: AcpWorkerManager;
     private memory: MemorySystem;
     private config: OrchestratorConfig;
     private hookRunner: HookRunner;
@@ -149,7 +149,7 @@ export class Orchestrator {
         this.config = config;
         this.modelPicker = new ModelPicker();
         this.taskDecomposer = new TaskDecomposer();
-        this.subagentManager = new SubagentManager();
+        this.subagentManager = new AcpWorkerManager();
         this.memory = new MemorySystem(config);
         this.hookRunner = createDefaultHookRunner();
         this.rateLimitGuard = new RateLimitGuard();
