@@ -2388,6 +2388,56 @@ export class Orchestrator {
             // Background mode — error will be shown via notification
             return;
         }
+
+        // Build subtask status summary
+        const subtaskSummary = session.plan
+            ? (() => {
+                  const completed = session.plan.subtasks.filter((st) => st.status === 'completed');
+                  const failed = session.plan.subtasks.filter((st) => st.status === 'failed');
+                  const inProgress = session.plan.subtasks.filter(
+                      (st) => st.status === 'in-progress',
+                  );
+                  const pending = session.plan.subtasks.filter((st) => st.status === 'pending');
+                  const escalated = session.plan.subtasks.filter((st) => st.status === 'escalated');
+
+                  const parts: string[] = [];
+
+                  if (completed.length > 0) {
+                      parts.push(
+                          `✅ **${completed.length} completed**: ${completed.map((st) => st.id).join(', ')}`,
+                      );
+                  }
+                  if (failed.length > 0) {
+                      const failedDetails = failed
+                          .map((st) => {
+                              const errorHint = st.result?.reviewNotes
+                                  ? ` (${st.result.reviewNotes.substring(0, 40)}...)`
+                                  : '';
+                              return `${st.id}${errorHint}`;
+                          })
+                          .join(', ');
+                      parts.push(`❌ **${failed.length} failed**: ${failedDetails}`);
+                  }
+                  if (escalated.length > 0) {
+                      parts.push(
+                          `⬆️ **${escalated.length} escalated**: ${escalated.map((st) => st.id).join(', ')}`,
+                      );
+                  }
+                  if (inProgress.length > 0) {
+                      parts.push(
+                          `⏸️ **${inProgress.length} interrupted**: ${inProgress.map((st) => st.id).join(', ')}`,
+                      );
+                  }
+                  if (pending.length > 0) {
+                      parts.push(
+                          `⏳ **${pending.length} not started**: ${pending.map((st) => st.id).join(', ')}`,
+                      );
+                  }
+
+                  return parts.length > 0 ? `\n\n### Task Status\n${parts.join('\n')}\n` : '';
+              })()
+            : '';
+
         const planProgress = session.plan
             ? (() => {
                   const completed = session.plan.subtasks.filter(
@@ -2411,7 +2461,9 @@ export class Orchestrator {
                         `**To resolve:**\n` +
                         `1. Check your internet connection\n` +
                         `2. If on WiFi, try switching networks or using a wired connection\n` +
-                        `3. Re-run your request — Johann will retry from where it left off\n` +
+                        `3. If the error mentions "Response stream has been closed", this is typically a VS Code API timeout — try running with a higher complexity model or breaking the task into smaller pieces\n` +
+                        `4. Re-run your request — Johann will retry from where it left off\n` +
+                        subtaskSummary +
                         planProgress,
                 );
                 break;
@@ -2424,6 +2476,7 @@ export class Orchestrator {
                         `1. Increase \`github.copilot.chat.agent.maxRequests\` in VS Code settings\n` +
                         `2. Type \`/yolo on\` for full setup guidance\n` +
                         `3. Wait a moment, then re-run your request\n` +
+                        subtaskSummary +
                         planProgress +
                         `\n**Error:** ${classified.message.substring(0, 200)}\n`,
                 );
@@ -2433,6 +2486,7 @@ export class Orchestrator {
                 response.markdown(
                     `\n\n**Request Cancelled**\n\n` +
                         `The orchestration was cancelled.` +
+                        subtaskSummary +
                         planProgress,
                 );
                 break;
@@ -2441,6 +2495,7 @@ export class Orchestrator {
                 response.markdown(
                     `\n\n**Authentication Error**\n\n` +
                         `${classified.userGuidance}\n\n` +
+                        subtaskSummary +
                         `**Error:** ${classified.message.substring(0, 200)}\n`,
                 );
                 break;
@@ -2449,6 +2504,7 @@ export class Orchestrator {
                 response.markdown(
                     `\n\n**Orchestration Error**\n\n` +
                         `${classified.message.substring(0, 300)}\n` +
+                        subtaskSummary +
                         planProgress,
                 );
                 break;

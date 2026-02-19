@@ -902,11 +902,25 @@ export class AcpWorkerManager {
         };
         this.activeWorkers.set(workerId, runtime);
 
-        // Health check interval
+        // Health check interval with stall detection
+        const STALL_THRESHOLD_MS = 180_000; // 3 minutes of no activity = stalled
         const healthCheck = setInterval(() => {
             const idleTime = Date.now() - lastActivityTime;
-            if (idleTime > 60_000) {
-                logger.warn(`[ACP:${workerId}] No activity for ${(idleTime / 1000).toFixed(0)}s`);
+            if (idleTime > STALL_THRESHOLD_MS) {
+                const stallError = new Error(
+                    `ACP worker stalled: no activity for ${(idleTime / 1000).toFixed(0)}s (threshold: ${STALL_THRESHOLD_MS / 1000}s). ` +
+                        `Last activity at: ${new Date(lastActivityTime).toISOString()}`,
+                );
+                logger.error(`[ACP:${workerId}] ${stallError.message}`);
+                // Kill the worker and reject
+                this.killWorker(workerId);
+                if (earlyExitReject) {
+                    earlyExitReject(stallError);
+                }
+            } else if (idleTime > 60_000) {
+                logger.warn(
+                    `[ACP:${workerId}] No activity for ${(idleTime / 1000).toFixed(0)}s (not stalled yet)`,
+                );
             }
         }, 30_000);
 

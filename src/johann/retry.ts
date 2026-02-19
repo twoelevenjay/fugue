@@ -54,6 +54,9 @@ const NETWORK_PATTERNS = [
     'connection refused',
     'connection aborted',
     'connection timed out',
+    'response stream', // VS Code API stream errors (e.g., "Response stream has been closed")
+    'stream has been closed',
+    'stream closed',
 ];
 
 // Patterns for matching rate-limit / quota errors

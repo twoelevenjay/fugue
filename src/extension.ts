@@ -2,6 +2,9 @@ import * as vscode from 'vscode';
 import { registerJohannParticipant } from './johann/participant';
 import { registerSetupCommand, showCliMissingNotification } from './johann/copilotCliStatus';
 import { getActivityPanel } from './johann/workerActivityPanel';
+import { createLogger as createRambleLogger, getLogger as getRambleLogger } from './ramble/logger';
+import { RambleDebugConversationLog } from './ramble/debugConversationLog';
+import { sendToLLMWithLogging } from './ramble/llmHelpers';
 
 // ============================================================================
 // TYPES & INTERFACES
@@ -430,7 +433,10 @@ Return JSON:
 Return ONLY valid JSON.`;
 
     try {
-        const result = await sendToLLM(model, resolutionPrompt, '', token);
+        const result = await sendToLLMWithLogging(model, resolutionPrompt, '', token, {
+            phase: 'codebase-analysis',
+            label: `Codebase resolution: ${question.question.substring(0, 50)}`,
+        });
         const parsed = parseJSON<{
             resolved: boolean;
             answer: string;
@@ -516,7 +522,10 @@ Return JSON:
 Return ONLY valid JSON.`;
 
         try {
-            const result = await sendToLLM(model, knowledgePrompt, '', token);
+            const result = await sendToLLMWithLogging(model, knowledgePrompt, '', token, {
+                phase: 'web-research',
+                label: `Knowledge resolution: ${question.question.substring(0, 50)}`,
+            });
             const parsed = parseJSON<{
                 resolved: boolean;
                 answer: string;
@@ -591,7 +600,10 @@ Return the updated context packet as JSON with the same structure.
 Return ONLY valid JSON.`;
 
     try {
-        const result = await sendToLLM(model, mergePrompt, '', token);
+        const result = await sendToLLMWithLogging(model, mergePrompt, '', token, {
+            phase: 'merge',
+            label: `Merge ${resolvedAttempts.length} resolved answers into context packet`,
+        });
         const parsed = parseJSON<ContextPacket>(result);
         if (parsed) {
             return parsed;
@@ -628,39 +640,13 @@ async function sendToLLM(
     token: vscode.CancellationToken,
     enableTools: boolean = false,
 ): Promise<string> {
-    const messages = [
-        vscode.LanguageModelChatMessage.User(systemPrompt + '\n\n---\n\n' + userPrompt),
-    ];
-
-    const options: vscode.LanguageModelChatRequestOptions = enableTools
-        ? {
-              tools: [
-                  {
-                      name: 'vscode_search',
-                      description: 'Search the web for current information',
-                      inputSchema: {
-                          type: 'object',
-                          properties: {
-                              query: {
-                                  type: 'string',
-                                  description: 'Search query',
-                              },
-                          },
-                          required: ['query'],
-                      },
-                  },
-              ],
-          }
-        : {};
-
-    const response = await model.sendRequest(messages, options, token);
-
-    let result = '';
-    for await (const chunk of response.text) {
-        result += chunk;
-    }
-
-    return result;
+    // Wrapper for backward compatibility - delegates to sendToLLMWithLogging
+    // Individual calls should migrate to sendToLLMWithLogging with specific phase/label
+    return sendToLLMWithLogging(model, systemPrompt, userPrompt, token, {
+        enableTools,
+        phase: 'other',
+        label: 'Legacy sendToLLM call',
+    });
 }
 
 // ============================================================================
@@ -746,7 +732,10 @@ ${chunks.length > 1 ? `This is part ${i + 1} of ${chunks.length}. The user's ful
         const fullPrompt = analysisPrompt + '\n\n' + chunkPrompt;
 
         try {
-            const result = await sendToLLM(model, fullPrompt, chunks[i], token);
+            const result = await sendToLLMWithLogging(model, fullPrompt, chunks[i], token, {
+                phase: 'analysis',
+                label: `Chunk ${i + 1}/${chunks.length} analysis`,
+            });
             const parsed = parseJSON<AnalysisResult>(result);
             if (parsed) {
                 chunkResults.push(parsed);
@@ -806,7 +795,10 @@ Merge these into a SINGLE JSON result with the same structure:
 Return ONLY valid JSON.`;
 
     try {
-        const result = await sendToLLM(model, mergePrompt, '', token);
+        const result = await sendToLLMWithLogging(model, mergePrompt, '', token, {
+            phase: 'merge',
+            label: `Merge ${chunkResults.length} chunk results`,
+        });
         return parseJSON<AnalysisResult>(result);
     } catch {
         // Fallback: manually merge the chunk results
@@ -1508,6 +1500,11 @@ function cleanupOrphanedWorkers(): void {
 export function activate(context: vscode.ExtensionContext) {
     console.warn('Fugue for GitHub Copilot activated');
 
+    // Initialize Ramble logger
+    const rambleLogger = createRambleLogger(undefined, 'debug');
+    context.subscriptions.push(rambleLogger);
+    rambleLogger.info('Ramble logging initialized');
+
     // Register Copilot CLI setup command and check availability
     registerSetupCommand(context);
     // Non-blocking — shows a warning if CLI is missing, doesn't block activation
@@ -1579,17 +1576,29 @@ export function activate(context: vscode.ExtensionContext) {
             response: vscode.ChatResponseStream,
             token: vscode.CancellationToken,
         ) => {
+            const logger = getRambleLogger();
+            const debugLog = new RambleDebugConversationLog(true);
+            await debugLog.initialize();
+
             const userMessage = request.prompt.trim();
+
+            logger.info('Ramble chat request received', {
+                messageLength: userMessage.length,
+                sessionId: debugLog.getSessionId(),
+            });
 
             // Explicit reset command
             if (
                 userMessage.toLowerCase() === 'reset' ||
                 userMessage.toLowerCase() === 'start over'
             ) {
+                logger.info('Session reset requested');
+                await debugLog.logEvent('other', 'User requested session reset');
                 await context.workspaceState.update(STATE_KEY, createEmptySession());
                 response.markdown(
                     "Session reset. Send me your request and I'll compile it into a structured prompt.\n",
                 );
+                await debugLog.finalize('reset');
                 return;
             }
 
@@ -1598,6 +1607,8 @@ export function activate(context: vscode.ExtensionContext) {
                 userMessage.toLowerCase() === 'refresh' ||
                 userMessage.toLowerCase() === 'refresh context'
             ) {
+                logger.info('Workspace context refresh requested');
+                await debugLog.logEvent('other', 'User requested workspace context refresh');
                 response.markdown('Refreshing workspace context...\n');
                 const workspaceCtx = await gatherWorkspaceContext();
                 const formatted = formatWorkspaceContext(workspaceCtx);
@@ -1610,17 +1621,24 @@ export function activate(context: vscode.ExtensionContext) {
                 response.markdown(
                     `- Workspace folders: ${vscode.workspace.workspaceFolders?.length || 0}\n`,
                 );
+                await debugLog.finalize('completed');
                 return;
             }
 
             // Get LLM
             const model = await getLLM();
             if (!model) {
+                logger.error('No language model available');
+                await debugLog.logEvent('other', 'Failed: No language model available');
                 response.markdown(
                     '**Error:** No language model available. Please ensure Copilot is active.\n',
                 );
+                await debugLog.finalize('failed', 'No language model available');
                 return;
             }
+
+            logger.debug('Using language model', { modelId: model.id });
+            await debugLog.logEvent('other', `Using model: ${model.id}`);
 
             // Get or gather workspace context
             let workspaceContext = context.workspaceState.get<string>(WORKSPACE_CONTEXT_KEY);
@@ -1660,7 +1678,13 @@ export function activate(context: vscode.ExtensionContext) {
                     .replace('{ANSWERS}', userMessage);
 
                 try {
-                    const mergeResult = await sendToLLM(model, mergePrompt, '', token, true); // Enable tools for follow-up research
+                    const mergeResult = await sendToLLMWithLogging(model, mergePrompt, '', token, {
+                        enableTools: true, // Enable tools for follow-up research
+                        debugLog,
+                        phase: 'merge',
+                        label: 'Merge user answers into context packet',
+                        questionRound: session.questionRound,
+                    });
                     const parsed = parseJSON<AnalysisResult>(mergeResult);
 
                     if (!parsed) {
@@ -1777,11 +1801,17 @@ export function activate(context: vscode.ExtensionContext) {
 
                     const compileSystemPrompt = getCompilePrompt(workspaceContext);
                     const compileUserPrompt = `Context Packet:\n${JSON.stringify(session.contextPacket, null, 2)}\n\nOriginal Request:\n${session.rawRamble}`;
-                    const compiledPrompt = await sendToLLM(
+                    const compiledPrompt = await sendToLLMWithLogging(
                         model,
                         compileSystemPrompt,
                         compileUserPrompt,
                         token,
+                        {
+                            debugLog,
+                            phase: 'compilation',
+                            label: 'Final prompt compilation (IDLE state)',
+                            questionRound: session.questionRound,
+                        },
                     );
 
                     await context.workspaceState.update(LAST_PROMPT_KEY, compiledPrompt);
@@ -1843,12 +1873,17 @@ export function activate(context: vscode.ExtensionContext) {
                     );
                 } else {
                     const analysisPrompt = getAnalysisPrompt(workspaceContext);
-                    const analysisResult = await sendToLLM(
+                    const analysisResult = await sendToLLMWithLogging(
                         model,
                         analysisPrompt,
                         session.rawRamble,
                         token,
-                        true, // Enable web search for analysis
+                        {
+                            enableTools: true, // Enable web search for analysis
+                            debugLog,
+                            phase: 'analysis',
+                            label: 'Initial request analysis',
+                        },
                     );
                     parsed = parseJSON<AnalysisResult>(analysisResult);
 
@@ -1981,16 +2016,29 @@ export function activate(context: vscode.ExtensionContext) {
 
                 const compileSystemPrompt = getCompilePrompt(workspaceContext);
                 const compileUserPrompt = `Context Packet:\n${JSON.stringify(session.contextPacket, null, 2)}\n\nOriginal Request:\n${session.rawRamble}`;
-                const compiledPrompt = await sendToLLM(
+                const compiledPrompt = await sendToLLMWithLogging(
                     model,
                     compileSystemPrompt,
                     compileUserPrompt,
                     token,
+                    {
+                        debugLog,
+                        phase: 'compilation',
+                        label: 'Final prompt compilation',
+                        questionRound: session.questionRound,
+                    },
                 );
 
                 await context.workspaceState.update(LAST_PROMPT_KEY, compiledPrompt);
                 session.state = 'DONE';
                 await context.workspaceState.update(STATE_KEY, session);
+
+                logger.info('Prompt compiled successfully', {
+                    promptLength: compiledPrompt.length,
+                    questionRounds: session.questionRound,
+                });
+                await debugLog.logEvent('compilation', 'Compilation completed successfully');
+                await debugLog.finalize('completed');
 
                 response.markdown('## Compiled Prompt\n\n```text\n' + compiledPrompt + '\n```\n\n');
                 response.button({
@@ -2008,9 +2056,11 @@ export function activate(context: vscode.ExtensionContext) {
 
                 return { metadata: { compiled: true, prompt: compiledPrompt } };
             } catch (err) {
-                response.markdown(
-                    `**Error:** ${err instanceof Error ? err.message : 'Unknown error'}\n`,
-                );
+                const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+                logger.error('Error during prompt compilation', { error: errorMessage });
+                await debugLog.logEvent('other', `Error: ${errorMessage}`);
+                await debugLog.finalize('failed', errorMessage);
+                response.markdown(`**Error:** ${errorMessage}\n`);
             }
         },
     );
