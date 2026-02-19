@@ -162,6 +162,12 @@ export const TASK_TO_MODEL_ROUTING = {
         escalateTo: ['gpt-5.1', 'claude-sonnet'],
         description: 'Debugging, error analysis, fixing failures',
     },
+    investigate: {
+        primary: 'gpt-4.1',
+        preferredCost: 0,
+        escalateTo: ['claude-sonnet', 'gemini-2.5-pro', 'gpt-5.1'],
+        description: 'Root cause analysis, code understanding, diagnosis',
+    },
     review: {
         primary: 'gpt-4.1',
         preferredCost: 0,
@@ -192,6 +198,12 @@ export const TASK_TO_MODEL_ROUTING = {
         escalateTo: ['gpt-5.3-codex', 'claude-sonnet'],
         description: 'Large-scale refactors with deep reasoning',
     },
+    implement: {
+        primary: 'gpt-5-mini',
+        preferredCost: 0,
+        escalateTo: ['gpt-5.1-codex-mini', 'gpt-5.3-codex'],
+        description: 'Implementing a well-defined plan or design',
+    },
 } as const;
 
 /**
@@ -199,6 +211,27 @@ export const TASK_TO_MODEL_ROUTING = {
  * Used for automatic task classification.
  */
 export const TASK_TYPE_PATTERNS = {
+    investigate: [
+        /investigat/i,
+        /diagnos/i,
+        /root.*cause/i,
+        /analyz/i,
+        /understand.*why/i,
+        /find.*cause/i,
+        /explore/i,
+        /research/i,
+        /discover/i,
+        /identify.*issue/i,
+        /trace/i,
+        /profil/i,
+    ],
+    implement: [
+        /implement.*(?:from|per|using|based.*on)/i,
+        /apply.*(?:design|plan|approach)/i,
+        /execute.*(?:plan|design)/i,
+        /build.*(?:according|per|from)/i,
+        /follow.*(?:design|spec)/i,
+    ],
     generate: [
         /generat/i,
         /creat.*file/i,
@@ -245,6 +278,7 @@ export const TASK_TYPE_PATTERNS = {
         /exception/i,
         /broken/i,
         /issue/i,
+        /resolv.*error/i,
     ],
     review: [
         /review/i,
@@ -285,6 +319,7 @@ export const TASK_TYPE_PATTERNS = {
         /approach/i,
         /strategy/i,
         /pattern.*for/i,
+        /decid/i,
     ],
     'complex-refactor': [
         /large.*refactor/i,

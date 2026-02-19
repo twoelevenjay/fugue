@@ -19,6 +19,8 @@ export type TaskType =
     | 'refactor' // Code transformations, renames, moves
     | 'test' // Test generation and writing
     | 'debug' // Debugging, fixing failures, error analysis
+    | 'investigate' // Root cause analysis, diagnosis, code understanding
+    | 'implement' // Implementing from a well-defined plan or design
     | 'review' // Code review, security, edge cases
     | 'spec' // Planning, documentation, communication
     | 'edit' // Small edits, formatting, single functions

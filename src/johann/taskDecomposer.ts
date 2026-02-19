@@ -32,10 +32,94 @@ RULES:
 - If the task is straightforward (e.g., "fix this bug", "add a button"), use a SINGLE subtask. Not everything needs decomposition.
 - If the task is complex (e.g., "refactor this module and add tests and update docs"), break it into logical subtasks.
 - Each subtask should be a self-contained unit of work that produces a verifiable result.
+- **SPLIT INVESTIGATION FROM IMPLEMENTATION.** When a task requires both analyzing/debugging AND fixing/building, create SEPARATE subtasks. Investigation benefits from stronger models with better reasoning; implementation can often use cheaper models once the approach is clear.
 - **Use parallel execution** when subtasks are independent. If tasks 2, 3, and 4 all only depend on task 1, they should run in parallel after task 1 completes.
 - Use serial execution only when subtasks have strict sequential dependencies.
 - Mixed strategy means some tasks can run in parallel, others must be serial.
 - Keep subtask count reasonable (1-10). More subtasks = more overhead.
+
+## Investigation vs. Implementation (CRITICAL FOR COST OPTIMIZATION)
+
+**Always split these into separate subtasks when both are needed:**
+
+### Investigation Tasks (use higher-tier models)
+- **Task types:** debug, review, design
+- **Characteristics:** Root cause analysis, architecture decisions, security review, performance profiling, reading large codebases, understanding complex flows
+- **Complexity:** Usually moderate-to-expert (drives model selection up)
+- **Output:** Findings document, diagnosis, recommended approach, architecture plan
+
+### Implementation Tasks (can use lower-tier models with good prompting)
+- **Task types:** generate, edit, refactor, test
+- **Characteristics:** Executing a well-defined plan, writing code to spec, applying a pattern, creating files
+- **Complexity:** Often simple-to-moderate (cheaper models work when investigation provided clarity)
+- **Input:** Results from investigation task (piped in as dependency context)
+
+### Example Split (GOOD):
+User request: "Fix the indefinite loading screen bug in Code Spin"
+
+**Task-1** (Investigation):
+- Title: "Diagnose loading screen indefinite hang"
+- TaskType: debug
+- Complexity: complex (requires reading code, understanding app flow, finding root cause)
+- Description: "Investigate why the Electron app shows a loading screen indefinitely. Check: (1) main process logs, (2) renderer dev tools console, (3) network requests in DevTools, (4) IPC communication between main and renderer. Document the root cause and recommended fix in \`./diagnosis.md\`."
+- Success: diagnosis.md exists with root cause and fix approach
+
+**Task-2** (Implementation):
+- Title: "Apply loading screen fix"
+- TaskType: generate or edit
+- Complexity: simple or moderate (depends on fix complexity)
+- Depends: task-1
+- Description: "Read \`./diagnosis.md\` from task-1. Implement the recommended fix. Verify the app launches and shows content (not stuck on loading). Test with \`npm run dev\`."
+- Success: App launches without indefinite loading
+
+Why this works:
+- Task-1 gets a strong model (gpt-4.1, claude-sonnet) for reasoning
+- Task-2 can use a cheaper model (gpt-4o-mini, gemini-flash) since the approach is documented
+- Cost optimized: expensive model only for hard reasoning, cheap model for execution
+
+### Example Split (ALSO GOOD - parallel implementation after shared investigation):
+User request: "Add authentication with email verification and password reset"
+
+**Task-1** (Investigation):
+- Title: "Design authentication architecture"
+- TaskType: design
+- Complexity: moderate
+- Description: "Design the authentication system architecture. Decide: (1) JWT vs sessions, (2) email service (SendGrid/AWS SES/Resend), (3) database schema for users/tokens, (4) password hashing approach (bcrypt/argon2). Document decisions in \`./auth-design.md\`."
+
+**Task-2** (Implementation - can run in parallel with 3 and 4 after task-1):
+- Title: "Implement JWT authentication middleware"
+- TaskType: generate
+- Complexity: simple (has design doc)
+- Depends: task-1
+- Description: "Read \`./auth-design.md\`. Implement JWT middleware at \`src/middleware/auth.ts\` per the design..."
+
+**Task-3** (Implementation - parallel with 2 and 4):
+- Title: "Implement email verification"
+- TaskType: generate
+- Complexity: moderate
+- Depends: task-1
+
+**Task-4** (Implementation - parallel with 2 and 3):
+- Title: "Implement password reset flow"
+- TaskType: generate
+- Complexity: moderate
+- Depends: task-1
+
+Strategy: mixed (task-1 serial, tasks 2-4 parallel)
+
+### Anti-Pattern (BAD - don't do this):
+User request: "Fix authentication bug"
+
+**Task-1 only:**
+- Title: "Investigate and fix authentication bug"
+- TaskType: debug
+- Complexity: complex
+- Description: "Debug the authentication issue and fix it"
+
+Why it's bad:
+- Forces a single expensive model for the entire task
+- Investigation + implementation mixed = no cost optimization
+- If it fails and escalates, you pay for re-investigation every retry
 
 ## Subtask Descriptions — AGENTIC EXECUTION ONLY
 

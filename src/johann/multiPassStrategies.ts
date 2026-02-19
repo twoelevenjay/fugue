@@ -380,6 +380,8 @@ export const TASK_TO_MULTIPASS_STRATEGY: Record<TaskType, MultiPassStrategyType>
     refactor: 'tool-verified-loop', // Refactors need tests to verify correctness
     test: 'tool-verified-loop', // Tests must actually run
     debug: 'self-consistency', // Debugging needs multiple reasoning paths
+    investigate: 'self-consistency', // Investigation benefits from multiple reasoning paths
+    implement: 'tool-verified-loop', // Implementation needs verification
     review: 'two-pass-rubric', // Code review needs extraction + scoring
     spec: 'draft-critique-revise', // Specs benefit from critique
     edit: 'none', // Small edits don't need multi-pass

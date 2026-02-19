@@ -819,7 +819,10 @@ export class Orchestrator {
         try {
             // == PHASE 1: PLANNING ==
             await this.hookRunner.run('on_session_start', { request, session });
-            reporter.phase('Planning', 'Analyzing request and creating plan');
+
+            // Generate contextual activity phrase for progress spinner
+            const activityPhrase = await this.generateActivityPhrase(request, userModel, token);
+            reporter.phase('Planning', activityPhrase.replace(/\.\.\.$/, ''));
 
             await debugLog.logEvent(
                 'planning',
@@ -2816,5 +2819,66 @@ export class Orchestrator {
         }
 
         return lines.join('\n');
+    }
+
+    /**
+     * Generate a contextual activity phrase from the user's request.
+     * Used for the progress spinner during planning.
+     * Examples: "Searching...", "Fixing authentication...", "Implementing feature..."
+     * Falls back to "Planning..." if generation fails or times out.
+     */
+    private async generateActivityPhrase(
+        request: string,
+        model: vscode.LanguageModelChat,
+        token: vscode.CancellationToken,
+    ): Promise<string> {
+        const prompt = `Based on this user request, generate a short, present-tense activity phrase (2-4 words) describing what you're doing right now. Use -ing verbs. Be specific and concise.
+
+Examples:
+- "search for authentication libraries" → "Searching for libraries..."
+- "fix the login bug" → "Fixing login bug..."
+- "add dark mode support" → "Adding dark mode..."
+- "debug the API timeout" → "Debugging API timeout..."
+- "implement file upload" → "Implementing file upload..."
+
+User request: ${request.substring(0, 300)}
+
+Activity phrase (2-4 words, present tense, ends with ...):`;
+
+        try {
+            const response = await Promise.race([
+                model.sendRequest([vscode.LanguageModelChatMessage.User(prompt)], {}, token),
+                new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error('Timeout')), 2000),
+                ),
+            ]);
+
+            if ('text' in response) {
+                let phrase = '';
+                for await (const chunk of response.text) {
+                    phrase += chunk;
+                }
+
+                phrase = phrase
+                    .trim()
+                    .replace(/^["']|["']$/g, '') // Remove quotes
+                    .replace(/\.\.\.+$/, '...') // Normalize ellipsis
+                    .substring(0, 60); // Cap length
+
+                // Ensure it ends with ...
+                if (!phrase.endsWith('...')) {
+                    phrase += '...';
+                }
+
+                // Basic validation - must contain a verb-ing or be reasonable
+                if (phrase.length >= 8 && phrase.length <= 60) {
+                    return phrase;
+                }
+            }
+        } catch {
+            // Fall through to default
+        }
+
+        return 'Planning...';
     }
 }
