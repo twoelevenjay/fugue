@@ -1690,22 +1690,6 @@ export function activate(context: vscode.ExtensionContext) {
                 `Using model: ${model.id} (tools: ${capabilities.supportsTools ? 'yes' : 'no'})`,
             );
 
-            // Ramble requires tool support for web search
-            if (!capabilities.supportsTools) {
-                logger.error('Model does not support tools', { modelId: model.id });
-                await debugLog?.logEvent('other', 'Failed: Model does not support tools');
-                response.markdown(
-                    `**Error:** The selected model (\`${model.id}\`) does not support tool calling, which Ramble requires for web search.\n\n` +
-                        `**Please select a compatible model:**\n` +
-                        `- Claude (any version)\n` +
-                        `- GPT-4o or GPT-4 Turbo\n` +
-                        `- o1 or o3 models\n\n` +
-                        `Change your model in the Copilot chat model picker, then try again.\n`,
-                );
-                await debugLog?.finalize('failed', 'Model does not support tools');
-                return;
-            }
-
             // Get or gather workspace context
             let workspaceContext = context.workspaceState.get<string>(WORKSPACE_CONTEXT_KEY);
             if (!workspaceContext) {

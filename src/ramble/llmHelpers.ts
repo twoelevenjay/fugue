@@ -7,6 +7,103 @@ import { getLogger } from './logger';
 // ============================================================================
 
 /**
+ * Tools that are useful for Ramble's web research phase.
+ * Includes web search, documentation lookup, etc.
+ */
+const RAMBLE_USEFUL_TOOLS = new Set<string>([
+    'vscode_web_search',
+    'vscode_websearch',
+    'web_search',
+    'websearch',
+    'search',
+]);
+
+/**
+ * Get available tools from VS Code API that are useful for web research.
+ */
+function getWebResearchTools(): vscode.LanguageModelChatTool[] {
+    const tools: vscode.LanguageModelChatTool[] = [];
+
+    for (const tool of vscode.lm.tools) {
+        // Check if tool name suggests web search capability
+        const toolNameLower = tool.name.toLowerCase();
+        const isWebSearchTool =
+            RAMBLE_USEFUL_TOOLS.has(tool.name) ||
+            toolNameLower.includes('search') ||
+            toolNameLower.includes('web');
+
+        if (isWebSearchTool) {
+            tools.push({
+                name: tool.name,
+                description: tool.description,
+                inputSchema: sanitizeToolSchema(tool.inputSchema),
+            });
+        }
+    }
+
+    return tools;
+}
+
+/**
+ * Sanitize tool input schema to avoid provider validation failures.
+ */
+function sanitizeToolSchema(inputSchema: unknown): object {
+    if (!isRecord(inputSchema)) {
+        return {
+            type: 'object',
+            properties: {},
+            additionalProperties: true,
+        };
+    }
+
+    const cloned = JSON.parse(JSON.stringify(inputSchema)) as Record<string, unknown>;
+    normalizeSchemaNode(cloned);
+    return cloned;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Normalize schema nodes recursively to ensure valid structure.
+ */
+function normalizeSchemaNode(node: unknown): void {
+    if (!isRecord(node)) {
+        return;
+    }
+
+    if (node.type === 'object') {
+        const properties = node.properties;
+        if (!isRecord(properties)) {
+            node.properties = {};
+        }
+        if (node.additionalProperties === undefined) {
+            node.additionalProperties = true;
+        }
+    }
+
+    if (isRecord(node.properties)) {
+        for (const child of Object.values(node.properties)) {
+            normalizeSchemaNode(child);
+        }
+    }
+
+    if (node.items !== undefined) {
+        normalizeSchemaNode(node.items);
+    }
+
+    for (const key of ['oneOf', 'anyOf', 'allOf'] as const) {
+        const variants = node[key];
+        if (Array.isArray(variants)) {
+            for (const variant of variants) {
+                normalizeSchemaNode(variant);
+            }
+        }
+    }
+}
+
+/**
  * Send a request to the LLM with optional debug logging and retry logic.
  */
 export async function sendToLLMWithLogging(
@@ -50,26 +147,23 @@ export async function sendToLLMWithLogging(
             vscode.LanguageModelChatMessage.User(systemPrompt + '\n\n---\n\n' + userPrompt),
         ];
 
-        const requestOptions: vscode.LanguageModelChatRequestOptions = options.enableTools
-            ? {
-                  tools: [
-                      {
-                          name: 'vscode_search',
-                          description: 'Search the web for current information',
-                          inputSchema: {
-                              type: 'object',
-                              properties: {
-                                  query: {
-                                      type: 'string',
-                                      description: 'Search query',
-                                  },
-                              },
-                              required: ['query'],
-                          },
-                      },
-                  ],
-              }
-            : {};
+        // Get real tools from VS Code API if tools are enabled
+        const tools = options.enableTools ? getWebResearchTools() : [];
+
+        if (options.enableTools && tools.length === 0) {
+            logger.warn('Tools requested but no web search tools available from VS Code API', {
+                phase: options.phase || 'other',
+                availableToolCount: Array.from(vscode.lm.tools).length,
+            });
+        }
+
+        const requestOptions: vscode.LanguageModelChatRequestOptions =
+            tools.length > 0
+                ? {
+                      tools,
+                      toolMode: vscode.LanguageModelChatToolMode.Auto,
+                  }
+                : {};
 
         logger.debug(`Sending LLM request (attempt ${attempt + 1}/${maxRetries + 1})`, {
             phase: options.phase || 'other',
@@ -77,7 +171,9 @@ export async function sendToLLMWithLogging(
             model: model.id,
             systemPromptLength: systemPrompt.length,
             userPromptLength: userPrompt.length,
-            enableTools: options.enableTools || false,
+            toolsEnabled: options.enableTools || false,
+            toolCount: tools.length,
+            toolNames: tools.map((t) => t.name),
         });
 
         try {
