@@ -28,6 +28,7 @@
     },
     "homepage": "https://github.com/leonshelhamer/fugue#readme",
     "activationEvents": [
+        "onStartupFinished",
         "onChatParticipant:ramble",
         "onChatParticipant:johann"
     ],
