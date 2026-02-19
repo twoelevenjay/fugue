@@ -1020,6 +1020,9 @@ User says: "I want to integrate the Twilio API for SMS notifications"
 
 After searching, incorporate findings into your contextPacket and only ask about aspects you couldn't resolve.
 
+CRITICAL - OUTPUT REQUIREMENTS:
+After any research, you MUST return the JSON response. Do not endlessly search for more information. Research what you need, then OUTPUT THE JSON.
+
 CRITICAL RULES - GENERATING CLARIFYING QUESTIONS:
 Follow this SYSTEMATIC PROCESS to identify what questions to ask:
 
@@ -1116,6 +1119,7 @@ CRITICAL RULES - CONSERVATIVE APPROACH:
 12. If the output format is implied (e.g., "implement hooks" implies code + documentation), fill it in - don't ask.
 13. DO NOT GUESS on ambiguous transcription issues — those SHOULD go in missingInfo with field "transcription".
 14. Return ONLY valid JSON, no markdown, no explanations.
+15. IMPORTANT: After you finish any web research, immediately return the JSON response. Do not continue researching endlessly. Research what you need (if anything), then OUTPUT THE REQUIRED JSON STRUCTURE.
 
 REMEMBER: Your job is to identify GENUINE ambiguities that would lead to different implementation approaches. Use the systematic checklist above - don't rely on intuition alone. The user wants thorough context engineering, not minimal interruptions at the cost of clarity.`;
 }

@@ -1056,6 +1056,14 @@ export class Orchestrator {
             // Finalize debug log on success
             await this.hookRunner.run('on_session_end', { request, session, plan });
 
+            // Display model usage report before completing
+            const usageReport = this.buildModelUsageReport(session);
+            if (usageReport) {
+                reporter.stream.markdown('\n\n---\n\n');
+                reporter.stream.markdown(usageReport);
+                reporter.stream.markdown('\n---\n\n');
+            }
+
             // === RunState: mark completed ===
             await runManager.completeRun();
             cancelListener.dispose();
@@ -2560,12 +2568,14 @@ export class Orchestrator {
         );
 
         if (answer === 'Promote to Global') {
-            // To promote, we'd need access to globalStorageUri which lives in the extension context
-            // For now, just notify the user that they can promote manually
-            vscode.window.showInformationMessage(
-                `To promote "${skill.metadata.slug}" to global, run the "Johann: Promote Skill to Global" command.`,
+            // TODO: Wire up actual promotion using SkillPromotionManager + GlobalSkillStore
+            // For now, just log the user's intent — the SkillSystem finalize() flow
+            // will offer promotion again at end-of-run via the full promotion UI
+            getLogger().info(
+                `User requested promotion for skill "${skill.metadata.slug}" (will be offered again at end-of-run)`,
             );
-            getLogger().info(`User requested promotion for skill "${skill.metadata.slug}"`);
+            // Do NOT show an instructional banner — the user just clicked "Promote to Global"
+            // so they already understand how to promote. A second banner is redundant and annoying.
         }
     }
 
@@ -2688,5 +2698,123 @@ export class Orchestrator {
             return 'packaging';
         }
         return 'implementation';
+    }
+
+    /**
+     * Build a comprehensive model usage report from the session's escalations and plan.
+     * Shows which models were used, how many times, and cost implications.
+     */
+    private buildModelUsageReport(session: JohannSession): string {
+        if (!session.plan) {
+            return '';
+        }
+
+        const plan = session.plan;
+        const escalations = session.escalations;
+
+        // Track model usage across all attempts
+        interface ModelUsage {
+            modelId: string;
+            subtaskIds: string[];
+            attemptCount: number;
+            successCount: number;
+            isPremium: boolean;
+        }
+
+        const usageByModel = new Map<string, ModelUsage>();
+
+        // Process all escalation attempts
+        for (const escalation of escalations) {
+            for (const attempt of escalation.attempts) {
+                const existing = usageByModel.get(attempt.modelId);
+                // Premium models: gpt-5.x (codex), o1-pro, opus-tier
+                const isPremium = /gpt-5\.|o1-pro|opus/i.test(attempt.modelId);
+
+                if (existing) {
+                    existing.attemptCount++;
+                    existing.subtaskIds.push(escalation.subtaskId);
+                    if (attempt.success) {
+                        existing.successCount++;
+                    }
+                } else {
+                    usageByModel.set(attempt.modelId, {
+                        modelId: attempt.modelId,
+                        subtaskIds: [escalation.subtaskId],
+                        attemptCount: 1,
+                        successCount: attempt.success ? 1 : 0,
+                        isPremium,
+                    });
+                }
+            }
+        }
+
+        if (usageByModel.size === 0) {
+            return ''; // No models used (planning-only session?)
+        }
+
+        // Build the report
+        const lines: string[] = [];
+        lines.push('## 📊 Model Usage Report\n');
+
+        // Overall stats
+        const totalSubtasks = plan.subtasks.length;
+        const completedSubtasks = plan.subtasks.filter((st) => st.result?.success).length;
+        const failedSubtasks = plan.subtasks.filter((st) => st.result && !st.result.success).length;
+        const pendingSubtasks = plan.subtasks.filter((st) => !st.result).length;
+
+        const elapsedMs = session.completedAt
+            ? new Date(session.completedAt).getTime() - new Date(session.startedAt).getTime()
+            : Date.now() - new Date(session.startedAt).getTime();
+
+        lines.push(
+            `**Total Subtasks:** ${totalSubtasks} (${completedSubtasks} completed, ${failedSubtasks} failed, ${pendingSubtasks} pending)`,
+        );
+        lines.push(`**Total Duration:** ${(elapsedMs / 60000).toFixed(1)} minutes\n`);
+
+        // Model breakdown table
+        lines.push('### Model Breakdown\n');
+        lines.push('| Model | Attempts | Success Rate | Premium? |');
+        lines.push('|-------|----------|--------------|----------|');
+
+        // Sort by attempt count descending
+        const sortedUsage = Array.from(usageByModel.values()).sort(
+            (a, b) => b.attemptCount - a.attemptCount,
+        );
+
+        for (const usage of sortedUsage) {
+            const successRate = `${usage.successCount}/${usage.attemptCount}`;
+            const premiumBadge = usage.isPremium ? '⭐ Yes' : 'No';
+            lines.push(
+                `| ${usage.modelId} | ${usage.attemptCount} | ${successRate} | ${premiumBadge} |`,
+            );
+        }
+
+        lines.push(''); // Blank line after table
+
+        // Premium request calculation
+        const premiumAttempts = sortedUsage
+            .filter((u) => u.isPremium)
+            .reduce((sum, u) => sum + u.attemptCount, 0);
+
+        if (premiumAttempts > 0) {
+            lines.push(`**Premium Requests:** ${premiumAttempts}\n`);
+        }
+
+        // Escalation summary
+        const escalatedTasks = escalations.filter((e) => e.attempts.length > 1);
+        if (escalatedTasks.length > 0) {
+            lines.push('### Escalation Summary\n');
+            for (const escalation of escalatedTasks) {
+                const subtask = plan.subtasks.find((st) => st.id === escalation.subtaskId);
+                const taskTitle = subtask?.title || escalation.subtaskId;
+                const chain = escalation.attempts.map((a) => a.modelId).join(' → ');
+                lines.push(
+                    `- **${taskTitle}**: ${escalation.attempts.length} escalations (${chain})`,
+                );
+            }
+            lines.push(''); // Blank line
+        }
+
+        return lines.join('\n');
     }
 }

@@ -37,7 +37,7 @@
             {
                 "id": "ramble",
                 "name": "ramble",
-                "fullName": "Fugue — Prompt Compiler",
+                "fullName": "Ramble — Prompt Compiler",
                 "description": "Converts rough requests into structured, high-context prompts",
                 "isSticky": true
             },

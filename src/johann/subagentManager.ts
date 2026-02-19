@@ -1294,10 +1294,38 @@ export class SubagentManager {
             /\[Tool:\s*(copilot_createFile|create_file)\]/i.test(result.output) ||
             /\[Tool:\s*run_in_terminal\].*?(cat|echo|tee|>>|>)\s/i.test(result.output);
 
+        // Detect explicit "COMPLETED:" markers in summary blocks or at start of lines
+        const hasExplicitCompletion =
+            /```summary[\s\S]*?COMPLETED:/i.test(result.output) ||
+            /^COMPLETED:/im.test(result.output);
+
         // == AUTO-PASS: strong success signals make review unnecessary ==
-        // If the execution ran 8+ tool rounds AND produced a summary block,
+
+        // Failsafe: Explicit COMPLETED marker with summary block = definite success
+        if (hasExplicitCompletion && hasSummaryBlock) {
+            if (debugLog) {
+                await debugLog.logEvent(
+                    'subtask-execution',
+                    `[Auto-Pass] Explicit COMPLETED marker detected with summary block - skipping review`,
+                );
+            }
+            return {
+                success: true,
+                reason: `Auto-approved: Explicit COMPLETED marker detected with summary block. Review skipped to prevent false negatives.`,
+                suggestions: [],
+            };
+        }
+
+        // If the execution ran 6+ tool rounds AND produced a summary block,
         // real work unambiguously happened. Review risks a false negative.
-        if (toolUsage.total >= 8 && hasSummaryBlock) {
+        // (Lowered from 8 to 6 to catch more legitimate completions)
+        if (toolUsage.total >= 6 && hasSummaryBlock) {
+            if (debugLog) {
+                await debugLog.logEvent(
+                    'subtask-execution',
+                    `[Auto-Pass] ${toolUsage.total} tool calls with summary block - skipping review`,
+                );
+            }
             return {
                 success: true,
                 reason: `Auto-approved: ${toolUsage.total} tool calls across ~${toolUsage.roundCount} rounds with a COMPLETED summary block. Real work confirmed without review.`,
@@ -1404,6 +1432,14 @@ ${outputForReview}
 
             // Parse the review result
             const review = this.parseReviewResult(reviewOutput);
+
+            // Log the review decision for debugging
+            if (debugLog) {
+                await debugLog.logEvent(
+                    'subtask-execution',
+                    `[Review Decision] ${review.success ? 'PASSED' : 'FAILED'} - ${review.reason}`,
+                );
+            }
 
             // === SELF-HEALING: Detect failure patterns ===
             if (selfHealing && !review.success && reviewOutput) {

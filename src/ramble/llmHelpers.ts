@@ -187,7 +187,7 @@ export async function sendToLLMWithLogging(
 
             let finalText = '';
             let toolCallRound = 0;
-            const maxToolRounds = 5; // Prevent infinite loops
+            const maxToolRounds = 10; // Give model enough rounds to complete research
 
             while (toolCallRound < maxToolRounds) {
                 const response = await model.sendRequest(
@@ -227,9 +227,16 @@ export async function sendToLLMWithLogging(
                 }
 
                 // Execute tool calls and feed results back
-                logger.debug(`Executing ${toolCalls.length} tool call(s)`, {
-                    tools: toolCalls.map((tc) => tc.name),
-                });
+                logger.info(
+                    `Tool round ${toolCallRound + 1}: Executing ${toolCalls.length} tool call(s)`,
+                    {
+                        phase: options.phase || 'other',
+                        tools: toolCalls.map((tc) => tc.name),
+                        roundText: roundText
+                            ? `${roundText.substring(0, 100)}...`
+                            : '(no text yet)',
+                    },
+                );
 
                 // Add assistant's tool calls to conversation
                 const assistantParts: Array<
@@ -271,9 +278,16 @@ export async function sendToLLMWithLogging(
                         toolResults.push(
                             new vscode.LanguageModelToolResultPart(toolCall.callId, resultContent),
                         );
-                        logger.debug('Tool call succeeded', {
-                            tool: toolCall.name,
+
+                        const resultPreview = resultContent
+                            .map((p) => p.value)
+                            .join(' ')
+                            .substring(0, 200);
+                        logger.info(`Tool "${toolCall.name}" succeeded`, {
+                            phase: options.phase || 'other',
+                            callId: toolCall.callId,
                             resultParts: resultContent.length,
+                            preview: resultPreview ? `${resultPreview}...` : '(empty)',
                         });
                     } catch (error) {
                         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -293,6 +307,20 @@ export async function sendToLLMWithLogging(
                 conversationMessages.push(vscode.LanguageModelChatMessage.User(toolResults));
 
                 toolCallRound++;
+
+                if (toolCallRound >= maxToolRounds - 2) {
+                    logger.warn(
+                        `Approaching tool round limit (${toolCallRound}/${maxToolRounds})`,
+                        {
+                            phase: options.phase || 'other',
+                            label: options.label || 'unlabeled',
+                            textSoFar:
+                                finalText.length > 0
+                                    ? `${finalText.substring(0, 100)}...`
+                                    : '(none)',
+                        },
+                    );
+                }
             }
 
             const duration = Date.now() - startTime;
@@ -300,15 +328,17 @@ export async function sendToLLMWithLogging(
             // Check for empty response
             if (!finalText || finalText.trim().length === 0) {
                 const emptyError = new Error(
-                    `LLM returned empty response after ${toolCallRound} tool rounds`,
+                    `LLM returned empty response after ${toolCallRound} tool rounds (hit limit: ${toolCallRound >= maxToolRounds})`,
                 );
                 lastError = emptyError;
 
-                logger.warn(`Empty LLM response (attempt ${attempt + 1}/${maxRetries + 1})`, {
+                logger.error(`Empty LLM response (attempt ${attempt + 1}/${maxRetries + 1})`, {
                     phase: options.phase || 'other',
                     label: options.label || 'unlabeled',
                     model: model.id,
                     toolRounds: toolCallRound,
+                    hitToolLimit: toolCallRound >= maxToolRounds,
+                    conversationLength: conversationMessages.length,
                     durationMs: duration,
                 });
 
