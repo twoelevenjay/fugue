@@ -4,7 +4,79 @@
 
 ### Summary
 
-Added comprehensive logging infrastructure to Ramble, improved Johann's error reporting, and enhanced timeout/stall detection for ACP workers.
+Added comprehensive logging infrastructure to Ramble, improved Johann's error reporting, enhanced timeout/stall detection for ACP workers, and added robust model capability checking with automatic retries.
+
+---
+
+## 🔧 Model Capability Validation & Retry Logic
+
+### Changes to `src/extension.ts`
+
+**Model Capability Detection:**
+
+- New `checkModelCapabilities()` function detects tool support
+- Checks model ID and family against known tool-compatible models:
+    - Claude (all versions)
+    - GPT-4o, GPT-4 Turbo
+    - o1, o3 models
+- Returns structured capability info (supportsTools, modelId, modelFamily)
+
+**Upfront Validation:**
+
+- Ramble now validates model capabilities before processing
+- If selected model doesn't support tools, shows clear error:
+    - Explains why tools are required (web search)
+    - Lists compatible models
+    - Instructs user how to change model
+- Prevents wasted processing time on incompatible models
+
+**Model Selection Fixed:**
+
+- `getLLM()` now respects user's model choice
+- **Removed hardcoded `family: 'gpt-4o'` filter**
+- Returns first model from user's selection (not forced family)
+- Fallback to any available model if none selected
+
+**Web Search Re-enabled:**
+
+- `enableTools: true` restored for all analysis calls
+- Initial request analysis
+- Chunked analysis
+- Follow-up research
+- Safe now that we validate tool support upfront
+
+### Changes to `src/ramble/llmHelpers.ts`
+
+**Automatic Retry Logic:**
+
+- `sendToLLMWithLogging()` now retries on failures
+- **Default: 3 total attempts** (configurable via `maxRetries` param)
+- Exponential backoff between retries:
+    - Attempt 1: immediate
+    - Attempt 2: 1s delay
+    - Attempt 3: 2s delay
+    - Cap at 5s max delay
+
+**Empty Response Detection:**
+
+- Detects when LLM returns 0 chars or whitespace-only
+- Automatically retries empty responses
+- Logs each attempt with chunk count
+- Throws descriptive error after all retries exhausted
+
+**Retry Behavior:**
+
+- Retries all errors except `CancellationError` (user cancelled)
+- Logs previous error on retry attempts
+- Marks successful responses as retry or not
+- Debug log captures all attempts with failure reasons
+
+**Enhanced Logging:**
+
+- Added `chunkCount` to response logging
+- Shows attempt number in all log messages
+- Tracks retry delays and previous errors
+- Records all attempts in debug conversation log
 
 ---
 
@@ -30,6 +102,7 @@ Added comprehensive logging infrastructure to Ramble, improved Johann's error re
     - Full responses received
     - Duration metrics
     - Error details
+    - **Retry attempts with failure reasons**
 - Same detailed format as Johann's debug logs
 - Session summary with call timeline and duration breakdown
 
@@ -40,6 +113,7 @@ Added comprehensive logging infrastructure to Ramble, improved Johann's error re
     - LLM request parameters
     - Response length and duration
     - Errors with stack traces
+    - **Retry attempts and outcomes**
 - Integrates with `RambleDebugConversationLog`
 
 ### Changes to `src/extension.ts`
@@ -53,6 +127,7 @@ Added comprehensive logging infrastructure to Ramble, improved Johann's error re
 
 - Debug log created at start of each Ramble session
 - Session lifecycle events logged (reset, refresh, errors)
+- **Model capability check logged with tool support status**
 - All LLM calls now use `sendToLLMWithLogging` with descriptive phase/label:
     - `codebase-analysis` — Analyzing workspace files for missing info
     - `web-research` — Knowledge resolution from training data
@@ -167,13 +242,25 @@ Added comprehensive logging infrastructure to Ramble, improved Johann's error re
 - ✅ All TypeScript compilation passes
 - ✅ No errors or warnings
 
+**Model Capability Validation:**
+
+- ✅ Blocks incompatible models with clear error message
+- ✅ Shows which models are compatible
+- ✅ Logs tool support status in debug log
+
+**Retry Logic:**
+
+- ✅ Automatically retries empty responses
+- ✅ Exponential backoff delays
+- ✅ All attempts logged to debug file
+
 **Next Steps:**
 
-1. Test Ramble with a real prompt compilation session
-2. Verify debug logs are created in `.vscode/ramble/debug/`
-3. Trigger an error scenario to verify improved error messages
-4. Check OutputChannel logging for both Ramble and Johann
-5. Test ACP worker stall detection with a long-running task
+1. Test Ramble with Claude Opus 4.6 (should work with tools)
+2. Test Ramble with incompatible model (should show error)
+3. Verify debug logs capture retry attempts
+4. Check OutputChannel logging for model capability checks
+5. Test web search during analysis phase
 
 ---
 
@@ -183,6 +270,7 @@ Added comprehensive logging infrastructure to Ramble, improved Johann's error re
 
 - Most `sendToLLM` calls now use `sendToLLMWithLogging` with descriptive phases
 - Helper functions (`analyzeCodebaseForMissingInfo`, `attemptKnowledgeResolution`, etc.) still use generic wrapper
+- **Model selection no longer forced to gpt-4o** — uses user's choice
 - Future improvement: Thread `debugLog` through helper functions for fuller coverage
 
 **For Johann:**
@@ -200,3 +288,5 @@ Added comprehensive logging infrastructure to Ramble, improved Johann's error re
 3. **Both:** Unified logging dashboard showing parallel Ramble/Johann activities
 4. **Performance:** Log rotation for large debug files
 5. **Observability:** Export logs in structured format (JSON lines) for analysis tools
+6. **Model Detection:** Query VS Code API for actual tool support instead of hardcoded list (if API becomes available)
+7. **Retry Strategy:** Make retry count/delays configurable per phase

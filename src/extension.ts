@@ -619,17 +619,48 @@ Return ONLY valid JSON.`;
 // LLM INTERACTION
 // ============================================================================
 
+interface ModelCapabilities {
+    supportsTools: boolean;
+    modelId: string;
+    modelFamily: string;
+}
+
+/**
+ * Check if a model supports tool calling.
+ * Returns capability info for the model.
+ */
+function checkModelCapabilities(model: vscode.LanguageModelChat): ModelCapabilities {
+    const modelId = model.id.toLowerCase();
+    const modelFamily = model.family.toLowerCase();
+
+    // Models known to support tools
+    const toolSupportedModels = ['claude', 'o1', 'o3', 'gpt-4o', 'gpt-4-turbo'];
+
+    // Check if model family supports tools
+    const supportsTools = toolSupportedModels.some(
+        (supported) => modelFamily.includes(supported) || modelId.includes(supported),
+    );
+
+    return {
+        supportsTools,
+        modelId: model.id,
+        modelFamily: model.family,
+    };
+}
+
 async function getLLM(): Promise<vscode.LanguageModelChat | undefined> {
+    // Get the default model (respects user's selection in VS Code)
     const models = await vscode.lm.selectChatModels({
         vendor: 'copilot',
-        family: 'gpt-4o',
     });
 
     if (models.length === 0) {
+        // Fallback to any available model
         const anyModels = await vscode.lm.selectChatModels();
         return anyModels[0];
     }
 
+    // Return the first model (user's default selection)
     return models[0];
 }
 
@@ -733,6 +764,7 @@ ${chunks.length > 1 ? `This is part ${i + 1} of ${chunks.length}. The user's ful
 
         try {
             const result = await sendToLLMWithLogging(model, fullPrompt, chunks[i], token, {
+                enableTools: true, // Enable web search for chunk analysis
                 phase: 'analysis',
                 label: `Chunk ${i + 1}/${chunks.length} analysis`,
             });
@@ -1577,14 +1609,24 @@ export function activate(context: vscode.ExtensionContext) {
             token: vscode.CancellationToken,
         ) => {
             const logger = getRambleLogger();
-            const debugLog = new RambleDebugConversationLog(true);
-            await debugLog.initialize();
+
+            // Try to create debug log - but don't fail if it doesn't work
+            let debugLog: RambleDebugConversationLog | undefined;
+            try {
+                debugLog = new RambleDebugConversationLog(true);
+                await debugLog.initialize();
+            } catch (err) {
+                logger.warn('Failed to initialize debug log', {
+                    error: err instanceof Error ? err.message : String(err),
+                });
+                debugLog = undefined;
+            }
 
             const userMessage = request.prompt.trim();
 
             logger.info('Ramble chat request received', {
                 messageLength: userMessage.length,
-                sessionId: debugLog.getSessionId(),
+                sessionId: debugLog?.getSessionId() || 'no-session',
             });
 
             // Explicit reset command
@@ -1593,12 +1635,12 @@ export function activate(context: vscode.ExtensionContext) {
                 userMessage.toLowerCase() === 'start over'
             ) {
                 logger.info('Session reset requested');
-                await debugLog.logEvent('other', 'User requested session reset');
+                await debugLog?.logEvent('other', 'User requested session reset');
                 await context.workspaceState.update(STATE_KEY, createEmptySession());
                 response.markdown(
                     "Session reset. Send me your request and I'll compile it into a structured prompt.\n",
                 );
-                await debugLog.finalize('reset');
+                await debugLog?.finalize('reset');
                 return;
             }
 
@@ -1608,7 +1650,7 @@ export function activate(context: vscode.ExtensionContext) {
                 userMessage.toLowerCase() === 'refresh context'
             ) {
                 logger.info('Workspace context refresh requested');
-                await debugLog.logEvent('other', 'User requested workspace context refresh');
+                await debugLog?.logEvent('other', 'User requested workspace context refresh');
                 response.markdown('Refreshing workspace context...\n');
                 const workspaceCtx = await gatherWorkspaceContext();
                 const formatted = formatWorkspaceContext(workspaceCtx);
@@ -1621,24 +1663,48 @@ export function activate(context: vscode.ExtensionContext) {
                 response.markdown(
                     `- Workspace folders: ${vscode.workspace.workspaceFolders?.length || 0}\n`,
                 );
-                await debugLog.finalize('completed');
+                await debugLog?.finalize('completed');
                 return;
             }
 
-            // Get LLM
-            const model = await getLLM();
+            // Get LLM - use the model selected by user in chat, or fallback
+            const model = request.model || (await getLLM());
             if (!model) {
                 logger.error('No language model available');
-                await debugLog.logEvent('other', 'Failed: No language model available');
+                await debugLog?.logEvent('other', 'Failed: No language model available');
                 response.markdown(
                     '**Error:** No language model available. Please ensure Copilot is active.\n',
                 );
-                await debugLog.finalize('failed', 'No language model available');
+                await debugLog?.finalize('failed', 'No language model available');
                 return;
             }
 
-            logger.debug('Using language model', { modelId: model.id });
-            await debugLog.logEvent('other', `Using model: ${model.id}`);
+            // Check model capabilities
+            const capabilities = checkModelCapabilities(model);
+            logger.debug('Using language model', {
+                modelId: model.id,
+                supportsTools: capabilities.supportsTools,
+            });
+            await debugLog?.logEvent(
+                'other',
+                `Using model: ${model.id} (tools: ${capabilities.supportsTools ? 'yes' : 'no'})`,
+            );
+
+            // Ramble requires tool support for web search
+            if (!capabilities.supportsTools) {
+                logger.error('Model does not support tools', { modelId: model.id });
+                await debugLog?.logEvent('other', 'Failed: Model does not support tools');
+                response.markdown(
+                    `**Error:** The selected model (\`${model.id}\`) does not support tool calling, which Ramble requires for web search.\n\n` +
+                        `**Please select a compatible model:**\n` +
+                        `- Claude (any version)\n` +
+                        `- GPT-4o or GPT-4 Turbo\n` +
+                        `- o1 or o3 models\n\n` +
+                        `Change your model in the Copilot chat model picker, then try again.\n`,
+                );
+                await debugLog?.finalize('failed', 'Model does not support tools');
+                return;
+            }
 
             // Get or gather workspace context
             let workspaceContext = context.workspaceState.get<string>(WORKSPACE_CONTEXT_KEY);
@@ -1885,6 +1951,7 @@ export function activate(context: vscode.ExtensionContext) {
                             label: 'Initial request analysis',
                         },
                     );
+
                     parsed = parseJSON<AnalysisResult>(analysisResult);
 
                     if (!parsed) {
@@ -2037,8 +2104,8 @@ export function activate(context: vscode.ExtensionContext) {
                     promptLength: compiledPrompt.length,
                     questionRounds: session.questionRound,
                 });
-                await debugLog.logEvent('compilation', 'Compilation completed successfully');
-                await debugLog.finalize('completed');
+                await debugLog?.logEvent('compilation', 'Compilation completed successfully');
+                await debugLog?.finalize('completed');
 
                 response.markdown('## Compiled Prompt\n\n```text\n' + compiledPrompt + '\n```\n\n');
                 response.button({
@@ -2058,8 +2125,8 @@ export function activate(context: vscode.ExtensionContext) {
             } catch (err) {
                 const errorMessage = err instanceof Error ? err.message : 'Unknown error';
                 logger.error('Error during prompt compilation', { error: errorMessage });
-                await debugLog.logEvent('other', `Error: ${errorMessage}`);
-                await debugLog.finalize('failed', errorMessage);
+                await debugLog?.logEvent('other', `Error: ${errorMessage}`);
+                await debugLog?.finalize('failed', errorMessage);
                 response.markdown(`**Error:** ${errorMessage}\n`);
             }
         },
