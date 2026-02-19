@@ -104,7 +104,14 @@ function normalizeSchemaNode(node: unknown): void {
 }
 
 /**
- * Send a request to the LLM with optional debug logging and retry logic.
+ * Send a request to the LLM with optional debug logging, retry logic, and tool calling.
+ *
+ * Implements a full agentic tool-calling loop:
+ * 1. Send request to model with available tools
+ * 2. Process response stream (can contain text AND tool calls)
+ * 3. If model requests tools, execute them via vscode.lm.invokeTool()
+ * 4. Feed tool results back to model
+ * 5. Repeat until model returns final text response
  */
 export async function sendToLLMWithLogging(
     model: vscode.LanguageModelChat,
@@ -143,10 +150,6 @@ export async function sendToLLMWithLogging(
             await new Promise((resolve) => setTimeout(resolve, delay));
         }
 
-        const messages = [
-            vscode.LanguageModelChatMessage.User(systemPrompt + '\n\n---\n\n' + userPrompt),
-        ];
-
         // Get real tools from VS Code API if tools are enabled
         const tools = options.enableTools ? getWebResearchTools() : [];
 
@@ -177,21 +180,127 @@ export async function sendToLLMWithLogging(
         });
 
         try {
-            const response = await model.sendRequest(messages, requestOptions, token);
+            // Agentic tool-calling loop
+            const conversationMessages: vscode.LanguageModelChatMessage[] = [
+                vscode.LanguageModelChatMessage.User(systemPrompt + '\n\n---\n\n' + userPrompt),
+            ];
 
-            let result = '';
-            let chunkCount = 0;
-            for await (const chunk of response.text) {
-                result += chunk;
-                chunkCount++;
+            let finalText = '';
+            let toolCallRound = 0;
+            const maxToolRounds = 5; // Prevent infinite loops
+
+            while (toolCallRound < maxToolRounds) {
+                const response = await model.sendRequest(
+                    conversationMessages,
+                    requestOptions,
+                    token,
+                );
+
+                let roundText = '';
+                const toolCalls: Array<{ name: string; callId: string; input: any }> = [];
+
+                // Process the stream - can contain text parts AND tool call parts
+                for await (const chunk of response.stream) {
+                    if (chunk instanceof vscode.LanguageModelTextPart) {
+                        roundText += chunk.value;
+                    } else if (chunk instanceof vscode.LanguageModelToolCallPart) {
+                        toolCalls.push({
+                            name: chunk.name,
+                            callId: chunk.callId,
+                            input: chunk.input,
+                        });
+                        logger.debug('Model requested tool call', {
+                            toolName: chunk.name,
+                            callId: chunk.callId,
+                        });
+                    }
+                }
+
+                // Add any text from this round to final output
+                if (roundText) {
+                    finalText += roundText;
+                }
+
+                // If no tool calls, we're done
+                if (toolCalls.length === 0) {
+                    break;
+                }
+
+                // Execute tool calls and feed results back
+                logger.debug(`Executing ${toolCalls.length} tool call(s)`, {
+                    tools: toolCalls.map((tc) => tc.name),
+                });
+
+                // Add assistant's tool calls to conversation
+                const assistantParts: Array<
+                    vscode.LanguageModelTextPart | vscode.LanguageModelToolCallPart
+                > = [];
+                if (roundText) {
+                    assistantParts.push(new vscode.LanguageModelTextPart(roundText));
+                }
+                assistantParts.push(
+                    ...toolCalls.map(
+                        (tc) => new vscode.LanguageModelToolCallPart(tc.callId, tc.name, tc.input),
+                    ),
+                );
+                conversationMessages.push(
+                    vscode.LanguageModelChatMessage.Assistant(assistantParts),
+                );
+
+                // Execute tools and collect results
+                const toolResults: vscode.LanguageModelToolResultPart[] = [];
+                for (const toolCall of toolCalls) {
+                    try {
+                        const result = await vscode.lm.invokeTool(
+                            toolCall.name,
+                            {
+                                toolInvocationToken: undefined, // Not in ChatParticipant context
+                                input: toolCall.input,
+                            },
+                            token,
+                        );
+
+                        // LanguageModelToolResult has a content property with array of text parts
+                        const resultContent: vscode.LanguageModelTextPart[] = [];
+                        for (const part of result.content) {
+                            if (part instanceof vscode.LanguageModelTextPart) {
+                                resultContent.push(part);
+                            }
+                        }
+
+                        toolResults.push(
+                            new vscode.LanguageModelToolResultPart(toolCall.callId, resultContent),
+                        );
+                        logger.debug('Tool call succeeded', {
+                            tool: toolCall.name,
+                            resultParts: resultContent.length,
+                        });
+                    } catch (error) {
+                        const errorMsg = error instanceof Error ? error.message : String(error);
+                        toolResults.push(
+                            new vscode.LanguageModelToolResultPart(toolCall.callId, [
+                                new vscode.LanguageModelTextPart(`Error: ${errorMsg}`),
+                            ]),
+                        );
+                        logger.error('Tool call failed', {
+                            tool: toolCall.name,
+                            error: errorMsg,
+                        });
+                    }
+                }
+
+                // Add tool results to conversation
+                conversationMessages.push(vscode.LanguageModelChatMessage.User(toolResults));
+
+                toolCallRound++;
             }
 
             const duration = Date.now() - startTime;
 
             // Check for empty response
-            if (!result || result.trim().length === 0) {
+            if (!finalText || finalText.trim().length === 0) {
                 const emptyError = new Error(
-                    `LLM returned empty response (${chunkCount} chunks received, all empty)`,
+                    `LLM returned empty response after ${toolCallRound} tool rounds`,
                 );
                 lastError = emptyError;
 
@@ -199,7 +308,7 @@ export async function sendToLLMWithLogging(
                     phase: options.phase || 'other',
                     label: options.label || 'unlabeled',
                     model: model.id,
-                    chunkCount,
+                    toolRounds: toolCallRound,
                     durationMs: duration,
                 });
 
@@ -232,8 +341,8 @@ export async function sendToLLMWithLogging(
                 phase: options.phase || 'other',
                 label: options.label || 'unlabeled',
                 model: model.id,
-                responseLength: result.length,
-                chunkCount,
+                responseLength: finalText.length,
+                toolRounds: toolCallRound,
                 durationMs: duration,
                 wasRetry: isRetry,
             });
@@ -246,13 +355,13 @@ export async function sendToLLMWithLogging(
                     label: options.label || 'unlabeled',
                     model: model.id,
                     promptMessages: [systemPrompt + '\n\n---\n\n' + userPrompt],
-                    responseText: result,
+                    responseText: finalText,
                     durationMs: duration,
                     questionRound: options.questionRound,
                 });
             }
 
-            return result;
+            return finalText;
         } catch (error) {
             const duration = Date.now() - startTime;
             const errorMessage = error instanceof Error ? error.message : String(error);
