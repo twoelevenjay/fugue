@@ -6,6 +6,7 @@ import { assembleSystemPrompt } from './systemPrompt';
 import { handleDirective } from './directives';
 import { getConfig, onConfigChange, migrateModelSettingsFromCopilot } from './config';
 import { SessionTranscript } from './sessionTranscript';
+import { SessionPersistence } from './sessionPersistence';
 import { logEvent, getRecentDailyNotesContext } from './dailyNotes';
 import { discoverSkills, formatSkillsForPrompt } from './skills';
 import { HeartbeatManager } from './heartbeat';
@@ -300,6 +301,63 @@ export function registerJohannParticipant(_context: vscode.ExtensionContext): vs
                         'To trust this workspace, run **Workspaces: Manage Workspace Trust** from the Command Palette.\n',
                 );
                 return { metadata: { command: 'orchestrate', success: false } };
+            }
+
+            // === AUTO-RESUME ===
+            // Check if there's an interrupted session from a previous conversation.
+            // If so, auto-resume it instead of starting a new orchestration.
+            const resumable = await SessionPersistence.findResumable();
+
+            if (resumable.length > 0) {
+                const targetSession = resumable[0]; // Most recent session
+                const completed = targetSession.completedSubtaskIds.length;
+                const total = completed + targetSession.pendingSubtaskIds.length;
+
+                response.markdown(
+                    `🔄 **Auto-resuming previous session**\n\n` +
+                        `You have an interrupted session from your last conversation.\n\n` +
+                        `**Progress:** ${completed}/${total} subtasks completed\n` +
+                        `**Original request:** ${targetSession.originalRequest.substring(0, 120)}${targetSession.originalRequest.length > 120 ? '...' : ''}\n\n`,
+                );
+
+                // Treat the current message as a course-correction message for the resume
+                targetSession.resumeMessage = userMessage;
+                response.markdown(`**Continuing with:** ${userMessage}\n\n`);
+
+                if (resumable.length > 1) {
+                    response.markdown(
+                        `_Note: ${resumable.length - 1} other session${resumable.length > 2 ? 's are' : ' is'} pending. Use \`/reset\` to clear all and start fresh._\n\n`,
+                    );
+                }
+
+                const model = await getModel(request);
+                if (!model) {
+                    response.markdown('**Error:** No language models available for resume.\n');
+                    return { metadata: { command: 'resume', success: false } };
+                }
+
+                const resumed = await orchestrator.resumeSession(
+                    targetSession,
+                    model,
+                    response,
+                    token,
+                );
+
+                if (!resumed) {
+                    response.markdown(
+                        '✅ **Session already complete.**\n\n' +
+                            'All subtasks were finished. Starting a new conversation...\n\n',
+                    );
+                    // Fall through to start new orchestration
+                } else {
+                    return {
+                        metadata: {
+                            command: 'auto-resume',
+                            success: true,
+                            summary: targetSession.originalRequest.substring(0, 200),
+                        },
+                    };
+                }
             }
 
             // === MODEL SETUP ===

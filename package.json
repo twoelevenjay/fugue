@@ -2,7 +2,7 @@
     "name": "fugue",
     "displayName": "Fugue for GitHub Copilot",
     "description": "Multi-agent AI workflow layer for GitHub Copilot with @ramble (prompt compiler) and @johann (orchestration agent)",
-    "version": "0.0.2",
+    "version": "0.0.3",
     "engines": {
         "vscode": "^1.108.1"
     },

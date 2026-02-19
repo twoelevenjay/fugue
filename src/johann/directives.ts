@@ -13,6 +13,7 @@ import { SessionPersistence, ResumableSession } from './sessionPersistence';
 import { BackgroundTaskManager } from './backgroundTaskManager';
 import { RunStateManager } from './runState';
 import { generateSnapshot, generateDetailedSnapshot } from './statusSnapshot';
+import { createLogger } from './logger';
 
 // ============================================================================
 // DIRECTIVES — Slash command / directive parsing for Johann
@@ -86,6 +87,8 @@ export async function handleDirective(
             return await handleYolo(args, response);
         case '/resume':
             return await handleResume(args, response);
+        case '/reset':
+            return await handleReset(response);
         case '/tasks':
             return await handleTasks(args, response);
         default:
@@ -115,8 +118,11 @@ async function handleHelp(response: vscode.ChatResponseStream): Promise<Directiv
 | \`/notes [date]\` | Show daily notes (today or specific date) |
 | \`/sessions\` | List recent sessions |
 | \`/yolo [on\\|off]\` | Toggle YOLO mode (maximum autonomy) |
-| \`/resume [id] [message]\` | Resume a session, optionally with a course-correction message |
+| \`/resume [id] [message]\` | Manually resume a specific session |
+| \`/reset\` | Clear any pending sessions and start fresh |
 | \`/tasks [task-id]\` | View background tasks |
+
+**Auto-resume:** Johann automatically continues where he left off in each workspace. Use \`/reset\` to start fresh.
 
 **While a run is active:**
 - Say \`@johann status\` for a live snapshot
@@ -414,6 +420,57 @@ async function handleResume(
     }
 
     return { isDirective: true, handled: true, resumeSession: targetSession };
+}
+
+async function handleReset(response: vscode.ChatResponseStream): Promise<DirectiveResult> {
+    const runManager = RunStateManager.getInstance();
+
+    // Check if there's an active run
+    if (runManager.isRunning()) {
+        response.markdown(
+            '⚠️ **Cannot reset while a run is active.**\n\n' +
+                'Please wait for the current orchestration to complete or cancel it first.\n',
+        );
+        return { isDirective: true, handled: false };
+    }
+
+    // Find all resumable sessions
+    const resumable = await SessionPersistence.findResumable();
+
+    if (resumable.length === 0) {
+        response.markdown(
+            '✅ **No pending sessions.**\n\n' +
+                'You can start a new conversation with Johann right away.\n',
+        );
+        return { isDirective: true, handled: true };
+    }
+
+    // Clear all resumable sessions
+    for (const session of resumable) {
+        try {
+            const persist = new SessionPersistence(session.sessionId);
+            await persist.markCompleted({
+                ...session,
+                plan: session.plan || null,
+                status: 'completed' as const,
+                escalations: [],
+                startedAt: session.startedAt,
+                workspaceContext: session.workspaceContext || '',
+            });
+        } catch (err) {
+            // Log but continue with other sessions
+            const logger = createLogger();
+            logger.warn(`Failed to clear session ${session.sessionId}: ${err}`);
+        }
+    }
+
+    response.markdown(
+        `✅ **Reset complete.**\n\n` +
+            `Cleared ${resumable.length} pending session${resumable.length === 1 ? '' : 's'}.\n\n` +
+            `Your next message will start a fresh conversation with Johann.\n`,
+    );
+
+    return { isDirective: true, handled: true };
 }
 
 async function handleYolo(
